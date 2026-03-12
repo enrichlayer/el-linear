@@ -17,7 +17,7 @@ import { GraphQLIssuesService } from "../utils/graphql-issues-service.js";
 import { createGraphQLService, type GraphQLService } from "../utils/graphql-service.js";
 import { createLinearService, type LinearService } from "../utils/linear-service.js";
 import { logger } from "../utils/logger.js";
-import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
+import { handleAsyncCommand, outputSuccess, outputWarning } from "../utils/output.js";
 import { formatCsv, formatMarkdown, formatTable } from "../utils/table-formatter.js";
 import { parsePriorityFilter, splitList, validatePriority } from "../utils/validators.js";
 
@@ -290,6 +290,17 @@ async function resolveCreateInputs(
 }> {
   const config = loadConfig();
   enforceBrandName(title, options.description, options.strict);
+
+  const missingFields: string[] = [];
+  if (!options.assignee) missingFields.push("--assignee");
+  if (!options.project) missingFields.push("--project");
+  if (!options.priority) missingFields.push("--priority");
+  if (missingFields.length > 0) {
+    outputWarning(
+      `Creating issue without ${missingFields.join(", ")}. Consider specifying ${missingFields.length === 1 ? "it" : "them"} for better triage.`,
+      "missing_fields",
+    );
+  }
 
   const teamInput = options.team || config.defaultTeam;
   const teamId = resolveTeam(teamInput);
