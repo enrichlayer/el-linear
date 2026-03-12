@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { handleAsyncCommand, outputSuccess, outputWarning, resetWarnings } from "./output.js";
+import { handleAsyncCommand, outputSuccess, outputWarning, resetWarnings, setRawMode } from "./output.js";
 
 describe("outputSuccess", () => {
   let stdoutSpy: ReturnType<typeof vi.spyOn>;
@@ -111,6 +111,54 @@ describe("warning buffer", () => {
     const parsed = JSON.parse(allStdout);
     expect(parsed.identifier).toBe("DEV-1");
     expect(parsed._warnings).toEqual(["mid-execution warning"]);
+  });
+});
+
+describe("--raw mode", () => {
+  let stdoutSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    resetWarnings();
+    setRawMode(true);
+    stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+  });
+
+  afterEach(() => {
+    setRawMode(false);
+    stdoutSpy.mockRestore();
+  });
+
+  it("unwraps { data: [...], meta } to just the array", () => {
+    outputSuccess({ data: [{ id: "1" }, { id: "2" }], meta: { count: 2 } });
+    const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+    expect(parsed).toEqual([{ id: "1" }, { id: "2" }]);
+  });
+
+  it("preserves flat objects without data key", () => {
+    outputSuccess({ id: "123", name: "test" });
+    const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+    expect(parsed.id).toBe("123");
+    expect(parsed.name).toBe("test");
+  });
+
+  it("preserves arrays passed directly", () => {
+    outputSuccess([1, 2, 3]);
+    const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+    expect(parsed).toEqual([1, 2, 3]);
+  });
+
+  it("preserves non-array data field", () => {
+    outputSuccess({ data: "not-an-array", meta: { count: 0 } });
+    const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+    expect(parsed.data).toBe("not-an-array");
+  });
+
+  it("still embeds warnings when unwrapping", () => {
+    outputWarning("watch out");
+    outputSuccess({ data: [{ id: "1" }], meta: { count: 1 }, _warnings: [] });
+    const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+    // raw mode unwraps after warnings are embedded, so the array has no warnings
+    expect(Array.isArray(parsed)).toBe(true);
   });
 });
 

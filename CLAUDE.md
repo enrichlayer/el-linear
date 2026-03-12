@@ -60,6 +60,40 @@ src/
     └── linear.ts                # All entity types + GraphQLResponseData
 ```
 
+## Output Format (for callers parsing JSON)
+
+All output is a single JSON object on stdout. Errors also go to stdout (not stderr) so `2>&1` is safe.
+
+**List commands** return `{ data: [...], meta: { count: N } }`:
+```json
+{ "data": [{ "id": "...", "name": "..." }], "meta": { "count": 2 } }
+```
+
+**Single resource** (read, create, update) returns a flat object:
+```json
+{ "id": "...", "identifier": "DEV-123", "title": "..." }
+```
+
+**Errors** return `{ "error": "message" }` and exit code 1.
+
+**Warnings** are embedded as `_warnings: [...]` in object responses (not in arrays).
+
+**`--raw` flag**: Strips the `{ data, meta }` wrapper from list output, emitting just the array. Useful for piping into `jq '.[]'` or Python list iteration without navigating `.data` first.
+
+```bash
+# Default:  { "data": [...], "meta": { "count": 5 } }
+# With --raw: [...]
+el-linear projects list --raw 2>&1 | jq '.[0].name'
+```
+
+**Always check for the `error` key before accessing result fields:**
+```python
+result = json.loads(output)
+if "error" in result:
+    raise Exception(result["error"])
+# Now safe to access result["data"] or result["identifier"]
+```
+
 ## Key Patterns
 
 ### Command Structure
