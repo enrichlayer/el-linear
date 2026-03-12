@@ -183,6 +183,12 @@ export class GraphQLIssuesService {
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      if (msg.includes("Discrepancy between issue team")) {
+        const hint = updateInput.projectId
+          ? `The project may not be associated with this issue's team. Fix with: el-linear projects add-team "<project>" <team>`
+          : "The issue's team doesn't match the assigned project, cycle, or status.";
+        throw new Error(`Failed to update issue ${originalId}: ${hint}`);
+      }
       throw new Error(`Failed to update issue ${originalId}: ${msg}`);
     }
     const issueUpdate = updateResult.issueUpdate as GraphQLResponseData;
