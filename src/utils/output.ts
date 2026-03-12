@@ -1,6 +1,11 @@
 import { logger } from "./logger.js";
 
 const warningBuffer: string[] = [];
+let rawMode = false;
+
+export function setRawMode(enabled: boolean): void {
+  rawMode = enabled;
+}
 
 export function outputSuccess(data: unknown): void {
   const warnings = drainWarnings();
@@ -9,6 +14,13 @@ export function outputSuccess(data: unknown): void {
     output = { ...(data as Record<string, unknown>), _warnings: warnings };
   } else {
     output = data;
+  }
+  // --raw: unwrap { data: [...] } to just the array
+  if (rawMode && output !== null && typeof output === "object" && !Array.isArray(output)) {
+    const obj = output as Record<string, unknown>;
+    if (Array.isArray(obj.data)) {
+      output = obj.data;
+    }
   }
   logger.info(JSON.stringify(output, null, 2));
 }

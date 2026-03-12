@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { program } from "commander";
+import { type Command, program } from "commander";
 import { setupAttachmentsCommands } from "./commands/attachments.js";
 import { setupCommentsCommands } from "./commands/comments.js";
 import { setupConfigCommands } from "./commands/config.js";
@@ -18,6 +18,7 @@ import { setupSearchCommands } from "./commands/search.js";
 import { setupTeamsCommands } from "./commands/teams.js";
 import { setupTemplatesCommands } from "./commands/templates.js";
 import { setupUsersCommands } from "./commands/users.js";
+import { setRawMode } from "./utils/output.js";
 import { outputUsageInfo } from "./utils/usage.js";
 
 program
@@ -27,7 +28,15 @@ program
   )
   .version("1.0.0")
   .option("--api-token <token>", "Linear API token")
-  .option("--json", "output as JSON (default, accepted for compatibility)");
+  .option("--json", "output as JSON (default, accepted for compatibility)")
+  .option("--raw", "strip { data, meta } wrapper from list output — emit the array directly");
+
+program.hook("preAction", (_thisCommand: Command, actionCommand: Command) => {
+  const rootOpts = actionCommand.optsWithGlobals();
+  if (rootOpts.raw) {
+    setRawMode(true);
+  }
+});
 
 program.action(() => {
   program.help();
