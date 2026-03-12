@@ -276,14 +276,11 @@ describe("issues commands", () => {
             "See the bug below.\n\n![screenshot.png](https://uploads.linear.app/asset/image.png)",
         }),
       );
-      expect(mockCreateAttachment).toHaveBeenCalledWith({
-        issueId: "new-issue-id",
-        url: "https://uploads.linear.app/asset/image.png",
-        title: "screenshot.png",
-      });
+      // Images are embedded inline in description, so no separate attachment record
+      expect(mockCreateAttachment).not.toHaveBeenCalled();
       expect(mockOutputSuccess).toHaveBeenCalledWith(
         expect.objectContaining({
-          attachment: expect.objectContaining({ id: "att-1" }),
+          identifier: "DEV-999",
         }),
       );
     });

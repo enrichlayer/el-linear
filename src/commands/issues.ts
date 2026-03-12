@@ -320,30 +320,39 @@ async function resolveCreateInputs(
   return { teamInput, teamId, assigneeId, labelIds, status, subscriberIds };
 }
 
-async function uploadAttachmentIfNeeded(
+type UploadResult = { success: true; assetUrl: string; filename: string };
+
+async function uploadAttachmentsIfNeeded(
   options: OptionValues,
   rootOpts: OptionValues,
-): Promise<{ success: true; assetUrl: string; filename: string } | undefined> {
+): Promise<UploadResult[]> {
   if (!options.attachment) {
-    return undefined;
+    return [];
   }
+  const paths: string[] = Array.isArray(options.attachment) ? options.attachment : [options.attachment];
   const apiToken = getApiToken(rootOpts);
   const fileService = new FileService(apiToken);
-  const result = await fileService.uploadFile(options.attachment);
-  if (!result.success) {
-    throw new Error(`Attachment upload failed: ${result.error}`);
+  const results: UploadResult[] = [];
+  for (const filePath of paths) {
+    const result = await fileService.uploadFile(filePath);
+    if (!result.success) {
+      throw new Error(`Attachment upload failed for ${filePath}: ${result.error}`);
+    }
+    results.push(result);
   }
-  return result;
+  return results;
 }
 
-function buildDescriptionWithAttachment(
+function buildDescriptionWithAttachments(
   baseDescription: string,
-  uploadResult: { assetUrl: string; filename: string } | undefined,
+  uploadResults: UploadResult[],
 ): string {
   let description = baseDescription;
-  if (uploadResult && isImageFile(uploadResult.filename)) {
-    const imageMarkdown = `\n\n![${uploadResult.filename}](${uploadResult.assetUrl})`;
-    description = description ? description + imageMarkdown : imageMarkdown.trimStart();
+  for (const uploadResult of uploadResults) {
+    if (isImageFile(uploadResult.filename)) {
+      const imageMarkdown = `\n\n![${uploadResult.filename}](${uploadResult.assetUrl})`;
+      description = description ? description + imageMarkdown : imageMarkdown.trimStart();
+    }
   }
   return description;
 }
@@ -357,8 +366,8 @@ async function handleCreateIssue(
   const { teamId, assigneeId, labelIds, status, subscriberIds } =
     await resolveCreateInputs(title, options, rootOpts);
 
-  const uploadResult = await uploadAttachmentIfNeeded(options, rootOpts);
-  const description = buildDescriptionWithAttachment(resolveDescription(options) || "", uploadResult);
+  const uploadResults = await uploadAttachmentsIfNeeded(options, rootOpts);
+  const description = buildDescriptionWithAttachments(resolveDescription(options) || "", uploadResults);
 
   const graphQLService = createGraphQLService(rootOpts);
   const linearService = createLinearService(rootOpts);
@@ -381,20 +390,27 @@ async function handleCreateIssue(
   });
   const relations = await createRelations(result.id, options, graphQLService, linearService);
 
-  let attachment;
-  if (uploadResult) {
+  // Images are already embedded inline as markdown in the description,
+  // so only create separate attachment records for non-image files.
+  const attachments = [];
+  if (uploadResults.length > 0) {
     const attachmentsService = createGraphQLAttachmentsService(rootOpts);
-    attachment = await attachmentsService.createAttachment({
-      issueId: result.id,
-      url: uploadResult.assetUrl,
-      title: uploadResult.filename,
-    });
+    for (const uploadResult of uploadResults) {
+      if (!isImageFile(uploadResult.filename)) {
+        const attachment = await attachmentsService.createAttachment({
+          issueId: result.id,
+          url: uploadResult.assetUrl,
+          title: uploadResult.filename,
+        });
+        attachments.push(attachment);
+      }
+    }
   }
 
   const output = {
     ...result,
     ...(relations.length > 0 ? { relations } : {}),
-    ...(attachment ? { attachment } : {}),
+    ...(attachments.length === 1 ? { attachment: attachments[0] } : attachments.length > 1 ? { attachments } : {}),
   };
   outputSuccess(output);
 }
@@ -526,7 +542,7 @@ export function setupIssuesCommands(program: Command): void {
     .option("--related-to <issues>", "related issues (comma-separated identifiers)")
     .option("--blocks <issues>", "issues this blocks (comma-separated identifiers)")
     .option("--blocked-by <issues>", "issues blocking this (comma-separated identifiers)")
-    .option("--attachment <path>", "attach a file (image, PDF, etc.) to the created issue")
+    .option("--attachment <path>", "attach a file (image, PDF, etc.) to the created issue (repeatable)", (value: string, prev: string[] | undefined) => prev ? [...prev, value] : [value])
     .option("--due-date <date>", "due date (YYYY-MM-DD)")
     .action(
       handleAsyncCommand((titleArg: string | undefined, options: OptionValues, command: Command) => {
