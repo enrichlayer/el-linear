@@ -1,0 +1,52 @@
+{
+  "name": "el-linear",
+  "version": "1.0.0",
+  "description": "Enrich Layer CLI for Linear.app — deterministic team/label/member resolution, brand validation, and status defaults.",
+  "main": "dist/main.js",
+  "types": "dist/main.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/main.d.ts",
+      "import": "./dist/main.js"
+    }
+  },
+  "sideEffects": false,
+  "bin": {
+    "el-linear": "dist/main.js"
+  },
+  "files": [
+    "dist/",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc && chmod +x dist/main.js",
+    "clean": "rm -rf dist/",
+    "lint": "biome check .",
+    "lint:fix": "biome check --fix .",
+    "start": "tsx src/main.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://gitlab.com/vertical-int/tools.git",
+    "directory": "el-linear"
+  },
+  "dependencies": {
+    "@linear/sdk": "^76.0.0",
+    "commander": "^14.0.0",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.0",
+    "@types/node": "^25.0.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.0.0",
+    "vitest": "^4.0.18"
+  }
+}

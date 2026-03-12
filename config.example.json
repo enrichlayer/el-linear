@@ -1,0 +1,35 @@
+{
+  "defaultTeam": "DEV",
+  "defaultLabels": ["claude"],
+  "brand": {
+    "name": "Enrich Layer",
+    "reject": ["EnrichLayer", "Enrichlayer", "enrichLayer", "enrichlayer"]
+  },
+  "members": {
+    "aliases": {
+      "nick": "Nicholas"
+    },
+    "uuids": {
+      "Nicholas": "uuid-from-linear"
+    }
+  },
+  "teams": {
+    "DEV": "uuid-from-linear",
+    "FE": "uuid-from-linear"
+  },
+  "labels": {
+    "workspace": {
+      "claude": "uuid-from-linear"
+    },
+    "teams": {
+      "DEV": {
+        "feature-request": "uuid-from-linear",
+        "chore": "uuid-from-linear"
+      }
+    }
+  },
+  "statusDefaults": {
+    "noProject": "Triage",
+    "withAssigneeAndProject": "Todo"
+  }
+}
