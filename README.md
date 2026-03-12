@@ -5,7 +5,7 @@ Enrich Layer CLI for Linear.app — deterministic team/label/member resolution, 
 ## Install
 
 ```bash
-cd tools/el-linear
+cd tools/cli/el-linear
 npm install
 npm run build
 npm link  # makes `el-linear` available globally
