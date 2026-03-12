@@ -42,7 +42,8 @@ describe("project-milestones commands", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     suppressExit();
-    consoleErrorSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    consoleErrorSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
   });
 
   describe("project-milestones list", () => {

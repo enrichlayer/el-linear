@@ -93,11 +93,14 @@ const { setupIssuesCommands } = await import("./issues.js");
 
 describe("issues commands", () => {
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+  let stdoutSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
     suppressExit();
-    consoleErrorSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    consoleErrorSpy = stdoutSpy; // errors now go to stdout
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     mockResolveTeam.mockImplementation((v: string) => `team-id-${v}`);
     mockResolveMember.mockImplementation((v: string) => `member-id-${v}`);
     mockResolveLabels.mockReturnValue([]);

@@ -69,11 +69,16 @@ describe("loadConfig", () => {
   it("handles parse errors gracefully", async () => {
     existsSyncReturn = true;
     readFileSyncReturn = "invalid json!!!";
-    const errorSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     const { loadConfig } = await import("./config.js");
+    const { resetWarnings, outputSuccess } = await import("../utils/output.js");
+    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    resetWarnings();
     const config = loadConfig();
     expect(config.defaultTeam).toBe("");
-    expect(errorSpy).toHaveBeenCalled();
-    errorSpy.mockRestore();
+    // Warning is buffered, verify by flushing through outputSuccess
+    outputSuccess({ check: true });
+    const output = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trimEnd());
+    expect(output._warnings).toBeDefined();
+    stdoutSpy.mockRestore();
   });
 });

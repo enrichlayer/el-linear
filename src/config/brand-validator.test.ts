@@ -26,13 +26,15 @@ describe("enforceBrandName", () => {
     );
   });
 
-  it("warns (stderr) in non-strict mode for misspelling", () => {
-    const spy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  it("buffers warning in non-strict mode for misspelling", async () => {
+    const { resetWarnings, outputSuccess } = await import("../utils/output.js");
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    resetWarnings();
     enforceBrandName("Fix EnrichLayer bug");
-    expect(spy).toHaveBeenCalledOnce();
+    outputSuccess({ test: true });
     const output = JSON.parse((spy.mock.calls[0][0] as string).trimEnd());
-    expect(output.type).toBe("brand_validation");
-    expect(output.warnings).toHaveLength(1);
+    expect(output._warnings).toHaveLength(1);
+    expect(output._warnings[0]).toContain("EnrichLayer");
     spy.mockRestore();
   });
 

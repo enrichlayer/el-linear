@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { handleAsyncCommand, outputSuccess } from "./output.js";
+import { handleAsyncCommand, outputSuccess, outputWarning, resetWarnings } from "./output.js";
 
 describe("outputSuccess", () => {
   let stdoutSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
+    resetWarnings();
     stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
   });
 
@@ -28,16 +29,105 @@ describe("outputSuccess", () => {
   });
 });
 
+describe("warning buffer", () => {
+  let stdoutSpy: ReturnType<typeof vi.spyOn>;
+  let stderrSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    resetWarnings();
+    stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  });
+
+  afterEach(() => {
+    stdoutSpy.mockRestore();
+    stderrSpy.mockRestore();
+  });
+
+  it("embeds warnings in success output as _warnings", () => {
+    outputWarning("brand name issue");
+    outputSuccess({ id: "123" });
+    const written = (stdoutSpy.mock.calls[0][0] as string).trim();
+    const parsed = JSON.parse(written);
+    expect(parsed.id).toBe("123");
+    expect(parsed._warnings).toEqual(["brand name issue"]);
+  });
+
+  it("drains buffer after outputSuccess", () => {
+    outputWarning("w1");
+    outputSuccess({ a: 1 });
+    outputSuccess({ b: 2 });
+    const first = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+    const second = JSON.parse((stdoutSpy.mock.calls[1][0] as string).trim());
+    expect(first._warnings).toEqual(["w1"]);
+    expect(second._warnings).toBeUndefined();
+  });
+
+  it("skips _warnings for array output", () => {
+    outputWarning("w1");
+    outputSuccess([1, 2, 3]);
+    const written = (stdoutSpy.mock.calls[0][0] as string).trim();
+    const parsed = JSON.parse(written);
+    expect(parsed).toEqual([1, 2, 3]);
+  });
+
+  it("accumulates multiple warnings", () => {
+    outputWarning("w1");
+    outputWarning(["w2", "w3"], "brand_validation");
+    outputSuccess({ id: "x" });
+    const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+    expect(parsed._warnings).toEqual(["w1", "w2", "w3"]);
+  });
+
+  it("does not write warnings to stderr (buffered for stdout only)", () => {
+    outputWarning("buffered");
+    expect(stderrSpy).not.toHaveBeenCalled();
+  });
+
+  it("resetWarnings clears the buffer", () => {
+    outputWarning("w1");
+    resetWarnings();
+    outputSuccess({ id: "x" });
+    const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+    expect(parsed._warnings).toBeUndefined();
+  });
+
+  it("no _warnings key when no warnings emitted", () => {
+    outputSuccess({ id: "y" });
+    const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+    expect(parsed._warnings).toBeUndefined();
+    expect(parsed.id).toBe("y");
+  });
+
+  it("stdout is always a single parseable JSON object", () => {
+    outputWarning("mid-execution warning");
+    outputSuccess({ id: "z", identifier: "DEV-1" });
+    // Collect all stdout writes
+    const allStdout = stdoutSpy.mock.calls
+      .map((call) => call[0] as string)
+      .join("");
+    // Must parse as a single JSON value
+    expect(() => JSON.parse(allStdout)).not.toThrow();
+    const parsed = JSON.parse(allStdout);
+    expect(parsed.identifier).toBe("DEV-1");
+    expect(parsed._warnings).toEqual(["mid-execution warning"]);
+  });
+});
+
 describe("handleAsyncCommand", () => {
+  let stdoutSpy: ReturnType<typeof vi.spyOn>;
   let stderrSpy: ReturnType<typeof vi.spyOn>;
   let exitSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
+    resetWarnings();
+    stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     exitSpy = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
   });
 
   afterEach(() => {
+    stdoutSpy.mockRestore();
     stderrSpy.mockRestore();
     exitSpy.mockRestore();
   });
@@ -49,13 +139,12 @@ describe("handleAsyncCommand", () => {
     expect(fn).toHaveBeenCalledWith("arg1", "arg2");
   });
 
-  it("outputs error JSON and exits on Error", async () => {
+  it("outputs error JSON to stdout and exits", async () => {
     const fn = vi.fn().mockRejectedValue(new Error("test failure"));
     const wrapped = handleAsyncCommand(fn);
     await wrapped();
-    expect(stderrSpy).toHaveBeenCalledWith(
-      `${JSON.stringify({ error: "test failure" }, null, 2)}\n`,
-    );
+    const errorJson = `${JSON.stringify({ error: "test failure" }, null, 2)}\n`;
+    expect(stdoutSpy).toHaveBeenCalledWith(errorJson);
     expect(exitSpy).toHaveBeenCalledWith(1);
   });
 
@@ -63,9 +152,19 @@ describe("handleAsyncCommand", () => {
     const fn = vi.fn().mockRejectedValue("string error");
     const wrapped = handleAsyncCommand(fn);
     await wrapped();
-    expect(stderrSpy).toHaveBeenCalledWith(
-      `${JSON.stringify({ error: "string error" }, null, 2)}\n`,
-    );
+    const errorJson = `${JSON.stringify({ error: "string error" }, null, 2)}\n`;
+    expect(stdoutSpy).toHaveBeenCalledWith(errorJson);
     expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
+  it("error output on stdout is a single parseable JSON object", async () => {
+    const fn = vi.fn().mockRejectedValue(new Error("broken"));
+    const wrapped = handleAsyncCommand(fn);
+    await wrapped();
+    const allStdout = stdoutSpy.mock.calls
+      .map((call) => call[0] as string)
+      .join("");
+    expect(() => JSON.parse(allStdout)).not.toThrow();
+    expect(JSON.parse(allStdout).error).toBe("broken");
   });
 });

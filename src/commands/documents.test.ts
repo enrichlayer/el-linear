@@ -60,7 +60,8 @@ describe("documents commands", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     suppressExit();
-    consoleErrorSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    consoleErrorSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
   });
 
   describe("documents list", () => {

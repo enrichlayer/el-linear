@@ -1,18 +1,42 @@
 import { logger } from "./logger.js";
 
+const warningBuffer: string[] = [];
+
 export function outputSuccess(data: unknown): void {
-  logger.info(JSON.stringify(data, null, 2));
+  const warnings = drainWarnings();
+  let output: unknown;
+  if (warnings.length > 0 && data !== null && typeof data === "object" && !Array.isArray(data)) {
+    output = { ...(data as Record<string, unknown>), _warnings: warnings };
+  } else {
+    output = data;
+  }
+  logger.info(JSON.stringify(output, null, 2));
 }
 
-export function outputWarning(message: string | string[], type?: string): void {
-  const payload = Array.isArray(message)
-    ? { warnings: message, ...(type ? { type } : {}) }
-    : { warning: message, ...(type ? { type } : {}) };
-  logger.error(JSON.stringify(payload));
+export function outputWarning(message: string | string[], _type?: string): void {
+  const messages = Array.isArray(message) ? message : [message];
+  for (const msg of messages) {
+    warningBuffer.push(msg);
+  }
+  // Warnings are buffered and embedded as _warnings in the next outputSuccess call.
+  // No stderr output — this prevents multi-JSON corruption when callers use 2>&1.
+}
+
+function drainWarnings(): string[] {
+  const warnings = [...warningBuffer];
+  warningBuffer.length = 0;
+  return warnings;
+}
+
+export function resetWarnings(): void {
+  warningBuffer.length = 0;
 }
 
 function outputError(error: Error): void {
-  logger.error(JSON.stringify({ error: error.message }, null, 2));
+  const payload = JSON.stringify({ error: error.message }, null, 2);
+  // Write to stdout (same channel as success) so machine callers always
+  // receive exactly one parseable JSON object regardless of stream capture.
+  logger.info(payload);
   if (process.env.EL_LINEAR_DEBUG) {
     logger.error(error.stack ?? "");
   }
