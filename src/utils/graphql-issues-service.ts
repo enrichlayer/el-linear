@@ -245,13 +245,22 @@ export class GraphQLIssuesService {
     milestoneId: string | undefined;
     cycleId: unknown;
   }> {
-    const teamId = args.teamId
+    let teamId = args.teamId
       ? this.resolveTeamId(args.teamId as string, resolveResult)
       : args.teamId;
 
     const projectId = args.projectId
       ? this.resolveProjectId(args.projectId as string, resolveResult)
       : args.projectId;
+
+    // Validate team-project compatibility and auto-correct when possible
+    if (projectId && teamId) {
+      teamId = this.validateProjectTeam(
+        teamId as string,
+        args.projectId as string,
+        resolveResult,
+      );
+    }
 
     const labelIds = this.resolveLabels(
       args.labelIds as string[] | undefined,
@@ -292,20 +301,11 @@ export class GraphQLIssuesService {
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      if (msg.toLowerCase().includes("project") && msg.toLowerCase().includes("team")) {
-        throw new Error(
-          `Failed to create issue: ${msg}\n` +
-          `Hint: Use \`el-linear projects add-team "Project Name" TEAM\` to associate the project with the team.`,
-        );
-      }
       throw new Error(`Failed to create issue: ${msg}`);
     }
     const issueCreate = createResult.issueCreate as GraphQLResponseData;
     if (!issueCreate.success) {
-      throw new Error(
-        "Failed to create issue. If using --project, check that the project is associated with the issue's team. " +
-        "Use `el-linear projects add-team \"Project Name\" TEAM` to associate them.",
-      );
+      throw new Error("Failed to create issue: the API reported failure.");
     }
     if (!issueCreate.issue) {
       throw new Error("Failed to retrieve created issue");
@@ -424,6 +424,45 @@ export class GraphQLIssuesService {
       throw notFoundError("Project", projectId);
     }
     return projectNodes[0].id as string;
+  }
+
+  /**
+   * Check that the resolved team is associated with the project.
+   * If not, auto-switch when the project belongs to exactly one team.
+   */
+  private validateProjectTeam(
+    teamId: string,
+    projectInput: string,
+    resolveResult: GraphQLResponseData,
+  ): string {
+    const projects = resolveResult.projects as GraphQLResponseData | undefined;
+    const projectNode = (projects?.nodes as GraphQLResponseData[] | undefined)?.[0];
+    if (!projectNode) return teamId;
+
+    const teamsConn = projectNode.teams as GraphQLResponseData | undefined;
+    const teamNodes = teamsConn?.nodes as GraphQLResponseData[] | undefined;
+    if (!teamNodes?.length) return teamId;
+
+    const isAssociated = teamNodes.some((t) => (t.id as string) === teamId);
+    if (isAssociated) return teamId;
+
+    const projectName = (projectNode.name as string) || projectInput;
+    const teamKeys = teamNodes.map((t) => t.key as string);
+
+    if (teamNodes.length === 1) {
+      const correctTeamId = teamNodes[0].id as string;
+      const correctKey = teamKeys[0];
+      process.stderr.write(
+        `Auto-switched team to ${correctKey} (the only team associated with project "${projectName}").\n`,
+      );
+      return correctTeamId;
+    }
+
+    throw new Error(
+      `Project "${projectName}" is not associated with the specified team.\n` +
+      `Associated teams: ${teamKeys.join(", ")}\n` +
+      `Hint: Use --team ${teamKeys[0]} or run \`el-linear projects add-team "${projectName}" TEAM\` to add your team.`,
+    );
   }
 
   private resolveLabels(

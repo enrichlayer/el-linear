@@ -226,6 +226,9 @@ export const BATCH_RESOLVE_FOR_CREATE_QUERY = `
       nodes {
         id
         name
+        teams {
+          nodes { id key }
+        }
         projectMilestones {
           nodes { id name }
         }
