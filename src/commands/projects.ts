@@ -10,8 +10,79 @@ import type { GraphQLResponseData } from "../types/linear.js";
 import type { GraphQLService } from "../utils/graphql-service.js";
 import { createGraphQLService } from "../utils/graphql-service.js";
 import { createLinearService } from "../utils/linear-service.js";
+import type { LinearProject } from "../types/linear.js";
+import { logger } from "../utils/logger.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
+import { splitList } from "../utils/validators.js";
 import { isUuid } from "../utils/uuid.js";
+
+function formatProjectsOutput(
+  projects: LinearProject[],
+  format: string,
+  fieldNames?: string[],
+): void {
+  const fields = fieldNames ?? ["name", "state", "progress", "teams", "lead", "targetDate"];
+  const rows = projects.map((p) => {
+    const row: Record<string, string> = {};
+    for (const f of fields) {
+      switch (f) {
+        case "name":
+          row[f] = p.name;
+          break;
+        case "state":
+          row[f] = p.state ?? "";
+          break;
+        case "progress":
+          row[f] = p.progress !== undefined ? `${Math.round(p.progress * 100)}%` : "";
+          break;
+        case "teams":
+          row[f] = p.teams?.map((t) => t.key).join(", ") ?? "";
+          break;
+        case "lead":
+          row[f] = p.lead?.name ?? "";
+          break;
+        case "targetDate":
+          row[f] = p.targetDate ?? "";
+          break;
+        case "id":
+          row[f] = p.id;
+          break;
+        default:
+          row[f] = String((p as unknown as Record<string, unknown>)[f] ?? "");
+      }
+    }
+    return row;
+  });
+
+  if (format === "csv") {
+    logger.info(fields.join(","));
+    for (const row of rows) {
+      logger.info(fields.map((f) => `"${(row[f] ?? "").replace(/"/g, '""')}"`).join(","));
+    }
+    return;
+  }
+
+  // table and md formats
+  const widths = fields.map((f) =>
+    Math.max(f.length, ...rows.map((r) => (r[f] ?? "").length)),
+  );
+
+  const separator = format === "md"
+    ? `| ${widths.map((w) => "-".repeat(w)).join(" | ")} |`
+    : widths.map((w) => "-".repeat(w + 2)).join("+");
+  const header = format === "md"
+    ? `| ${fields.map((f, i) => f.padEnd(widths[i])).join(" | ")} |`
+    : fields.map((f, i) => ` ${f.padEnd(widths[i])} `).join("|");
+
+  logger.info(header);
+  logger.info(separator);
+  for (const row of rows) {
+    const line = format === "md"
+      ? `| ${fields.map((f, i) => (row[f] ?? "").padEnd(widths[i])).join(" | ")} |`
+      : fields.map((f, i) => ` ${(row[f] ?? "").padEnd(widths[i])} `).join("|");
+    logger.info(line);
+  }
+}
 
 interface ProjectTeamInfo {
   currentTeams: { id: string; key: string; name: string }[];
@@ -226,12 +297,26 @@ export function setupProjectsCommands(program: Command): void {
     .command("list")
     .description("List projects")
     .option("-l, --limit <number>", "limit results", "100")
+    .option("--format <format>", "output format (json, table, md, csv)", "json")
+    .option(
+      "--fields <fields>",
+      "columns for table/csv (comma-separated: name,state,progress,teams,lead,targetDate)",
+    )
     .action(
       handleAsyncCommand(async (options: OptionValues, command: Command) => {
         const rootOpts = command.parent!.parent!.opts();
         const service = createLinearService(rootOpts);
         const result = await service.getProjects(Number.parseInt(options.limit, 10));
-        outputSuccess({ data: result, meta: { count: result.length } });
+        const format = options.format as string;
+        if (format === "table" || format === "md" || format === "markdown" || format === "csv") {
+          const fieldList = options.fields ? splitList(options.fields) : undefined;
+          formatProjectsOutput(result, format, fieldList);
+          if (format === "table") {
+            logger.info(`\n${result.length} projects`);
+          }
+        } else {
+          outputSuccess({ data: result, meta: { count: result.length } });
+        }
       }),
     );
 
