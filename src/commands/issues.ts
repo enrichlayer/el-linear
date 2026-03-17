@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import type { Command, OptionValues } from "commander";
 import { enforceBrandName } from "../config/brand-validator.js";
@@ -28,6 +29,35 @@ import { formatCsv, formatMarkdown, formatTable } from "../utils/table-formatter
 import { parsePriorityFilter, splitList, validatePriority } from "../utils/validators.js";
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico"]);
+
+/**
+ * Transform Linear's branchName (e.g. "dev-3549-slug") into our convention:
+ * "feature/DEV-3549-slug" — uppercase team key with a configurable prefix.
+ */
+function toBranchName(linearBranchName: string, prefix = "feature/"): string {
+  // Linear branch names look like "dev-123-some-slug"
+  // We need to uppercase the team key: "DEV-123-some-slug"
+  const match = linearBranchName.match(/^([a-zA-Z]+)-(\d+)-(.+)$/);
+  if (!match) {
+    return `${prefix}${linearBranchName}`;
+  }
+  const [, teamKey, number, slug] = match;
+  return `${prefix}${teamKey.toUpperCase()}-${number}-${slug}`;
+}
+
+/**
+ * Check out a new git branch. Warns and skips if not in a git repo.
+ * Throws if the branch already exists.
+ */
+function gitCheckoutBranch(branchName: string): void {
+  try {
+    execFileSync("git", ["rev-parse", "--is-inside-work-tree"], { stdio: "pipe" });
+  } catch {
+    outputWarning("Not inside a git repository — skipping branch checkout.");
+    return;
+  }
+  execFileSync("git", ["checkout", "-b", branchName], { stdio: "pipe" });
+}
 
 /**
  * Read description from a file path or stdin ("-").
@@ -448,8 +478,15 @@ async function handleCreateIssue(
     }
   }
 
+  let branch: string | undefined;
+  if (options.checkout && result.branchName) {
+    branch = toBranchName(result.branchName);
+    gitCheckoutBranch(branch);
+  }
+
   const output = {
     ...result,
+    ...(branch ? { branch } : {}),
     ...(relations.length > 0 ? { relations } : {}),
     ...(attachments.length === 1
       ? { attachment: attachments[0] }
@@ -594,6 +631,80 @@ async function handleUpdateIssue(
   outputSuccess(result);
 }
 
+async function handleRetrolink(options: OptionValues, command: Command): Promise<void> {
+  // 1. Read current branch
+  let currentBranch: string;
+  try {
+    currentBranch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      stdio: "pipe",
+    })
+      .toString()
+      .trim();
+  } catch {
+    throw new Error("Not inside a git repository.");
+  }
+  if (currentBranch === "main" || currentBranch === "master") {
+    throw new Error(`Cannot retrolink the '${currentBranch}' branch.`);
+  }
+
+  // 2. Read commit messages on this branch vs base
+  const base = options.base || "main";
+  let commitLog: string;
+  try {
+    commitLog = execFileSync("git", ["log", `${base}..HEAD`, "--oneline"], {
+      stdio: "pipe",
+    })
+      .toString()
+      .trim();
+  } catch {
+    commitLog = "";
+  }
+
+  const commits = commitLog
+    ? commitLog.split("\n").map((line: string) => line.replace(/^[a-f0-9]+ /, ""))
+    : [];
+
+  // 3. Build title and description
+  const title = options.title || (commits.length > 0 ? commits[0] : currentBranch);
+  const description =
+    commits.length > 0
+      ? commits.map((msg: string) => `- ${msg}`).join("\n")
+      : `Retrolinked from branch: ${currentBranch}`;
+
+  // 4. Create Linear issue
+  const rootOpts = command.parent!.parent!.opts();
+  const config = loadConfig();
+  const teamInput = options.team || config.defaultTeam;
+  if (!teamInput) {
+    throw new Error("Team is required. Use --team or set a defaultTeam in config.");
+  }
+  const teamId = resolveTeam(teamInput);
+
+  const graphQLService = createGraphQLService(rootOpts);
+  const linearService = createLinearService(rootOpts);
+  const issuesService = new GraphQLIssuesService(graphQLService, linearService);
+
+  const result = await issuesService.createIssue({
+    title,
+    teamId,
+    description,
+  });
+
+  // 5. Rename branch
+  const oldBranch = currentBranch;
+  let newBranch: string | undefined;
+  if (result.branchName) {
+    newBranch = toBranchName(result.branchName);
+    execFileSync("git", ["branch", "-m", oldBranch, newBranch], { stdio: "pipe" });
+  }
+
+  outputSuccess({
+    ...result,
+    oldBranch,
+    ...(newBranch ? { branch: newBranch } : {}),
+  });
+}
+
 export function setupIssuesCommands(program: Command): void {
   const issues = program.command("issues").alias("issue").description("Issue operations");
   issues.action(() => issues.help());
@@ -671,6 +782,7 @@ export function setupIssuesCommands(program: Command): void {
       (value: string, prev: string[] | undefined) => (prev ? [...prev, value] : [value]),
     )
     .option("--due-date <date>", "due date (YYYY-MM-DD)")
+    .option("--checkout", "create and checkout a git branch named after the issue")
     .action(
       handleAsyncCommand(
         (titleArg: string | undefined, options: OptionValues, command: Command) => {
@@ -748,4 +860,14 @@ export function setupIssuesCommands(program: Command): void {
     .option("--blocked-by <issues>", "issues blocking this (comma-separated)")
     .option("--duplicate-of <issue>", "mark as duplicate of another issue")
     .action(handleAsyncCommand(handleRelateIssue));
+
+  issues
+    .command("retrolink")
+    .description(
+      "Create a Linear issue from current branch commits and rename the branch to link it.",
+    )
+    .option("--team <team>", "team key or name (required if no config default)")
+    .option("--title <title>", "override auto-generated title (default: first commit message)")
+    .option("--base <branch>", "base branch for log comparison", "main")
+    .action(handleAsyncCommand(handleRetrolink));
 }
