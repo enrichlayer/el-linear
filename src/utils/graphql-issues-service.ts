@@ -541,7 +541,9 @@ export class GraphQLIssuesService {
         return match.key as string;
       }
     }
-    return teamNodes[0].key as string;
+    // Only fall back to first team if there's exactly one (unambiguous).
+    // With multiple teams, returning an arbitrary one produces misleading error hints.
+    return teamNodes.length === 1 ? (teamNodes[0].key as string) : undefined;
   }
 
   private resolveMilestoneId(
