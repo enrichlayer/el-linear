@@ -1,7 +1,9 @@
+import { resolveUserDisplayName } from "../config/resolver.js";
 import {
   BATCH_RESOLVE_FOR_CREATE_QUERY,
   BATCH_RESOLVE_FOR_SEARCH_QUERY,
   BATCH_RESOLVE_FOR_UPDATE_QUERY,
+  buildResolveLabelsByNameQuery,
   CREATE_ISSUE_MUTATION,
   FILTERED_SEARCH_ISSUES_QUERY,
   GET_ISSUE_BY_ID_QUERY,
@@ -10,9 +12,7 @@ import {
   GET_ISSUES_QUERY,
   SEARCH_ISSUES_QUERY,
   UPDATE_ISSUE_MUTATION,
-  buildResolveLabelsByNameQuery,
 } from "../queries/issues.js";
-import { resolveUserDisplayName } from "../config/resolver.js";
 import type { GraphQLResponseData, LinearIssue } from "../types/linear.js";
 import { toISOStringOrNow } from "./date-format.js";
 import { extractEmbeds } from "./embed-parser.js";
@@ -114,8 +114,10 @@ export class GraphQLIssuesService {
       ? this.resolveProjectId(args.projectId as string, resolveResult)
       : args.projectId;
 
-    const { projectMilestoneNodes, issueProjectMilestoneNodes } =
-      this.extractMilestoneNodes(args, resolveResult);
+    const { projectMilestoneNodes, issueProjectMilestoneNodes } = this.extractMilestoneNodes(
+      args,
+      resolveResult,
+    );
 
     const finalMilestoneId = this.resolveMilestoneId(
       args.milestoneId as string | undefined,
@@ -212,9 +214,7 @@ export class GraphQLIssuesService {
       ];
       if (__labelNames) {
         const labelQuery = buildResolveLabelsByNameQuery(__labelNames as string[]);
-        requests.push(
-          this.graphQLService.rawRequest(labelQuery.query, labelQuery.variables),
-        );
+        requests.push(this.graphQLService.rawRequest(labelQuery.query, labelQuery.variables));
       }
       const results = await Promise.all(requests);
       resolveResult = results[0];
@@ -255,11 +255,7 @@ export class GraphQLIssuesService {
 
     // Validate team-project compatibility and auto-correct when possible
     if (projectId && teamId) {
-      teamId = this.validateProjectTeam(
-        teamId as string,
-        args.projectId as string,
-        resolveResult,
-      );
+      teamId = this.validateProjectTeam(teamId as string, args.projectId as string, resolveResult);
     }
 
     const labelIds = this.resolveLabels(
@@ -276,10 +272,7 @@ export class GraphQLIssuesService {
 
     let cycleId = args.cycleId;
     if (args.cycleId && typeof args.cycleId === "string" && !isUuid(args.cycleId)) {
-      cycleId = await this.linearService.resolveCycleId(
-        args.cycleId,
-        teamId as string | undefined,
-      );
+      cycleId = await this.linearService.resolveCycleId(args.cycleId, teamId as string | undefined);
     }
 
     let statusId = args.statusId;
@@ -437,14 +430,20 @@ export class GraphQLIssuesService {
   ): string {
     const projects = resolveResult.projects as GraphQLResponseData | undefined;
     const projectNode = (projects?.nodes as GraphQLResponseData[] | undefined)?.[0];
-    if (!projectNode) return teamId;
+    if (!projectNode) {
+      return teamId;
+    }
 
     const teamsConn = projectNode.teams as GraphQLResponseData | undefined;
     const teamNodes = teamsConn?.nodes as GraphQLResponseData[] | undefined;
-    if (!teamNodes?.length) return teamId;
+    if (!teamNodes?.length) {
+      return teamId;
+    }
 
     const isAssociated = teamNodes.some((t) => (t.id as string) === teamId);
-    if (isAssociated) return teamId;
+    if (isAssociated) {
+      return teamId;
+    }
 
     const projectName = (projectNode.name as string) || projectInput;
     const teamKeys = teamNodes.map((t) => t.key as string);
@@ -460,8 +459,8 @@ export class GraphQLIssuesService {
 
     throw new Error(
       `Project "${projectName}" is not associated with the specified team.\n` +
-      `Associated teams: ${teamKeys.join(", ")}\n` +
-      `Hint: Use --team ${teamKeys[0]} or run \`el-linear projects add-team "${projectName}" TEAM\` to add your team.`,
+        `Associated teams: ${teamKeys.join(", ")}\n` +
+        `Hint: Use --team ${teamKeys[0]} or run \`el-linear projects add-team "${projectName}" TEAM\` to add your team.`,
     );
   }
 
@@ -808,11 +807,11 @@ export class GraphQLIssuesService {
     }
     if (filters.labelNames && filters.labelNames.length > 0) {
       if (filters.labelNames.length === 1) {
-        filter.labels = { some: { name: { eqIgnoreCase:filters.labelNames[0] } } };
+        filter.labels = { some: { name: { eqIgnoreCase: filters.labelNames[0] } } };
       } else {
         filter.labels = {
           and: filters.labelNames.map((name) => ({
-            some: { name: { eqIgnoreCase:name } },
+            some: { name: { eqIgnoreCase: name } },
           })),
         };
       }
@@ -876,9 +875,7 @@ export class GraphQLIssuesService {
     ];
     if (__labelNames) {
       const labelQuery = buildResolveLabelsByNameQuery(__labelNames as string[]);
-      requests.push(
-        this.graphQLService.rawRequest(labelQuery.query, labelQuery.variables),
-      );
+      requests.push(this.graphQLService.rawRequest(labelQuery.query, labelQuery.variables));
     }
     const results = await Promise.all(requests);
     const resolveResult = results[0];
@@ -1005,7 +1002,9 @@ export class GraphQLIssuesService {
     };
   }
 
-  private transformIssueCoreFields(issue: GraphQLResponseData): Pick<
+  private transformIssueCoreFields(
+    issue: GraphQLResponseData,
+  ): Pick<
     LinearIssue,
     "id" | "identifier" | "url" | "title" | "description" | "branchName" | "embeds"
   > {
@@ -1020,10 +1019,9 @@ export class GraphQLIssuesService {
     };
   }
 
-  private transformIssueRelations(issue: GraphQLResponseData): Pick<
-    LinearIssue,
-    "state" | "assignee" | "team" | "project" | "cycle" | "projectMilestone"
-  > {
+  private transformIssueRelations(
+    issue: GraphQLResponseData,
+  ): Pick<LinearIssue, "state" | "assignee" | "team" | "project" | "cycle" | "projectMilestone"> {
     const state = issue.state as GraphQLResponseData | undefined;
     const assignee = issue.assignee as GraphQLResponseData | undefined;
     const team = issue.team as GraphQLResponseData | undefined;
@@ -1034,7 +1032,11 @@ export class GraphQLIssuesService {
     return {
       state: state ? { id: state.id as string, name: state.name as string } : undefined,
       assignee: assignee
-        ? { id: assignee.id as string, name: resolveUserDisplayName(assignee.id as string, assignee.name as string), url: (assignee.url as string | undefined) || undefined }
+        ? {
+            id: assignee.id as string,
+            name: resolveUserDisplayName(assignee.id as string, assignee.name as string),
+            url: (assignee.url as string | undefined) || undefined,
+          }
         : undefined,
       team: team
         ? { id: team.id as string, key: team.key as string, name: team.name as string }
@@ -1053,16 +1055,19 @@ export class GraphQLIssuesService {
     };
   }
 
-  private transformIssueHierarchy(issue: GraphQLResponseData): Pick<
-    LinearIssue,
-    "parentIssue" | "subIssues"
-  > {
+  private transformIssueHierarchy(
+    issue: GraphQLResponseData,
+  ): Pick<LinearIssue, "parentIssue" | "subIssues"> {
     const parent = issue.parent as GraphQLResponseData | undefined;
     const children = issue.children as GraphQLResponseData | undefined;
 
     return {
       parentIssue: parent
-        ? { id: parent.id as string, identifier: parent.identifier as string, title: parent.title as string }
+        ? {
+            id: parent.id as string,
+            identifier: parent.identifier as string,
+            title: parent.title as string,
+          }
         : undefined,
       subIssues:
         (children?.nodes as GraphQLResponseData[] | undefined)?.map(
@@ -1086,7 +1091,14 @@ export class GraphQLIssuesService {
             body: comment.body as string,
             embeds: extractEmbeds(comment.body as string),
             user: commentUser
-              ? { id: commentUser.id as string, name: resolveUserDisplayName(commentUser.id as string, commentUser.name as string), url: (commentUser.url as string | undefined) || undefined }
+              ? {
+                  id: commentUser.id as string,
+                  name: resolveUserDisplayName(
+                    commentUser.id as string,
+                    commentUser.name as string,
+                  ),
+                  url: (commentUser.url as string | undefined) || undefined,
+                }
               : undefined,
             createdAt: toISOStringOrNow(comment.createdAt as string),
             updatedAt: toISOStringOrNow(comment.updatedAt as string),

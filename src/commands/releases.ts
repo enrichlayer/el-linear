@@ -67,9 +67,7 @@ async function handleCreateRelease(
     const available = (pipelineNodes ?? [])
       .map((p: GraphQLResponseData) => p.name as string)
       .join(", ");
-    throw new Error(
-      `Pipeline "${options.pipeline}" not found. Available: ${available || "none"}`,
-    );
+    throw new Error(`Pipeline "${options.pipeline}" not found. Available: ${available || "none"}`);
   }
 
   const input: Record<string, unknown> = { name, pipelineId: pipeline.id };
@@ -85,8 +83,7 @@ async function handleCreateRelease(
       | undefined;
     const stage = stageNodes?.find(
       (s: GraphQLResponseData) =>
-        s.id === options.stage ||
-        (s.name as string).toLowerCase() === options.stage.toLowerCase(),
+        s.id === options.stage || (s.name as string).toLowerCase() === options.stage.toLowerCase(),
     );
     if (stage) {
       input.stageId = stage.id;

@@ -95,9 +95,7 @@ export function setupGraphQLCommands(program: Command): void {
 
             if (options.filter) {
               const pattern = options.filter.toLowerCase();
-              fields = fields.filter((f) =>
-                (f.name as string).toLowerCase().includes(pattern),
-              );
+              fields = fields.filter((f) => (f.name as string).toLowerCase().includes(pattern));
             }
 
             const summary = fields.map((f) => ({

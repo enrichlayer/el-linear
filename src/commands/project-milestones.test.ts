@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createTestProgram, runCommand, suppressExit } from "./test-helpers.js";
+import { createTestProgram, runCommand, suppressExit } from "../__tests__/test-helpers.js";
 
 // Use proper UUID format so isUuid() returns true
 const MILESTONE_UUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";

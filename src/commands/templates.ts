@@ -1,19 +1,19 @@
 import type { Command, OptionValues } from "commander";
-import { TEMPLATES_LIST_QUERY, TEMPLATE_BY_ID_QUERY } from "../queries/templates.js";
+import { TEMPLATE_BY_ID_QUERY, TEMPLATES_LIST_QUERY } from "../queries/templates.js";
 import { createGraphQLService } from "../utils/graphql-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
 import { parsePositiveInt } from "../utils/validators.js";
 
 interface TemplateResult {
+  createdAt: string;
+  creator: { id: string; name: string } | null;
+  description: string | null;
   id: string;
   name: string;
-  type: string;
-  description: string | null;
-  templateData: unknown;
-  createdAt: string;
-  updatedAt: string;
   team: { id: string; key: string; name: string } | null;
-  creator: { id: string; name: string } | null;
+  templateData: unknown;
+  type: string;
+  updatedAt: string;
 }
 
 function formatTemplateSummary(t: TemplateResult): Record<string, unknown> {

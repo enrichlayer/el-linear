@@ -14,17 +14,9 @@ import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
 import { isUuid } from "../utils/uuid.js";
 
 interface ProjectTeamInfo {
+  currentTeams: { id: string; key: string; name: string }[];
   projectId: string;
   projectName: string;
-  currentTeams: { id: string; key: string; name: string }[];
-}
-
-async function resolveTeamIdFromInput(
-  linearService: ReturnType<typeof createLinearService>,
-  teamInput: string,
-): Promise<string> {
-  const resolved = resolveTeam(teamInput);
-  return linearService.resolveTeamId(resolved);
 }
 
 async function resolveProjectWithTeams(
@@ -41,16 +33,20 @@ async function resolveProjectWithTeams(
     return {
       projectId: project.id as string,
       projectName: project.name as string,
-      currentTeams: ((teams?.nodes as GraphQLResponseData[]) || []).map((t: GraphQLResponseData) => ({
-        id: t.id as string,
-        key: t.key as string,
-        name: t.name as string,
-      })),
+      currentTeams: ((teams?.nodes as GraphQLResponseData[]) || []).map(
+        (t: GraphQLResponseData) => ({
+          id: t.id as string,
+          key: t.key as string,
+          name: t.name as string,
+        }),
+      ),
     };
   }
 
   const result = await graphQLService.rawRequest(GET_PROJECT_QUERY, { name: projectNameOrId });
-  const projectNodes = (result.projects as GraphQLResponseData)?.nodes as GraphQLResponseData[] | undefined;
+  const projectNodes = (result.projects as GraphQLResponseData)?.nodes as
+    | GraphQLResponseData[]
+    | undefined;
   if (!projectNodes?.length) {
     throw new Error(`Project "${projectNameOrId}" not found`);
   }
@@ -73,10 +69,153 @@ function formatTeamsOutput(projectUpdate: GraphQLResponseData) {
   return {
     id: updatedProject.id,
     name: updatedProject.name,
-    teams: ((updatedTeams.nodes as GraphQLResponseData[]) || []).map(
-      (t: GraphQLResponseData) => ({ id: t.id, key: t.key, name: t.name }),
-    ),
+    teams: ((updatedTeams.nodes as GraphQLResponseData[]) || []).map((t: GraphQLResponseData) => ({
+      id: t.id,
+      key: t.key,
+      name: t.name,
+    })),
   };
+}
+
+async function handleAddTeam(
+  projectNameOrId: string,
+  teamInput: string,
+  _options: OptionValues,
+  command: Command,
+): Promise<void> {
+  const rootOpts = command.parent!.parent!.opts();
+  const graphQLService = createGraphQLService(rootOpts);
+
+  const finalTeamId = await createLinearService(rootOpts).resolveTeamId(resolveTeam(teamInput));
+  const { projectId, currentTeams } = await resolveProjectWithTeams(
+    graphQLService,
+    projectNameOrId,
+  );
+  const currentTeamIds = currentTeams.map((t) => t.id);
+
+  if (currentTeamIds.includes(finalTeamId)) {
+    outputSuccess({
+      message: `Team "${teamInput}" is already associated with the project`,
+      projectId,
+    });
+    return;
+  }
+
+  const updateResult = await graphQLService.rawRequest(UPDATE_PROJECT_MUTATION, {
+    id: projectId,
+    input: { teamIds: [...currentTeamIds, finalTeamId] },
+  });
+
+  const projectUpdate = updateResult.projectUpdate as GraphQLResponseData;
+  if (!projectUpdate.success) {
+    throw new Error("Failed to update project");
+  }
+  outputSuccess(formatTeamsOutput(projectUpdate));
+}
+
+async function handleAddTeams(
+  projectNameOrId: string,
+  teamInputs: string[],
+  _options: OptionValues,
+  command: Command,
+): Promise<void> {
+  const rootOpts = command.parent!.parent!.opts();
+  const graphQLService = createGraphQLService(rootOpts);
+
+  const resolvedTeamIds = await Promise.all(
+    teamInputs.map((t) => createLinearService(rootOpts).resolveTeamId(resolveTeam(t))),
+  );
+  const { projectId, currentTeams } = await resolveProjectWithTeams(
+    graphQLService,
+    projectNameOrId,
+  );
+  const currentTeamIds = currentTeams.map((t) => t.id);
+
+  const newTeamIds = resolvedTeamIds.filter((id) => !currentTeamIds.includes(id));
+  const skippedInputs = teamInputs.filter((_, i) => currentTeamIds.includes(resolvedTeamIds[i]));
+
+  if (newTeamIds.length === 0) {
+    outputSuccess({
+      message: "All teams are already associated with the project",
+      projectId,
+      skipped: skippedInputs,
+    });
+    return;
+  }
+
+  const mergedTeamIds = [...currentTeamIds, ...newTeamIds];
+  const updateResult = await graphQLService.rawRequest(UPDATE_PROJECT_MUTATION, {
+    id: projectId,
+    input: { teamIds: mergedTeamIds },
+  });
+
+  const projectUpdate = updateResult.projectUpdate as GraphQLResponseData;
+  if (!projectUpdate.success) {
+    throw new Error("Failed to update project");
+  }
+
+  const result = formatTeamsOutput(projectUpdate);
+  outputSuccess({
+    ...result,
+    added: newTeamIds.length,
+    skipped: skippedInputs.length > 0 ? skippedInputs : undefined,
+  });
+}
+
+async function handleRemoveTeam(
+  projectNameOrId: string,
+  teamInput: string,
+  options: OptionValues,
+  command: Command,
+): Promise<void> {
+  const rootOpts = command.parent!.parent!.opts();
+  const graphQLService = createGraphQLService(rootOpts);
+
+  const finalTeamId = await createLinearService(rootOpts).resolveTeamId(resolveTeam(teamInput));
+  const { projectId, projectName, currentTeams } = await resolveProjectWithTeams(
+    graphQLService,
+    projectNameOrId,
+  );
+  const currentTeamIds = currentTeams.map((t) => t.id);
+
+  if (!currentTeamIds.includes(finalTeamId)) {
+    throw new Error(`Team "${teamInput}" is not associated with project "${projectName}"`);
+  }
+
+  if (!options.force) {
+    const issueCheck = await graphQLService.rawRequest(GET_PROJECT_TEAM_ISSUES_QUERY, {
+      projectId,
+      teamId: finalTeamId,
+    });
+    const project = issueCheck.project as GraphQLResponseData;
+    const issues = project.issues as GraphQLResponseData;
+    const issueNodes = (issues.nodes as GraphQLResponseData[]) || [];
+
+    if (issueNodes.length > 0) {
+      const examples = issueNodes
+        .slice(0, 5)
+        .map((i: GraphQLResponseData) => `${i.identifier}: ${i.title}`)
+        .join("\n  ");
+      throw new Error(
+        `Cannot remove team "${teamInput}" — it has ${issueNodes.length}${issueNodes.length >= 50 ? "+" : ""} issues in project "${projectName}". Reassign or remove those issues first.\n  ${examples}${issueNodes.length > 5 ? "\n  ..." : ""}\n\nUse --force to bypass this check.`,
+      );
+    }
+  }
+
+  const updatedTeamIds = currentTeamIds.filter((id) => id !== finalTeamId);
+  const updateResult = await graphQLService.rawRequest(UPDATE_PROJECT_MUTATION, {
+    id: projectId,
+    input: { teamIds: updatedTeamIds },
+  });
+
+  const projectUpdate = updateResult.projectUpdate as GraphQLResponseData;
+  if (!projectUpdate.success) {
+    throw new Error("Failed to update project");
+  }
+  outputSuccess({
+    ...formatTeamsOutput(projectUpdate),
+    removed: teamInput,
+  });
 }
 
 export function setupProjectsCommands(program: Command): void {
@@ -99,132 +238,16 @@ export function setupProjectsCommands(program: Command): void {
   projects
     .command("add-team <project> <team>")
     .description("Associate a project with an additional team (resolves names)")
-    .action(
-      handleAsyncCommand(async (projectNameOrId: string, teamInput: string, _options: OptionValues, command: Command) => {
-        const rootOpts = command.parent!.parent!.opts();
-        const graphQLService = createGraphQLService(rootOpts);
-
-        const finalTeamId = await resolveTeamIdFromInput(createLinearService(rootOpts), teamInput);
-        const { projectId, currentTeams } = await resolveProjectWithTeams(graphQLService, projectNameOrId);
-        const currentTeamIds = currentTeams.map((t) => t.id);
-
-        if (currentTeamIds.includes(finalTeamId)) {
-          outputSuccess({ message: `Team "${teamInput}" is already associated with the project`, projectId });
-          return;
-        }
-
-        const updateResult = await graphQLService.rawRequest(UPDATE_PROJECT_MUTATION, {
-          id: projectId,
-          input: { teamIds: [...currentTeamIds, finalTeamId] },
-        });
-
-        const projectUpdate = updateResult.projectUpdate as GraphQLResponseData;
-        if (!projectUpdate.success) {
-          throw new Error("Failed to update project");
-        }
-        outputSuccess(formatTeamsOutput(projectUpdate));
-      }),
-    );
+    .action(handleAsyncCommand(handleAddTeam));
 
   projects
     .command("add-teams <project> <teams...>")
     .description("Associate a project with multiple teams in one operation (resolves names)")
-    .action(
-      handleAsyncCommand(async (projectNameOrId: string, teamInputs: string[], _options: OptionValues, command: Command) => {
-        const rootOpts = command.parent!.parent!.opts();
-        const graphQLService = createGraphQLService(rootOpts);
-
-        const resolvedTeamIds = await Promise.all(
-          teamInputs.map((t) => resolveTeamIdFromInput(createLinearService(rootOpts), t)),
-        );
-        const { projectId, currentTeams } = await resolveProjectWithTeams(graphQLService, projectNameOrId);
-        const currentTeamIds = currentTeams.map((t) => t.id);
-
-        const newTeamIds = resolvedTeamIds.filter((id) => !currentTeamIds.includes(id));
-        const skippedInputs = teamInputs.filter(
-          (_, i) => currentTeamIds.includes(resolvedTeamIds[i]),
-        );
-
-        if (newTeamIds.length === 0) {
-          outputSuccess({
-            message: "All teams are already associated with the project",
-            projectId,
-            skipped: skippedInputs,
-          });
-          return;
-        }
-
-        const mergedTeamIds = [...currentTeamIds, ...newTeamIds];
-        const updateResult = await graphQLService.rawRequest(UPDATE_PROJECT_MUTATION, {
-          id: projectId,
-          input: { teamIds: mergedTeamIds },
-        });
-
-        const projectUpdate = updateResult.projectUpdate as GraphQLResponseData;
-        if (!projectUpdate.success) {
-          throw new Error("Failed to update project");
-        }
-
-        const result = formatTeamsOutput(projectUpdate);
-        outputSuccess({
-          ...result,
-          added: newTeamIds.length,
-          skipped: skippedInputs.length > 0 ? skippedInputs : undefined,
-        });
-      }),
-    );
+    .action(handleAsyncCommand(handleAddTeams));
 
   projects
     .command("remove-team <project> <team>")
     .description("Remove a team from a project (checks for issues first)")
     .option("--force", "remove even if the team has issues in the project")
-    .action(
-      handleAsyncCommand(async (projectNameOrId: string, teamInput: string, options: OptionValues, command: Command) => {
-        const rootOpts = command.parent!.parent!.opts();
-        const graphQLService = createGraphQLService(rootOpts);
-
-        const finalTeamId = await resolveTeamIdFromInput(createLinearService(rootOpts), teamInput);
-        const { projectId, projectName, currentTeams } = await resolveProjectWithTeams(graphQLService, projectNameOrId);
-        const currentTeamIds = currentTeams.map((t) => t.id);
-
-        if (!currentTeamIds.includes(finalTeamId)) {
-          throw new Error(`Team "${teamInput}" is not associated with project "${projectName}"`);
-        }
-
-        if (!options.force) {
-          const issueCheck = await graphQLService.rawRequest(GET_PROJECT_TEAM_ISSUES_QUERY, {
-            projectId,
-            teamId: finalTeamId,
-          });
-          const project = issueCheck.project as GraphQLResponseData;
-          const issues = project.issues as GraphQLResponseData;
-          const issueNodes = (issues.nodes as GraphQLResponseData[]) || [];
-
-          if (issueNodes.length > 0) {
-            const examples = issueNodes
-              .slice(0, 5)
-              .map((i: GraphQLResponseData) => `${i.identifier}: ${i.title}`)
-              .join("\n  ");
-            throw new Error(
-              `Cannot remove team "${teamInput}" — it has ${issueNodes.length}${issueNodes.length >= 50 ? "+" : ""} issues in project "${projectName}". Reassign or remove those issues first.\n  ${examples}${issueNodes.length > 5 ? "\n  ..." : ""}\n\nUse --force to bypass this check.`,
-            );
-          }
-        }
-
-        const updatedTeamIds = currentTeamIds.filter((id) => id !== finalTeamId);
-        const updateResult = await graphQLService.rawRequest(UPDATE_PROJECT_MUTATION, {
-          id: projectId,
-          input: { teamIds: updatedTeamIds },
-        });
-
-        const projectUpdate = updateResult.projectUpdate as GraphQLResponseData;
-        if (!projectUpdate.success) {
-          throw new Error("Failed to update project");
-        }
-        outputSuccess({
-          ...formatTeamsOutput(projectUpdate),
-          removed: teamInput,
-        });
-      }),
-    );
+    .action(handleAsyncCommand(handleRemoveTeam));
 }

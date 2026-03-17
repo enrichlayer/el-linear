@@ -25,10 +25,9 @@ describe("GraphQLService", () => {
     const service = new GraphQLService("test-token");
 
     await service.rawRequest("query ($id: String!) { issue(id: $id) { id } }", { id: "abc" });
-    expect(mockRawRequest).toHaveBeenCalledWith(
-      "query ($id: String!) { issue(id: $id) { id } }",
-      { id: "abc" },
-    );
+    expect(mockRawRequest).toHaveBeenCalledWith("query ($id: String!) { issue(id: $id) { id } }", {
+      id: "abc",
+    });
   });
 
   it("throws a readable error from GraphQL errors", async () => {

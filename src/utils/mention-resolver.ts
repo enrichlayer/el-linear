@@ -1,14 +1,14 @@
 import { resolveMember } from "../config/resolver.js";
-import { isUuid } from "./uuid.js";
 import type { LinearService } from "./linear-service.js";
+import { isUuid } from "./uuid.js";
 
 const MENTION_REGEX = /@(\w+)/g;
 
 interface ProseMirrorNode {
-  type: string;
   attrs?: Record<string, unknown>;
   content?: ProseMirrorNode[];
   text?: string;
+  type: string;
 }
 
 /**
@@ -66,17 +66,16 @@ async function resolveUserByName(
 /**
  * Build ProseMirror document with mention nodes replacing @name tokens.
  */
-function buildBodyData(
-  body: string,
-  mentions: Map<string, string>,
-): ProseMirrorNode {
+function buildBodyData(body: string, mentions: Map<string, string>): ProseMirrorNode {
   const lines = body.split("\n");
   const content: ProseMirrorNode[] = [];
 
   let paragraphLines: string[] = [];
 
   const flushParagraph = () => {
-    if (paragraphLines.length === 0) return;
+    if (paragraphLines.length === 0) {
+      return;
+    }
     const text = paragraphLines.join("\n");
     const nodes = buildInlineContent(text, mentions);
     if (nodes.length > 0) {
@@ -100,21 +99,19 @@ function buildBodyData(
 /**
  * Split text into text nodes and mention nodes around @name tokens.
  */
-function buildInlineContent(
-  text: string,
-  mentions: Map<string, string>,
-): ProseMirrorNode[] {
+function buildInlineContent(text: string, mentions: Map<string, string>): ProseMirrorNode[] {
   const nodes: ProseMirrorNode[] = [];
   let lastIndex = 0;
 
   const regex = new RegExp(MENTION_REGEX.source, "g");
-  let match: RegExpExecArray | null;
+  let match: RegExpExecArray | null = regex.exec(text);
 
-  while ((match = regex.exec(text)) !== null) {
+  while (match !== null) {
     const name = match[1];
     const userId = mentions.get(name);
 
     if (!userId) {
+      match = regex.exec(text);
       continue;
     }
 
@@ -128,6 +125,7 @@ function buildInlineContent(
     });
 
     lastIndex = match.index + match[0].length;
+    match = regex.exec(text);
   }
 
   if (lastIndex < text.length) {

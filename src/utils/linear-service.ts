@@ -1,4 +1,5 @@
 import { type IssueLabel, LinearClient } from "@linear/sdk";
+import { resolveUserDisplayName } from "../config/resolver.js";
 import type {
   LinearComment,
   LinearCycleDetail,
@@ -9,7 +10,6 @@ import type {
   LinearTeam,
   LinearUser,
 } from "../types/linear.js";
-import { resolveUserDisplayName } from "../config/resolver.js";
 import { type AuthOptions, getApiToken } from "./auth.js";
 import { toISOStringOrNow, toISOStringOrUndefined } from "./date-format.js";
 import { multipleMatchesError, notFoundError } from "./error-messages.js";
@@ -33,9 +33,7 @@ function teamIdFilter(teamId: string): { id: { eq: string } } {
   return { id: { eq: teamId } };
 }
 
-function nonEmptyFilter(
-  filter: Record<string, unknown>,
-): Record<string, unknown> | undefined {
+function nonEmptyFilter(filter: Record<string, unknown>): Record<string, unknown> | undefined {
   return Object.keys(filter).length > 0 ? filter : undefined;
 }
 
@@ -292,7 +290,11 @@ export class LinearService {
     return {
       id: comment.id,
       body: comment.body,
-      user: { id: user.id, name: resolveUserDisplayName(user.id, user.name), url: user.url || undefined },
+      user: {
+        id: user.id,
+        name: resolveUserDisplayName(user.id, user.name),
+        url: user.url || undefined,
+      },
       createdAt: comment.createdAt.toISOString(),
       updatedAt: comment.updatedAt.toISOString(),
     };

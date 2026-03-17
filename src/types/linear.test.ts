@@ -62,6 +62,6 @@ describe("linear entity types", () => {
 
   it("GraphQLResponseData allows recursive nested access", () => {
     const data: GraphQLResponseData = { issue: { id: "1", title: "test" } };
-    expectTypeOf(data["issue"]).not.toBeAny();
+    expectTypeOf(data.issue).not.toBeAny();
   });
 });

@@ -9,8 +9,7 @@ describe("extractDocId", () => {
   });
 
   it("extracts ID from URL with query params", () => {
-    const url =
-      "https://docs.google.com/document/d/abc123_-XYZ/edit?tab=t.0#heading=h.1";
+    const url = "https://docs.google.com/document/d/abc123_-XYZ/edit?tab=t.0#heading=h.1";
     expect(extractDocId(url)).toBe("abc123_-XYZ");
   });
 

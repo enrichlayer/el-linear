@@ -11,8 +11,7 @@ describe("downloadLinearUploads", () => {
   }
 
   it("extracts uploads.linear.app URLs from markdown descriptions", () => {
-    const desc =
-      "Here is a screenshot:\n![image](https://uploads.linear.app/ws/a/b/file.png)\nEnd";
+    const desc = "Here is a screenshot:\n![image](https://uploads.linear.app/ws/a/b/file.png)\nEnd";
     const urls = collectUploadUrls(desc);
     expect(urls).toEqual(["https://uploads.linear.app/ws/a/b/file.png"]);
   });

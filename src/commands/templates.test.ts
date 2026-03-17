@@ -1,6 +1,6 @@
 import type { Command } from "commander";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createTestProgram, runCommand } from "./test-helpers.js";
+import { createTestProgram, runCommand } from "../__tests__/test-helpers.js";
 
 const mockRawRequest = vi.fn();
 const mockGraphQLService = {
@@ -15,7 +15,7 @@ vi.mock("../utils/graphql-service.js", () => ({
 }));
 
 vi.mock("../utils/output.js", async () => ({
-  handleAsyncCommand: (await import("./test-helpers.js")).passthroughHandleAsyncCommand,
+  handleAsyncCommand: (await import("../__tests__/test-helpers.js")).passthroughHandleAsyncCommand,
   outputSuccess: mockOutputSuccess,
 }));
 
@@ -88,9 +88,7 @@ describe("templates", () => {
       mockRawRequest.mockResolvedValue({ templates: [MOCK_TEMPLATE, MOCK_TEMPLATE_2] });
       await runCommand(program, ["templates", "list", "--type", "issue"]);
       expect(mockOutputSuccess).toHaveBeenCalledWith({
-        data: [
-          expect.objectContaining({ id: "tmpl-1", type: "issue" }),
-        ],
+        data: [expect.objectContaining({ id: "tmpl-1", type: "issue" })],
         meta: { count: 1 },
       });
     });
@@ -118,18 +116,17 @@ describe("templates", () => {
     it("reads a template by ID", async () => {
       mockRawRequest.mockResolvedValue({ template: MOCK_TEMPLATE });
       await runCommand(program, ["templates", "read", "tmpl-1"]);
-      expect(mockRawRequest).toHaveBeenCalledWith(
-        expect.stringContaining("template(id: $id)"),
-        { id: "tmpl-1" },
-      );
+      expect(mockRawRequest).toHaveBeenCalledWith(expect.stringContaining("template(id: $id)"), {
+        id: "tmpl-1",
+      });
       expect(mockOutputSuccess).toHaveBeenCalledWith(MOCK_TEMPLATE);
     });
 
     it("throws when template not found", async () => {
       mockRawRequest.mockResolvedValue({ template: null });
-      await expect(
-        runCommand(program, ["templates", "read", "nonexistent"]),
-      ).rejects.toThrow('Template "nonexistent" not found');
+      await expect(runCommand(program, ["templates", "read", "nonexistent"])).rejects.toThrow(
+        'Template "nonexistent" not found',
+      );
     });
   });
 });

@@ -20,7 +20,7 @@ export function setupGdocCommands(program: Command): void {
           stdout = execFileSync(
             "gws",
             ["docs", "documents", "get", "--params", JSON.stringify({ documentId: docId })],
-            { encoding: "utf-8", timeout: 30000, stdio: ["pipe", "pipe", "pipe"] },
+            { encoding: "utf-8", timeout: 30_000, stdio: ["pipe", "pipe", "pipe"] },
           );
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);

@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createTestProgram, runCommand, suppressExit } from "./test-helpers.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createTestProgram, runCommand, suppressExit } from "../__tests__/test-helpers.js";
 
 const mockResolveIssueId = vi.fn().mockResolvedValue("resolved-uuid");
 const mockResolveUserId = vi.fn();

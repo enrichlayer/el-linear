@@ -1,6 +1,6 @@
 import type { Command } from "commander";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createTestProgram, runCommand } from "./test-helpers.js";
+import { createTestProgram, runCommand } from "../__tests__/test-helpers.js";
 
 const mockDownloadFile = vi.fn();
 const mockUploadFile = vi.fn();

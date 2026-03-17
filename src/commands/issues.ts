@@ -8,7 +8,13 @@ import {
   GET_ISSUE_STATE_HISTORY_QUERY,
   ISSUE_RELATION_CREATE_MUTATION,
 } from "../queries/issues.js";
-import type { GraphQLResponseData, IssueStateSpan, LinearIssue, LinearIssueRelation } from "../types/linear.js";
+import type {
+  GraphQLResponseData,
+  IssueStateSpan,
+  LinearAttachment,
+  LinearIssue,
+  LinearIssueRelation,
+} from "../types/linear.js";
 import { getApiToken } from "../utils/auth.js";
 import { downloadLinearUploads } from "../utils/download-uploads.js";
 import { FileService } from "../utils/file-service.js";
@@ -185,7 +191,9 @@ function outputIssues(
 }
 
 function sortIssues(issues: LinearIssue[], sort: string | undefined): LinearIssue[] {
-  if (!sort) return issues;
+  if (!sort) {
+    return issues;
+  }
   const sorted = [...issues];
   switch (sort) {
     case "priority":
@@ -203,6 +211,8 @@ function sortIssues(issues: LinearIssue[], sort: string | undefined): LinearIssu
       break;
     case "updated":
       sorted.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      break;
+    default:
       break;
   }
   return sorted;
@@ -292,9 +302,15 @@ async function resolveCreateInputs(
   enforceBrandName(title, options.description, options.strict);
 
   const missingFields: string[] = [];
-  if (!options.assignee) missingFields.push("--assignee");
-  if (!options.project) missingFields.push("--project");
-  if (!options.priority) missingFields.push("--priority");
+  if (!options.assignee) {
+    missingFields.push("--assignee");
+  }
+  if (!options.project) {
+    missingFields.push("--project");
+  }
+  if (!options.priority) {
+    missingFields.push("--priority");
+  }
   if (missingFields.length > 0) {
     outputWarning(
       `Creating issue without ${missingFields.join(", ")}. Consider specifying ${missingFields.length === 1 ? "it" : "them"} for better triage.`,
@@ -304,7 +320,9 @@ async function resolveCreateInputs(
 
   const teamInput = options.team || config.defaultTeam;
   const teamId = resolveTeam(teamInput);
-  const assigneeId = options.assignee ? await resolveAssignee(options.assignee, rootOpts) : undefined;
+  const assigneeId = options.assignee
+    ? await resolveAssignee(options.assignee, rootOpts)
+    : undefined;
 
   let labelIds: string[] = [];
   if (options.labels) {
@@ -331,7 +349,11 @@ async function resolveCreateInputs(
   return { teamInput, teamId, assigneeId, labelIds, status, subscriberIds };
 }
 
-type UploadResult = { success: true; assetUrl: string; filename: string };
+interface UploadResult {
+  assetUrl: string;
+  filename: string;
+  success: true;
+}
 
 async function uploadAttachmentsIfNeeded(
   options: OptionValues,
@@ -340,7 +362,9 @@ async function uploadAttachmentsIfNeeded(
   if (!options.attachment) {
     return [];
   }
-  const paths: string[] = Array.isArray(options.attachment) ? options.attachment : [options.attachment];
+  const paths: string[] = Array.isArray(options.attachment)
+    ? options.attachment
+    : [options.attachment];
   const apiToken = getApiToken(rootOpts);
   const fileService = new FileService(apiToken);
   const results: UploadResult[] = [];
@@ -374,11 +398,17 @@ async function handleCreateIssue(
   command: Command,
 ): Promise<void> {
   const rootOpts = command.parent!.parent!.opts();
-  const { teamId, assigneeId, labelIds, status, subscriberIds } =
-    await resolveCreateInputs(title, options, rootOpts);
+  const { teamId, assigneeId, labelIds, status, subscriberIds } = await resolveCreateInputs(
+    title,
+    options,
+    rootOpts,
+  );
 
   const uploadResults = await uploadAttachmentsIfNeeded(options, rootOpts);
-  const description = buildDescriptionWithAttachments(resolveDescription(options) || "", uploadResults);
+  const description = buildDescriptionWithAttachments(
+    resolveDescription(options) || "",
+    uploadResults,
+  );
 
   const graphQLService = createGraphQLService(rootOpts);
   const linearService = createLinearService(rootOpts);
@@ -403,7 +433,7 @@ async function handleCreateIssue(
 
   // Images are already embedded inline as markdown in the description,
   // so only create separate attachment records for non-image files.
-  const attachments = [];
+  const attachments: LinearAttachment[] = [];
   if (uploadResults.length > 0) {
     const attachmentsService = createGraphQLAttachmentsService(rootOpts);
     for (const uploadResult of uploadResults) {
@@ -421,7 +451,11 @@ async function handleCreateIssue(
   const output = {
     ...result,
     ...(relations.length > 0 ? { relations } : {}),
-    ...(attachments.length === 1 ? { attachment: attachments[0] } : attachments.length > 1 ? { attachments } : {}),
+    ...(attachments.length === 1
+      ? { attachment: attachments[0] }
+      : attachments.length > 1
+        ? { attachments }
+        : {}),
   };
   outputSuccess(output);
 }
@@ -491,6 +525,75 @@ async function handleRelateIssue(
   });
 }
 
+async function handleReadIssue(
+  issueIds: string[],
+  _options: OptionValues,
+  command: Command,
+): Promise<void> {
+  const rootOpts = command.parent!.parent!.opts();
+  const graphQLService = createGraphQLService(rootOpts);
+  const linearService = createLinearService(rootOpts);
+  const issuesService = new GraphQLIssuesService(graphQLService, linearService);
+  const apiToken = getApiToken(rootOpts);
+  if (issueIds.length === 1) {
+    const issue = await issuesService.getIssueById(issueIds[0]);
+    const resolved = await downloadLinearUploads(issue, apiToken);
+    outputSuccess(resolved);
+  } else {
+    const results = await Promise.all(
+      issueIds.map(async (id) => {
+        const issue = await issuesService.getIssueById(id);
+        return downloadLinearUploads(issue, apiToken);
+      }),
+    );
+    outputSuccess(results);
+  }
+}
+
+async function handleUpdateIssue(
+  issueId: string,
+  options: OptionValues,
+  command: Command,
+): Promise<void> {
+  // Normalize aliases
+  if (options.state && !options.status) {
+    options.status = options.state;
+  }
+  if (options.label && !options.labels) {
+    options.labels = options.label;
+  }
+  // Resolve --description-file before validation
+  if (options.descriptionFile) {
+    options.description = readDescriptionFile(options.descriptionFile);
+  }
+  validateUpdateOptions(options);
+  const rootOpts = command.parent!.parent!.opts();
+  const graphQLService = createGraphQLService(rootOpts);
+  const linearService = createLinearService(rootOpts);
+
+  if (options.appendDescription) {
+    const resolved = await linearService.resolveIssueId(issueId);
+    const current = await graphQLService.rawRequest(
+      "query($id: String!) { issue(id: $id) { description } }",
+      { id: resolved },
+    );
+    const issue = current.issue as GraphQLResponseData | undefined;
+    const existing = (issue?.description as string) ?? "";
+    options.description = `${existing}\n${options.appendDescription}`;
+  }
+
+  if (options.title || options.description) {
+    enforceBrandName(options.title || "", options.description, options.strict);
+  }
+  const issuesService = new GraphQLIssuesService(graphQLService, linearService);
+  const assigneeId = options.assignee
+    ? await resolveAssignee(options.assignee, rootOpts)
+    : undefined;
+  const updateArgs = buildUpdateArgs(issueId, options, assigneeId);
+  const result = await issuesService.updateIssue(updateArgs, options.labelBy || "adding");
+  outputSuccess(result);
+}
+
 export function setupIssuesCommands(program: Command): void {
   const issues = program.command("issues").alias("issue").description("Issue operations");
   issues.action(() => issues.help());
@@ -506,10 +609,16 @@ export function setupIssuesCommands(program: Command): void {
     .option("--labels <labels>", "filter by labels (comma-separated names)")
     .option("--label <labels>", "alias for --labels")
     .option("--status <status>", "filter by status (comma-separated, e.g. Todo,Backlog)")
-    .option("--priority <priority>", "filter by priority (comma-separated: urgent,high,medium,low,none or 0-4)")
+    .option(
+      "--priority <priority>",
+      "filter by priority (comma-separated: urgent,high,medium,low,none or 0-4)",
+    )
     .option("--sort <field>", "sort results (priority, status, created, updated)")
     .option("--format <format>", "output format (json, table, md, csv)", "json")
-    .option("--fields <fields>", "columns for table/csv (comma-separated: identifier,title,status,priority,assignee,project,team,labels,updated)")
+    .option(
+      "--fields <fields>",
+      "columns for table/csv (comma-separated: identifier,title,status,priority,assignee,project,team,labels,updated)",
+    )
     .action(handleAsyncCommand(handleListIssues));
 
   issues
@@ -522,7 +631,10 @@ export function setupIssuesCommands(program: Command): void {
     .option("--status <status>", "filter by status (comma-separated)")
     .option("--labels <labels>", "filter by labels (comma-separated names)")
     .option("--label <labels>", "alias for --labels")
-    .option("--priority <priority>", "filter by priority (comma-separated: urgent,high,medium,low,none or 0-4)")
+    .option(
+      "--priority <priority>",
+      "filter by priority (comma-separated: urgent,high,medium,low,none or 0-4)",
+    )
     .option("--sort <field>", "sort results (priority, status, created, updated)")
     .option("--format <format>", "output format (json, table, md, csv)", "json")
     .option("--fields <fields>", "columns for table/csv output")
@@ -553,20 +665,28 @@ export function setupIssuesCommands(program: Command): void {
     .option("--related-to <issues>", "related issues (comma-separated identifiers)")
     .option("--blocks <issues>", "issues this blocks (comma-separated identifiers)")
     .option("--blocked-by <issues>", "issues blocking this (comma-separated identifiers)")
-    .option("--attachment <path>", "attach a file (image, PDF, etc.) to the created issue (repeatable)", (value: string, prev: string[] | undefined) => prev ? [...prev, value] : [value])
+    .option(
+      "--attachment <path>",
+      "attach a file (image, PDF, etc.) to the created issue (repeatable)",
+      (value: string, prev: string[] | undefined) => (prev ? [...prev, value] : [value]),
+    )
     .option("--due-date <date>", "due date (YYYY-MM-DD)")
     .action(
-      handleAsyncCommand((titleArg: string | undefined, options: OptionValues, command: Command) => {
-        // Normalize --label alias to --labels
-        if (options.label && !options.labels) {
-          options.labels = options.label;
-        }
-        const title = options.title || titleArg;
-        if (!title) {
-          throw new Error("Title is required. Provide it as a positional argument or with --title.");
-        }
-        return handleCreateIssue(title, options, command);
-      }),
+      handleAsyncCommand(
+        (titleArg: string | undefined, options: OptionValues, command: Command) => {
+          // Normalize --label alias to --labels
+          if (options.label && !options.labels) {
+            options.labels = options.label;
+          }
+          const title = options.title || titleArg;
+          if (!title) {
+            throw new Error(
+              "Title is required. Provide it as a positional argument or with --title.",
+            );
+          }
+          return handleCreateIssue(title, options, command);
+        },
+      ),
     );
 
   issues
@@ -575,29 +695,11 @@ export function setupIssuesCommands(program: Command): void {
     .alias("get")
     .alias("show")
     .description("Get issue details. Accepts multiple IDs for batch retrieval.")
-    .addHelpText("after", "\nBoth UUID and identifiers like ABC-123 are supported.\nMultiple IDs: el-linear issue get DEV-123 DEV-456 DEV-789")
-    .action(
-      handleAsyncCommand(async (issueIds: string[], _options: OptionValues, command: Command) => {
-        const rootOpts = command.parent!.parent!.opts();
-        const graphQLService = createGraphQLService(rootOpts);
-        const linearService = createLinearService(rootOpts);
-        const issuesService = new GraphQLIssuesService(graphQLService, linearService);
-        const apiToken = getApiToken(rootOpts);
-        if (issueIds.length === 1) {
-          const issue = await issuesService.getIssueById(issueIds[0]);
-          const resolved = await downloadLinearUploads(issue, apiToken);
-          outputSuccess(resolved);
-        } else {
-          const results = await Promise.all(
-            issueIds.map(async (id) => {
-              const issue = await issuesService.getIssueById(id);
-              return downloadLinearUploads(issue, apiToken);
-            }),
-          );
-          outputSuccess(results);
-        }
-      }),
-    );
+    .addHelpText(
+      "after",
+      "\nBoth UUID and identifiers like ABC-123 are supported.\nMultiple IDs: el-linear issue get DEV-123 DEV-456 DEV-789",
+    )
+    .action(handleAsyncCommand(handleReadIssue));
 
   issues
     .command("update <issueId>")
@@ -611,7 +713,10 @@ export function setupIssuesCommands(program: Command): void {
     .option("--append-description <text>", "append text to the existing description")
     .option("-s, --status <status>", "new status name or ID")
     .option("--state <status>", "alias for --status (new status name or ID)")
-    .option("-p, --priority <priority>", "new priority: name (urgent/high/medium/low) or number (1-4)")
+    .option(
+      "-p, --priority <priority>",
+      "new priority: name (urgent/high/medium/low) or number (1-4)",
+    )
     .option("--assignee <assignee>", "new assignee (name, alias, or UUID)")
     .option("--project <project>", "new project (name or ID)")
     .option("--labels <labels>", "labels (comma-separated names or IDs)")
@@ -627,45 +732,7 @@ export function setupIssuesCommands(program: Command): void {
     .option("--due-date <date>", "due date (YYYY-MM-DD)")
     .option("--clear-due-date", "clear due date")
     .option("--strict", "strict brand validation")
-    .action(
-      handleAsyncCommand(async (issueId: string, options: OptionValues, command: Command) => {
-        // Normalize aliases
-        if (options.state && !options.status) {
-          options.status = options.state;
-        }
-        if (options.label && !options.labels) {
-          options.labels = options.label;
-        }
-        // Resolve --description-file before validation
-        if (options.descriptionFile) {
-          options.description = readDescriptionFile(options.descriptionFile);
-        }
-        validateUpdateOptions(options);
-        const rootOpts = command.parent!.parent!.opts();
-        const graphQLService = createGraphQLService(rootOpts);
-        const linearService = createLinearService(rootOpts);
-
-        if (options.appendDescription) {
-          const resolved = await linearService.resolveIssueId(issueId);
-          const current = await graphQLService.rawRequest(
-            "query($id: String!) { issue(id: $id) { description } }",
-            { id: resolved },
-          );
-          const issue = current.issue as GraphQLResponseData | undefined;
-          const existing = (issue?.description as string) ?? "";
-          options.description = existing + "\n" + options.appendDescription;
-        }
-
-        if (options.title || options.description) {
-          enforceBrandName(options.title || "", options.description, options.strict);
-        }
-        const issuesService = new GraphQLIssuesService(graphQLService, linearService);
-        const assigneeId = options.assignee ? await resolveAssignee(options.assignee, rootOpts) : undefined;
-        const updateArgs = buildUpdateArgs(issueId, options, assigneeId);
-        const result = await issuesService.updateIssue(updateArgs, options.labelBy || "adding");
-        outputSuccess(result);
-      }),
-    );
+    .action(handleAsyncCommand(handleUpdateIssue));
 
   issues
     .command("history <issueId>")

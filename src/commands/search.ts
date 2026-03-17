@@ -2,6 +2,7 @@ import type { Command, OptionValues } from "commander";
 import { resolveTeam, resolveUserDisplayName } from "../config/resolver.js";
 import { SEMANTIC_SEARCH_QUERY } from "../queries/search.js";
 import type { GraphQLResponseData } from "../types/linear.js";
+import type { GraphQLService } from "../utils/graphql-service.js";
 import { createGraphQLService } from "../utils/graphql-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
 
@@ -19,6 +20,7 @@ const TEMPLATES_QUERY = `
 `;
 
 const VALID_TYPES = new Set(["issue", "project", "initiative", "document", "template"]);
+const WHITESPACE_RE = /\s+/;
 
 function transformSearchResult(r: GraphQLResponseData): Record<string, unknown> {
   const rType = r.type as string;
@@ -35,7 +37,9 @@ function transformSearchResult(r: GraphQLResponseData): Record<string, unknown> 
         title: issue?.title as string | undefined,
         state: state?.name as string | undefined,
         team: team?.key as string | undefined,
-        assignee: assignee ? resolveUserDisplayName(assignee.id as string, assignee.name as string) : undefined,
+        assignee: assignee
+          ? resolveUserDisplayName(assignee.id as string, assignee.name as string)
+          : undefined,
         priority: issue?.priority as number | undefined,
         project: project?.name as string | undefined,
         id: issue?.id as string | undefined,
@@ -76,23 +80,25 @@ function transformSearchResult(r: GraphQLResponseData): Record<string, unknown> 
 }
 
 interface TemplateNode {
+  creator: { name: string } | null;
+  description: string | null;
   id: string;
   name: string;
-  type: string;
-  description: string | null;
   team: { key: string } | null;
-  creator: { name: string } | null;
+  type: string;
 }
 
 function matchesQuery(name: string, query: string): boolean {
   const lower = name.toLowerCase();
-  const terms = query.toLowerCase().split(/\s+/);
+  const terms = query.toLowerCase().split(WHITESPACE_RE);
   return terms.every((term) => lower.includes(term));
 }
 
 function searchTemplates(templates: TemplateNode[], query: string): Record<string, unknown>[] {
   return templates
-    .filter((t) => matchesQuery(t.name, query) || (t.description && matchesQuery(t.description, query)))
+    .filter(
+      (t) => matchesQuery(t.name, query) || (t.description && matchesQuery(t.description, query)),
+    )
     .map((t) => ({
       type: "template",
       name: t.name,
@@ -103,11 +109,66 @@ function searchTemplates(templates: TemplateNode[], query: string): Record<strin
     }));
 }
 
+function validateTypes(requestedTypes: string[]): void {
+  for (const t of requestedTypes) {
+    if (!VALID_TYPES.has(t)) {
+      throw new Error(`Invalid type "${t}". Valid types: ${[...VALID_TYPES].join(", ")}`);
+    }
+  }
+}
+
+function parseTypeFilters(requestedTypes: string[] | null) {
+  const onlyTemplates = requestedTypes?.length === 1 && requestedTypes[0] === "template";
+  const includeTemplates = !requestedTypes || requestedTypes.includes("template");
+  const includeSemanticTypes =
+    !requestedTypes || requestedTypes.some((t: string) => t !== "template");
+  return { onlyTemplates, includeTemplates, includeSemanticTypes };
+}
+
+function buildSemanticQuery(
+  graphQLService: GraphQLService,
+  query: string,
+  limit: number,
+  teamOption: string | undefined,
+): Promise<GraphQLResponseData | null> {
+  const filters: Record<string, unknown> = {};
+  if (teamOption) {
+    filters.issues = { team: { id: { eq: resolveTeam(teamOption) } } };
+  }
+  return graphQLService.rawRequest(SEMANTIC_SEARCH_QUERY, {
+    query,
+    maxResults: limit,
+    filters: Object.keys(filters).length > 0 ? filters : undefined,
+  });
+}
+
+function extractSemanticResults(
+  semanticResult: GraphQLResponseData,
+  requestedTypes: string[] | null,
+  onlyTemplates: boolean,
+): Record<string, unknown>[] {
+  const semanticSearch = semanticResult.semanticSearch as GraphQLResponseData | undefined;
+  let results: GraphQLResponseData[] =
+    (semanticSearch?.results as GraphQLResponseData[] | undefined) ?? [];
+
+  if (requestedTypes && !onlyTemplates) {
+    const semanticTypes = requestedTypes.filter((t: string) => t !== "template");
+    results = results.filter((r: GraphQLResponseData) => semanticTypes.includes(r.type as string));
+  }
+
+  return results.map(transformSearchResult);
+}
+
 export function setupSearchCommands(program: Command): void {
   program
     .command("search <query>")
-    .description("Natural language search across issues, projects, initiatives, documents, and templates.")
-    .option("--type <types>", "filter by type (comma-separated: issue,project,initiative,document,template)")
+    .description(
+      "Natural language search across issues, projects, initiatives, documents, and templates.",
+    )
+    .option(
+      "--type <types>",
+      "filter by type (comma-separated: issue,project,initiative,document,template)",
+    )
     .option("--team <team>", "filter issue results by team key")
     .option("-l, --limit <number>", "max results", "10")
     .action(
@@ -121,58 +182,28 @@ export function setupSearchCommands(program: Command): void {
           : null;
 
         if (requestedTypes) {
-          for (const t of requestedTypes) {
-            if (!VALID_TYPES.has(t)) {
-              throw new Error(`Invalid type "${t}". Valid types: ${[...VALID_TYPES].join(", ")}`);
-            }
-          }
+          validateTypes(requestedTypes);
         }
 
-        const onlyTemplates = requestedTypes && requestedTypes.length === 1 && requestedTypes[0] === "template";
-        const includeTemplates = !requestedTypes || requestedTypes.includes("template");
-        const includeSemanticTypes = !requestedTypes || requestedTypes.some((t: string) => t !== "template");
+        const { onlyTemplates, includeTemplates, includeSemanticTypes } =
+          parseTypeFilters(requestedTypes);
 
-        // Run queries in parallel
         const [semanticResult, templateResult] = await Promise.all([
           includeSemanticTypes
-            ? (async () => {
-                const filters: Record<string, unknown> = {};
-                if (options.team) {
-                  filters.issues = { team: { id: { eq: resolveTeam(options.team) } } };
-                }
-                return graphQLService.rawRequest(SEMANTIC_SEARCH_QUERY, {
-                  query,
-                  maxResults: limit,
-                  filters: Object.keys(filters).length > 0 ? filters : undefined,
-                });
-              })()
-            : Promise.resolve(null),
-          includeTemplates
-            ? graphQLService.rawRequest(TEMPLATES_QUERY)
-            : Promise.resolve(null),
+            ? buildSemanticQuery(graphQLService, query, limit, options.team)
+            : null,
+          includeTemplates ? graphQLService.rawRequest(TEMPLATES_QUERY) : null,
         ]);
 
         let data: Record<string, unknown>[] = [];
 
-        // Semantic search results
         if (semanticResult) {
-          const semanticSearch = semanticResult.semanticSearch as GraphQLResponseData | undefined;
-          let results: GraphQLResponseData[] =
-            (semanticSearch?.results as GraphQLResponseData[] | undefined) ?? [];
-
-          if (requestedTypes && !onlyTemplates) {
-            const semanticTypes = requestedTypes.filter((t: string) => t !== "template");
-            results = results.filter((r: GraphQLResponseData) => semanticTypes.includes(r.type as string));
-          }
-
-          data = results.map(transformSearchResult);
+          data = extractSemanticResults(semanticResult, requestedTypes, onlyTemplates ?? false);
         }
 
-        // Template results
         if (templateResult) {
           const templates = (templateResult.templates as unknown as TemplateNode[]) ?? [];
-          const templateHits = searchTemplates(templates, query);
-          data = [...data, ...templateHits];
+          data = [...data, ...searchTemplates(templates, query)];
         }
 
         outputSuccess({

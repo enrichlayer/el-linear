@@ -95,7 +95,9 @@ export async function resolveAssignee(
     const result = await graphQLService.rawRequest("{ viewer { id } }");
     const viewer = result.viewer as Record<string, unknown> | undefined;
     if (!viewer?.id) {
-      throw new Error('Could not resolve "me" — viewer query returned no user. Check your API token.');
+      throw new Error(
+        'Could not resolve "me" — viewer query returned no user. Check your API token.',
+      );
     }
     return viewer.id as string;
   }

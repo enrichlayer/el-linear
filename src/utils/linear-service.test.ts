@@ -48,9 +48,7 @@ describe("LinearService", () => {
     it("throws when identifier not found", async () => {
       mockIssues.mockResolvedValue({ nodes: [] });
       const service = new LinearService("token");
-      await expect(service.resolveIssueId("DEV-999")).rejects.toThrow(
-        'Issue "DEV-999" not found',
-      );
+      await expect(service.resolveIssueId("DEV-999")).rejects.toThrow('Issue "DEV-999" not found');
     });
   });
 
@@ -78,9 +76,7 @@ describe("LinearService", () => {
     });
 
     it("throws when team not found by key or name", async () => {
-      mockTeams
-        .mockResolvedValueOnce({ nodes: [] })
-        .mockResolvedValueOnce({ nodes: [] });
+      mockTeams.mockResolvedValueOnce({ nodes: [] }).mockResolvedValueOnce({ nodes: [] });
       const service = new LinearService("token");
       await expect(service.resolveTeamId("NOPE")).rejects.toThrow('"NOPE" not found');
     });

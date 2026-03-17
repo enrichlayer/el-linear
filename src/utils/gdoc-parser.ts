@@ -1,4 +1,7 @@
 interface GDocElement {
+  inlineObjectElement?: {
+    inlineObjectId: string;
+  };
   textRun?: {
     content: string;
     textStyle?: {
@@ -7,19 +10,16 @@ interface GDocElement {
       link?: { url?: string };
     };
   };
-  inlineObjectElement?: {
-    inlineObjectId: string;
-  };
 }
 
 interface GDocParagraph {
-  elements: GDocElement[];
-  paragraphStyle?: {
-    namedStyleType?: string;
-  };
   bullet?: {
     nestingLevel?: number;
     listId?: string;
+  };
+  elements: GDocElement[];
+  paragraphStyle?: {
+    namedStyleType?: string;
   };
 }
 
@@ -38,6 +38,9 @@ interface GDocBody {
   content: GDocContent[];
 }
 
+const TRAILING_NEWLINE_RE = /\n$/;
+const GDOC_URL_RE = /\/document\/d\/([a-zA-Z0-9_-]+)/;
+
 interface GDocResponse {
   body: GDocBody;
   title?: string;
@@ -45,32 +48,40 @@ interface GDocResponse {
 
 function formatTextRun(element: GDocElement): string {
   const run = element.textRun;
-  if (!run?.content) return "";
+  if (!run?.content) {
+    return "";
+  }
 
   let text = run.content;
   const style = run.textStyle;
 
-  if (!style) return text;
+  if (!style) {
+    return text;
+  }
 
   // Don't wrap newlines in formatting
-  if (text.trim() === "") return text;
+  if (text.trim() === "") {
+    return text;
+  }
 
   const trimmedEnd = text.endsWith("\n");
-  if (trimmedEnd) text = text.slice(0, -1);
+  if (trimmedEnd) {
+    text = text.slice(0, -1);
+  }
 
   if (style.link?.url) {
     text = `[${text}](${style.link.url})`;
-  } else {
-    if (style.bold && style.italic) {
-      text = `***${text}***`;
-    } else if (style.bold) {
-      text = `**${text}**`;
-    } else if (style.italic) {
-      text = `*${text}*`;
-    }
+  } else if (style.bold && style.italic) {
+    text = `***${text}***`;
+  } else if (style.bold) {
+    text = `**${text}**`;
+  } else if (style.italic) {
+    text = `*${text}*`;
   }
 
-  if (trimmedEnd) text += "\n";
+  if (trimmedEnd) {
+    text += "\n";
+  }
   return text;
 }
 
@@ -85,7 +96,7 @@ function paragraphToMarkdown(para: GDocParagraph): string {
   // Handle bullet lists
   if (para.bullet) {
     const indent = "  ".repeat(para.bullet.nestingLevel || 0);
-    const content = line.replace(/\n$/, "");
+    const content = line.replace(TRAILING_NEWLINE_RE, "");
     return `${indent}- ${content}\n`;
   }
 
@@ -110,7 +121,9 @@ function paragraphToMarkdown(para: GDocParagraph): string {
 
 export function parseGoogleDoc(doc: GDocResponse): string {
   const body = doc.body?.content;
-  if (!body) return "";
+  if (!body) {
+    return "";
+  }
 
   const parts: string[] = [];
 
@@ -128,7 +141,7 @@ export function parseGoogleDoc(doc: GDocResponse): string {
               for (const el of c.paragraph!.elements) {
                 text += formatTextRun(el);
               }
-              return text.replace(/\n$/, "");
+              return text.replace(TRAILING_NEWLINE_RE, "");
             })
             .join(" ");
           return cellText;
@@ -143,7 +156,7 @@ export function parseGoogleDoc(doc: GDocResponse): string {
 
 export function extractDocId(input: string): string {
   // Full URL: https://docs.google.com/document/d/DOC_ID/...
-  const urlMatch = input.match(/\/document\/d\/([a-zA-Z0-9_-]+)/);
+  const urlMatch = input.match(GDOC_URL_RE);
   if (urlMatch) {
     return urlMatch[1];
   }

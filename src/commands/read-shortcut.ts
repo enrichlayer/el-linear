@@ -31,7 +31,10 @@ export function setupReadShortcut(program: Command): void {
 
   // Catch-all: if argv looks like `el-linear ADM-652 [DEV-123 ...]`, run read
   const originalParse = program.parse.bind(program);
-  program.parse = function (argv?: readonly string[], parseOptions?: { from: "node" | "electron" | "user" }) {
+  program.parse = (
+    argv?: readonly string[],
+    parseOptions?: { from: "node" | "electron" | "user" },
+  ) => {
     const args = argv ?? process.argv;
     const userArgs = args.slice(2); // skip node + script
 

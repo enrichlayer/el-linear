@@ -24,8 +24,8 @@ interface ElLinearConfig {
     noProject: string;
     withAssigneeAndProject: string;
   };
-  teams: Record<string, string>;
   teamAliases: Record<string, string>;
+  teams: Record<string, string>;
 }
 
 const CONFIG_PATH = path.join(os.homedir(), ".config", "el-linear", "config.json");

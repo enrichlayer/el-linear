@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { handleAsyncCommand, outputSuccess, outputWarning, resetWarnings, setRawMode } from "./output.js";
+import {
+  handleAsyncCommand,
+  outputSuccess,
+  outputWarning,
+  resetWarnings,
+  setRawMode,
+} from "./output.js";
 
 describe("outputSuccess", () => {
   let stdoutSpy: ReturnType<typeof vi.spyOn>;
@@ -103,9 +109,7 @@ describe("warning buffer", () => {
     outputWarning("mid-execution warning");
     outputSuccess({ id: "z", identifier: "DEV-1" });
     // Collect all stdout writes
-    const allStdout = stdoutSpy.mock.calls
-      .map((call) => call[0] as string)
-      .join("");
+    const allStdout = stdoutSpy.mock.calls.map((call) => call[0] as string).join("");
     // Must parse as a single JSON value
     expect(() => JSON.parse(allStdout)).not.toThrow();
     const parsed = JSON.parse(allStdout);
@@ -209,9 +213,7 @@ describe("handleAsyncCommand", () => {
     const fn = vi.fn().mockRejectedValue(new Error("broken"));
     const wrapped = handleAsyncCommand(fn);
     await wrapped();
-    const allStdout = stdoutSpy.mock.calls
-      .map((call) => call[0] as string)
-      .join("");
+    const allStdout = stdoutSpy.mock.calls.map((call) => call[0] as string).join("");
     expect(() => JSON.parse(allStdout)).not.toThrow();
     expect(JSON.parse(allStdout).error).toBe("broken");
   });

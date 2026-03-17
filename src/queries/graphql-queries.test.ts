@@ -5,6 +5,11 @@ import {
   DELETE_ATTACHMENT_MUTATION,
   LIST_ATTACHMENTS_QUERY,
 } from "./attachments.js";
+import {
+  CREATE_COMMENT_MUTATION,
+  LIST_COMMENTS_QUERY,
+  UPDATE_COMMENT_MUTATION,
+} from "./comments.js";
 import { COMPLETE_ISSUE_FRAGMENT, COMPLETE_ISSUE_WITH_COMMENTS_FRAGMENT } from "./common.js";
 import { FIND_CYCLE_GLOBAL_QUERY, FIND_CYCLE_SCOPED_QUERY } from "./cycles.js";
 import {
@@ -14,10 +19,12 @@ import {
   LIST_DOCUMENTS_QUERY,
   UPDATE_DOCUMENT_MUTATION,
 } from "./documents.js";
+import { INTROSPECT_ROOT_QUERY, INTROSPECT_TYPE_QUERY } from "./introspect.js";
 import {
   BATCH_RESOLVE_FOR_CREATE_QUERY,
   BATCH_RESOLVE_FOR_SEARCH_QUERY,
   BATCH_RESOLVE_FOR_UPDATE_QUERY,
+  buildResolveLabelsByNameQuery,
   CREATE_ISSUE_MUTATION,
   FILTERED_SEARCH_ISSUES_QUERY,
   GET_ISSUE_BY_ID_QUERY,
@@ -27,7 +34,6 @@ import {
   GET_ISSUES_QUERY,
   ISSUE_RELATION_CREATE_MUTATION,
   SCAN_ISSUES_QUERY,
-  buildResolveLabelsByNameQuery,
   SEARCH_ISSUES_QUERY,
   UPDATE_ISSUE_MUTATION,
 } from "./issues.js";
@@ -46,22 +52,20 @@ import {
   UPDATE_PROJECT_MILESTONE_MUTATION,
 } from "./project-milestones.js";
 import {
-  CREATE_RELEASE_MUTATION,
-  GET_RELEASE_BY_ID_QUERY,
-  GET_RELEASE_PIPELINES_QUERY,
-  GET_RELEASES_QUERY,
-} from "./releases.js";
-import {
   GET_PROJECT_QUERY,
   GET_PROJECT_TEAM_ISSUES_QUERY,
   PROJECT_BY_ID_QUERY,
   TEAM_LOOKUP_QUERY,
   UPDATE_PROJECT_MUTATION,
 } from "./projects.js";
-import { CREATE_COMMENT_MUTATION, LIST_COMMENTS_QUERY, UPDATE_COMMENT_MUTATION } from "./comments.js";
+import {
+  CREATE_RELEASE_MUTATION,
+  GET_RELEASE_BY_ID_QUERY,
+  GET_RELEASE_PIPELINES_QUERY,
+  GET_RELEASES_QUERY,
+} from "./releases.js";
 import { SEMANTIC_SEARCH_QUERY } from "./search.js";
-import { TEMPLATES_LIST_QUERY, TEMPLATE_BY_ID_QUERY } from "./templates.js";
-import { INTROSPECT_TYPE_QUERY, INTROSPECT_ROOT_QUERY } from "./introspect.js";
+import { TEMPLATE_BY_ID_QUERY, TEMPLATES_LIST_QUERY } from "./templates.js";
 
 /**
  * Known Linear API fields that return Connection types (paginated).
@@ -292,14 +296,35 @@ function containsField(query: string, fieldName: string): boolean {
 
 describe("common.ts — fragment composition", () => {
   it("COMPLETE_ISSUE_FRAGMENT includes all core fields", () => {
-    const coreFields = ["id", "identifier", "title", "description", "priority", "estimate", "url", "createdAt", "updatedAt", "branchName"];
+    const coreFields = [
+      "id",
+      "identifier",
+      "title",
+      "description",
+      "priority",
+      "estimate",
+      "url",
+      "createdAt",
+      "updatedAt",
+      "branchName",
+    ];
     for (const field of coreFields) {
       expect(COMPLETE_ISSUE_FRAGMENT).toContain(field);
     }
   });
 
   it("COMPLETE_ISSUE_FRAGMENT includes relation fields", () => {
-    const relations = ["state", "assignee", "team", "project", "labels", "cycle", "projectMilestone", "parent", "children"];
+    const relations = [
+      "state",
+      "assignee",
+      "team",
+      "project",
+      "labels",
+      "cycle",
+      "projectMilestone",
+      "parent",
+      "children",
+    ];
     for (const field of relations) {
       expect(COMPLETE_ISSUE_FRAGMENT).toContain(field);
     }
@@ -352,7 +377,11 @@ describe("cycles.ts — scoped vs global", () => {
 
 describe("documents.ts — CRUD operations", () => {
   it("all mutations return success", () => {
-    for (const mutation of [CREATE_DOCUMENT_MUTATION, UPDATE_DOCUMENT_MUTATION, DELETE_DOCUMENT_MUTATION]) {
+    for (const mutation of [
+      CREATE_DOCUMENT_MUTATION,
+      UPDATE_DOCUMENT_MUTATION,
+      DELETE_DOCUMENT_MUTATION,
+    ]) {
       expect(getOperationType(mutation)).toBe("mutation");
       expect(containsField(mutation, "success")).toBe(true);
     }

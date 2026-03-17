@@ -55,9 +55,7 @@ class GraphQLAttachmentsService {
   }
 }
 
-export function createGraphQLAttachmentsService(
-  options: AuthOptions,
-): GraphQLAttachmentsService {
+export function createGraphQLAttachmentsService(options: AuthOptions): GraphQLAttachmentsService {
   const graphqlService = createGraphQLService(options);
   return new GraphQLAttachmentsService(graphqlService);
 }

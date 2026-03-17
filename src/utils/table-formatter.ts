@@ -3,11 +3,11 @@ import type { LinearIssue } from "../types/linear.js";
 import { PRIORITY_LABELS } from "./validators.js";
 
 interface ColumnDef {
-  key: string;
-  header: string;
-  width: number;
-  extract: (issue: LinearIssue) => string;
   colorize?: (value: string, issue: LinearIssue) => string;
+  extract: (issue: LinearIssue) => string;
+  header: string;
+  key: string;
+  width: number;
 }
 
 // ── Status colors ──────────────────────────────────────────────
@@ -99,7 +99,9 @@ const ALL_COLUMNS: Record<string, ColumnDef> = {
     header: "Assignee",
     width: 20,
     extract: (i) => {
-      if (!i.assignee) return "—";
+      if (!i.assignee) {
+        return "—";
+      }
       const name = i.assignee.name;
       const atIdx = name.indexOf("@");
       return atIdx > 0 ? name.slice(0, atIdx) : name;
@@ -134,7 +136,9 @@ const ALL_COLUMNS: Record<string, ColumnDef> = {
 const DEFAULT_COLUMNS = ["identifier", "title", "status", "priority", "assignee", "project"];
 
 function truncate(str: string, maxLen: number): string {
-  if (str.length <= maxLen) return str;
+  if (str.length <= maxLen) {
+    return str;
+  }
   return `${str.slice(0, maxLen - 1)}…`;
 }
 
@@ -176,10 +180,14 @@ export function formatCsv(issues: LinearIssue[], fieldNames?: string[]): string 
 
   const header = columns.map((col) => col.header).join(",");
   const rows = issues.map((issue) =>
-    columns.map((col) => {
-      const value = col.extract(issue);
-      return value.includes(",") || value.includes('"') ? `"${value.replace(/"/g, '""')}"` : value;
-    }).join(","),
+    columns
+      .map((col) => {
+        const value = col.extract(issue);
+        return value.includes(",") || value.includes('"')
+          ? `"${value.replace(/"/g, '""')}"`
+          : value;
+      })
+      .join(","),
   );
 
   return [header, ...rows].join("\n");
@@ -208,9 +216,9 @@ const PRIORITY_MD: Record<number, string> = {
 };
 
 interface MarkdownColumnDef {
-  header: string;
   align?: "left" | "right";
   extract: (issue: LinearIssue) => string;
+  header: string;
 }
 
 const MD_COLUMNS: Record<string, MarkdownColumnDef> = {
@@ -237,7 +245,9 @@ const MD_COLUMNS: Record<string, MarkdownColumnDef> = {
   assignee: {
     header: "Assignee",
     extract: (i) => {
-      if (!i.assignee) return "—";
+      if (!i.assignee) {
+        return "—";
+      }
       const name = i.assignee.name;
       const atIdx = name.indexOf("@");
       return atIdx > 0 ? name.slice(0, atIdx) : name;
@@ -278,11 +288,8 @@ export function formatMarkdown(issues: LinearIssue[], fieldNames?: string[]): st
   const header = `| ${columns.map((col) => col.header).join(" | ")} |`;
   const divider = `| ${columns.map((col) => (col.align === "right" ? "---:" : "---")).join(" | ")} |`;
   const rows = issues.map(
-    (issue) =>
-      `| ${columns.map((col) => escapeMarkdownCell(col.extract(issue))).join(" | ")} |`,
+    (issue) => `| ${columns.map((col) => escapeMarkdownCell(col.extract(issue))).join(" | ")} |`,
   );
 
   return [header, divider, ...rows].join("\n");
 }
-
-export const VALID_COLUMNS = Object.keys(ALL_COLUMNS);

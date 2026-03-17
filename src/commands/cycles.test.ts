@@ -1,6 +1,6 @@
 import type { Command } from "commander";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createTestProgram, runCommand, suppressExit } from "./test-helpers.js";
+import { createTestProgram, runCommand, suppressExit } from "../__tests__/test-helpers.js";
 
 const mockGetCycles = vi.fn();
 const mockResolveCycleId = vi.fn();
@@ -19,7 +19,7 @@ vi.mock("../utils/linear-service.js", () => ({
 }));
 
 vi.mock("../utils/output.js", async () => ({
-  handleAsyncCommand: (await import("./test-helpers.js")).passthroughHandleAsyncCommand,
+  handleAsyncCommand: (await import("../__tests__/test-helpers.js")).passthroughHandleAsyncCommand,
   outputSuccess: mockOutputSuccess,
 }));
 

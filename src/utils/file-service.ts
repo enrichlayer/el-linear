@@ -166,7 +166,12 @@ export class FileService {
     filename: string,
     fileSize: number,
   ): Promise<
-    | { ok: true; uploadUrl: string; assetUrl: string; headers: Array<{ key: string; value: string }> }
+    | {
+        ok: true;
+        uploadUrl: string;
+        assetUrl: string;
+        headers: Array<{ key: string; value: string }>;
+      }
     | { ok: false; error: FileUploadResult }
   > {
     const query = `
@@ -188,7 +193,11 @@ export class FileService {
     if (!response.ok) {
       return {
         ok: false,
-        error: { success: false, error: `GraphQL request failed: HTTP ${response.status}`, statusCode: response.status },
+        error: {
+          success: false,
+          error: `GraphQL request failed: HTTP ${response.status}`,
+          statusCode: response.status,
+        },
       };
     }
     const data = (await response.json()) as {
@@ -207,16 +216,25 @@ export class FileService {
     if (data.errors) {
       return {
         ok: false,
-        error: { success: false, error: `Failed to request upload URL: ${data.errors[0]?.message || "GraphQL error"}` },
+        error: {
+          success: false,
+          error: `Failed to request upload URL: ${data.errors[0]?.message || "GraphQL error"}`,
+        },
       };
     }
     const fileUpload = data.data?.fileUpload;
     if (!fileUpload?.success) {
-      return { ok: false, error: { success: false, error: "Failed to request upload URL: success=false" } };
+      return {
+        ok: false,
+        error: { success: false, error: "Failed to request upload URL: success=false" },
+      };
     }
     const uploadFile = fileUpload.uploadFile;
     if (!(uploadFile?.uploadUrl && uploadFile?.assetUrl)) {
-      return { ok: false, error: { success: false, error: "Missing uploadUrl or assetUrl in response" } };
+      return {
+        ok: false,
+        error: { success: false, error: "Missing uploadUrl or assetUrl in response" },
+      };
     }
     return {
       ok: true,
@@ -243,7 +261,11 @@ export class FileService {
       body: new Uint8Array(fileBuffer),
     });
     if (!putResponse.ok) {
-      return { success: false, error: `File upload failed: HTTP ${putResponse.status}`, statusCode: putResponse.status };
+      return {
+        success: false,
+        error: `File upload failed: HTTP ${putResponse.status}`,
+        statusCode: putResponse.status,
+      };
     }
     return { success: true, assetUrl: meta.assetUrl, filename };
   }

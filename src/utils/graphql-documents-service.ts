@@ -24,7 +24,11 @@ function transformDocument(doc: GraphQLResponseData): LinearDocument {
     creator: creator ? { id: creator.id as string, name: creator.name as string } : undefined,
     project: project ? { id: project.id as string, name: project.name as string } : undefined,
     issue: issue
-      ? { id: issue.id as string, identifier: issue.identifier as string, title: issue.title as string }
+      ? {
+          id: issue.id as string,
+          identifier: issue.identifier as string,
+          title: issue.title as string,
+        }
       : undefined,
     createdAt: (doc.createdAt as string | undefined) || undefined,
     updatedAt: (doc.updatedAt as string | undefined) || undefined,
@@ -103,9 +107,7 @@ class GraphQLDocumentsService {
   }
 }
 
-export function createGraphQLDocumentsService(
-  options: AuthOptions,
-): GraphQLDocumentsService {
+export function createGraphQLDocumentsService(options: AuthOptions): GraphQLDocumentsService {
   const graphqlService = createGraphQLService(options);
   return new GraphQLDocumentsService(graphqlService);
 }

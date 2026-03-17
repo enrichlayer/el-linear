@@ -42,9 +42,7 @@ describe("getApiToken", () => {
   });
 
   it("reads from ~/.config/el-linear/token when no flag or env", () => {
-    existsSyncMock.mockImplementation((p) =>
-      (p as string).includes(".config/el-linear/token"),
-    );
+    existsSyncMock.mockImplementation((p) => (p as string).includes(".config/el-linear/token"));
     readFileSyncMock.mockReturnValue("config-token\n");
 
     const result = getApiToken({});
@@ -52,9 +50,7 @@ describe("getApiToken", () => {
   });
 
   it("reads from ~/.linear_api_token as last fallback", () => {
-    existsSyncMock.mockImplementation((p) =>
-      (p as string).includes(".linear_api_token"),
-    );
+    existsSyncMock.mockImplementation((p) => (p as string).includes(".linear_api_token"));
     readFileSyncMock.mockReturnValue("  fallback-token  \n");
 
     const result = getApiToken({});

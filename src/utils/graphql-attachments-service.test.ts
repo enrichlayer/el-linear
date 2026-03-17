@@ -82,7 +82,7 @@ describe("GraphQLAttachmentsService", () => {
       });
       await expect(
         service.createAttachment({ issueId: "issue-1", url: "https://example.com/fail.pdf" }),
-      ).rejects.toThrow('Failed to create attachment on issue issue-1');
+      ).rejects.toThrow("Failed to create attachment on issue issue-1");
     });
   });
 

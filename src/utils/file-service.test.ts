@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const BEARER_PREFIX_RE = /^Bearer /;
+
 const mockAccess = vi.fn();
 const mockMkdir = vi.fn();
 const mockReadFile = vi.fn();
@@ -41,10 +43,9 @@ describe("FileService", () => {
     it("returns error if file already exists and overwrite is false", async () => {
       const service = createService();
       mockAccess.mockResolvedValue(undefined);
-      const result = await service.downloadFile(
-        "https://uploads.linear.app/abc/file.png",
-        { output: "file.png" },
-      );
+      const result = await service.downloadFile("https://uploads.linear.app/abc/file.png", {
+        output: "file.png",
+      });
       expect(result.success).toBe(false);
       if (!result.success) {
         expect(result.error).toContain("File already exists");
@@ -61,10 +62,9 @@ describe("FileService", () => {
         arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)),
       });
 
-      const result = await service.downloadFile(
-        "https://uploads.linear.app/abc/photo.png",
-        { output: "output/photo.png" },
-      );
+      const result = await service.downloadFile("https://uploads.linear.app/abc/photo.png", {
+        output: "output/photo.png",
+      });
 
       expect(result.success).toBe(true);
       if (result.success) {
@@ -87,10 +87,9 @@ describe("FileService", () => {
         arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)),
       });
 
-      await service.downloadFile(
-        "https://uploads.linear.app/abc/photo.png?signature=abc123",
-        { output: "photo.png" },
-      );
+      await service.downloadFile("https://uploads.linear.app/abc/photo.png?signature=abc123", {
+        output: "photo.png",
+      });
 
       expect(mockFetch).toHaveBeenCalledWith(
         expect.any(String),
@@ -107,10 +106,9 @@ describe("FileService", () => {
         statusText: "Not Found",
       });
 
-      const result = await service.downloadFile(
-        "https://uploads.linear.app/abc/missing.png",
-        { output: "missing.png" },
-      );
+      const result = await service.downloadFile("https://uploads.linear.app/abc/missing.png", {
+        output: "missing.png",
+      });
 
       expect(result.success).toBe(false);
       if (!result.success) {
@@ -127,10 +125,10 @@ describe("FileService", () => {
       });
       mockWriteFile.mockResolvedValue(undefined);
 
-      const result = await service.downloadFile(
-        "https://uploads.linear.app/abc/file.png",
-        { output: "file.png", overwrite: true },
-      );
+      const result = await service.downloadFile("https://uploads.linear.app/abc/file.png", {
+        output: "file.png",
+        overwrite: true,
+      });
 
       expect(result.success).toBe(true);
       expect(mockAccess).not.toHaveBeenCalled();
@@ -264,7 +262,7 @@ describe("FileService", () => {
       const graphqlCall = mockFetch.mock.calls[0];
       const authHeader = graphqlCall[1].headers.Authorization;
       expect(authHeader).toBe("test-api-token");
-      expect(authHeader).not.toMatch(/^Bearer /);
+      expect(authHeader).not.toMatch(BEARER_PREFIX_RE);
     });
 
     it("returns error when PUT upload fails", async () => {

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createTestProgram, runCommand, suppressExit } from "./test-helpers.js";
+import { createTestProgram, runCommand, suppressExit } from "../__tests__/test-helpers.js";
 
 // -- Mock function declarations (before vi.mock) --
 
@@ -43,7 +43,9 @@ vi.mock("../utils/output.js", async (importOriginal) => {
 
 const mockResolveTeam = vi.fn().mockImplementation((v: string) => `team-id-${v}`);
 const mockResolveMember = vi.fn().mockImplementation((v: string) => `member-id-${v}`);
-const mockResolveAssignee = vi.fn().mockImplementation((v: string) => Promise.resolve(`member-id-${v}`));
+const mockResolveAssignee = vi
+  .fn()
+  .mockImplementation((v: string) => Promise.resolve(`member-id-${v}`));
 const mockResolveLabels = vi.fn().mockReturnValue([]);
 vi.mock("../config/resolver.js", () => ({
   resolveTeam: mockResolveTeam,

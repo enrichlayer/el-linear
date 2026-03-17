@@ -1,6 +1,6 @@
 import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { LinearIssue } from "../types/linear.js";
 import { FileService } from "./file-service.js";
 

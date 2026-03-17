@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createTestProgram, runCommand, suppressExit } from "./test-helpers.js";
+import { createTestProgram, runCommand, suppressExit } from "../__tests__/test-helpers.js";
 
 const mockGetProjects = vi.fn().mockResolvedValue({ projects: [] });
 const mockService = { getProjects: mockGetProjects };

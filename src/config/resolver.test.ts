@@ -149,7 +149,11 @@ describe("resolveLabels", () => {
 
   it("resolves mixed labels", () => {
     const result = resolveLabels(["claude", "unknown-label", "bug"]);
-    expect(result).toEqual(["c1a0de00-0000-4000-8000-000000000001", "unknown-label", "b0900000-0000-4000-8000-000000000002"]);
+    expect(result).toEqual([
+      "c1a0de00-0000-4000-8000-000000000001",
+      "unknown-label",
+      "b0900000-0000-4000-8000-000000000002",
+    ]);
   });
 
   it("returns label name when config has truncated UUID", () => {

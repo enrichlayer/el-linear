@@ -1,6 +1,6 @@
 import type { Command } from "commander";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createTestProgram, runCommand } from "./test-helpers.js";
+import { createTestProgram, runCommand } from "../__tests__/test-helpers.js";
 
 const mockRawRequest = vi.fn();
 const mockGraphQLService = { rawRequest: mockRawRequest };
@@ -12,7 +12,7 @@ vi.mock("../utils/graphql-service.js", () => ({
 }));
 
 vi.mock("../utils/output.js", async () => ({
-  handleAsyncCommand: (await import("./test-helpers.js")).passthroughHandleAsyncCommand,
+  handleAsyncCommand: (await import("../__tests__/test-helpers.js")).passthroughHandleAsyncCommand,
   outputSuccess: mockOutputSuccess,
 }));
 

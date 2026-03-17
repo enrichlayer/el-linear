@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createTestProgram, runCommand } from "./test-helpers.js";
+import { createTestProgram, runCommand } from "../__tests__/test-helpers.js";
 
 const mockGetIssueById = vi.fn();
 const mockOutputSuccess = vi.fn();
