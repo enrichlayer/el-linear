@@ -530,20 +530,60 @@ export class GraphQLIssuesService {
     resolveResult: GraphQLResponseData,
     teamId?: string,
   ): string | undefined {
-    const teams = resolveResult.teams as GraphQLResponseData | undefined;
-    const teamNodes = teams?.nodes as GraphQLResponseData[] | undefined;
-    if (!teamNodes?.length) {
-      return undefined;
-    }
+    // Collect team nodes from both the top-level teams query and the project's teams.
+    // When the team was pre-resolved to a UUID by config, the top-level teams query
+    // runs with null filters and may return an unrelated team. The project's teams
+    // always include the correct team when a project is specified.
+    const allTeamNodes = this.collectTeamNodes(resolveResult);
+
     if (teamId) {
-      const match = teamNodes.find((t: GraphQLResponseData) => t.id === teamId);
+      const match = allTeamNodes.find((t: GraphQLResponseData) => t.id === teamId);
       if (match) {
         return match.key as string;
       }
     }
     // Only fall back to first team if there's exactly one (unambiguous).
     // With multiple teams, returning an arbitrary one produces misleading error hints.
-    return teamNodes.length === 1 ? (teamNodes[0].key as string) : undefined;
+    const topLevelNodes = (resolveResult.teams as GraphQLResponseData | undefined)?.nodes as
+      | GraphQLResponseData[]
+      | undefined;
+    return topLevelNodes?.length === 1 ? (topLevelNodes[0].key as string) : undefined;
+  }
+
+  private collectTeamNodes(resolveResult: GraphQLResponseData): GraphQLResponseData[] {
+    const nodes: GraphQLResponseData[] = [];
+    const seen = new Set<string>();
+
+    const topTeams = resolveResult.teams as GraphQLResponseData | undefined;
+    const topNodes = topTeams?.nodes as GraphQLResponseData[] | undefined;
+    if (topNodes) {
+      for (const t of topNodes) {
+        const id = t.id as string;
+        if (!seen.has(id)) {
+          seen.add(id);
+          nodes.push(t);
+        }
+      }
+    }
+
+    // Also check project teams (which are always fetched when --project is used)
+    const projects = resolveResult.projects as GraphQLResponseData | undefined;
+    const projectNode = (projects?.nodes as GraphQLResponseData[] | undefined)?.[0];
+    if (projectNode) {
+      const projectTeams = projectNode.teams as GraphQLResponseData | undefined;
+      const projectTeamNodes = projectTeams?.nodes as GraphQLResponseData[] | undefined;
+      if (projectTeamNodes) {
+        for (const t of projectTeamNodes) {
+          const id = t.id as string;
+          if (!seen.has(id)) {
+            seen.add(id);
+            nodes.push(t);
+          }
+        }
+      }
+    }
+
+    return nodes;
   }
 
   private resolveMilestoneId(
