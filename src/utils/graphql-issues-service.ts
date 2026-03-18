@@ -108,6 +108,7 @@ export class GraphQLIssuesService {
       labelMode,
       currentIssueLabels,
       teamIdForLabels,
+      args.teamId as string | undefined,
     );
 
     const finalProjectId = args.projectId
@@ -262,6 +263,7 @@ export class GraphQLIssuesService {
       args.labelIds as string[] | undefined,
       resolveResult,
       teamId as string | undefined,
+      args.teamInput as string | undefined,
     );
     const parentId = this.resolveParentId(args.parentId as string | undefined, resolveResult);
     const milestoneId = this.resolveMilestoneIdForCreate(
@@ -468,8 +470,9 @@ export class GraphQLIssuesService {
     labelIds: string[] | undefined,
     resolveResult: GraphQLResponseData,
     teamId?: string,
+    teamInput?: string,
   ): string[] | undefined {
-    return this.resolveLabelsWithMode(labelIds, resolveResult, "overwriting", [], teamId);
+    return this.resolveLabelsWithMode(labelIds, resolveResult, "overwriting", [], teamId, teamInput);
   }
 
   private resolveLabelsWithMode(
@@ -478,6 +481,7 @@ export class GraphQLIssuesService {
     labelMode: string,
     currentIssueLabels: string[],
     teamId?: string,
+    teamInput?: string,
   ): string[] | undefined {
     if (!(labelIds && Array.isArray(labelIds))) {
       return labelIds;
@@ -504,14 +508,14 @@ export class GraphQLIssuesService {
           label = candidates?.[0];
         }
         if (!label) {
-          const teamKey = this.resolveTeamKeyFromResult(resolveResult, teamId);
+          const teamKey = this.resolveTeamKeyFromResult(resolveResult, teamId, teamInput);
           const hint = teamKey
             ? `— check available labels with: el-linear labels list --team ${teamKey}`
             : undefined;
           throw notFoundError("Label", labelIdOrName, undefined, hint);
         }
         if (label.isGroup) {
-          const teamKey = this.resolveTeamKeyFromResult(resolveResult, teamId);
+          const teamKey = this.resolveTeamKeyFromResult(resolveResult, teamId, teamInput);
           const hint = teamKey ? ` Run: el-linear labels list --team ${teamKey}` : "";
           throw new Error(
             `Label "${labelIdOrName}" is a group label. Use a specific child label instead.${hint}`,
@@ -529,6 +533,7 @@ export class GraphQLIssuesService {
   private resolveTeamKeyFromResult(
     resolveResult: GraphQLResponseData,
     teamId?: string,
+    teamInput?: string,
   ): string | undefined {
     // Collect team nodes from both the top-level teams query and the project's teams.
     // When the team was pre-resolved to a UUID by config, the top-level teams query
@@ -542,6 +547,13 @@ export class GraphQLIssuesService {
         return match.key as string;
       }
     }
+
+    // If the team was pre-resolved to UUID by config and not found in the result,
+    // use the original input (e.g., "DEV") as the hint.
+    if (teamInput && !isUuid(teamInput)) {
+      return teamInput.toUpperCase();
+    }
+
     // Only fall back to first team if there's exactly one (unambiguous).
     // With multiple teams, returning an arbitrary one produces misleading error hints.
     const topLevelNodes = (resolveResult.teams as GraphQLResponseData | undefined)?.nodes as

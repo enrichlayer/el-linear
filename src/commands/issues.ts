@@ -428,11 +428,8 @@ async function handleCreateIssue(
   command: Command,
 ): Promise<void> {
   const rootOpts = command.parent!.parent!.opts();
-  const { teamId, assigneeId, labelIds, status, subscriberIds } = await resolveCreateInputs(
-    title,
-    options,
-    rootOpts,
-  );
+  const { teamInput, teamId, assigneeId, labelIds, status, subscriberIds } =
+    await resolveCreateInputs(title, options, rootOpts);
 
   const uploadResults = await uploadAttachmentsIfNeeded(options, rootOpts);
   const description = buildDescriptionWithAttachments(
@@ -447,6 +444,7 @@ async function handleCreateIssue(
   const result = await issuesService.createIssue({
     title,
     teamId,
+    teamInput,
     description: description || undefined,
     assigneeId,
     priority: options.priority ? validatePriority(options.priority) : undefined,
