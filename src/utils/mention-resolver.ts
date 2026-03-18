@@ -1,20 +1,19 @@
 import { resolveMember } from "../config/resolver.js";
 import type { LinearService } from "./linear-service.js";
+import type { ProseMirrorNode } from "./markdown-prosemirror.js";
+import { markdownToProseMirror } from "./markdown-prosemirror.js";
 import { isUuid } from "./uuid.js";
 
 const MENTION_REGEX = /@(\w+)/g;
-
-interface ProseMirrorNode {
-  attrs?: Record<string, unknown>;
-  content?: ProseMirrorNode[];
-  text?: string;
-  type: string;
-}
 
 /**
  * Resolve @name mentions in markdown body text to Linear user IDs.
  * Returns ProseMirror bodyData with suggestion_userMentions nodes,
  * or null if no mentions were found/resolved.
+ *
+ * The markdown is first converted to a proper ProseMirror document
+ * (preserving headings, lists, code blocks, etc.), then @mentions
+ * are injected as suggestion_userMentions nodes.
  */
 export async function resolveMentions(
   body: string,
@@ -41,7 +40,9 @@ export async function resolveMentions(
     return null;
   }
 
-  const bodyData = buildBodyData(body, resolved);
+  // Parse markdown into a proper ProseMirror document, then inject mentions
+  const doc = markdownToProseMirror(body);
+  const bodyData = injectMentions(doc, resolved);
   return { bodyData };
 }
 
@@ -64,73 +65,85 @@ async function resolveUserByName(
 }
 
 /**
- * Build ProseMirror document with mention nodes replacing @name tokens.
+ * Walk a ProseMirror document tree and replace @name text with mention nodes.
  */
-function buildBodyData(body: string, mentions: Map<string, string>): ProseMirrorNode {
-  const lines = body.split("\n");
-  const content: ProseMirrorNode[] = [];
-
-  let paragraphLines: string[] = [];
-
-  const flushParagraph = () => {
-    if (paragraphLines.length === 0) {
-      return;
-    }
-    const text = paragraphLines.join("\n");
-    const nodes = buildInlineContent(text, mentions);
-    if (nodes.length > 0) {
-      content.push({ type: "paragraph", content: nodes });
-    }
-    paragraphLines = [];
-  };
-
-  for (const line of lines) {
-    if (line.trim() === "") {
-      flushParagraph();
-    } else {
-      paragraphLines.push(line);
-    }
+function injectMentions(doc: ProseMirrorNode, mentions: Map<string, string>): ProseMirrorNode {
+  if (!doc.content) {
+    return doc;
   }
-  flushParagraph();
 
-  return { type: "doc", content };
+  return {
+    ...doc,
+    content: doc.content.map((node) => {
+      // Recurse into container nodes (lists, blockquotes, list items, etc.)
+      if (node.content && node.type !== "codeBlock") {
+        const processed = injectMentions(node, mentions);
+        // For nodes that contain inline content (paragraph, heading),
+        // expand text nodes that contain @mentions
+        if (node.type === "paragraph" || node.type === "heading") {
+          return {
+            ...processed,
+            content: processed.content?.flatMap((child) => splitMentions(child, mentions)),
+          };
+        }
+        return processed;
+      }
+      return node;
+    }),
+  };
 }
 
 /**
- * Split text into text nodes and mention nodes around @name tokens.
+ * If a text node contains @mentions, split it into text + mention nodes.
+ * Non-text nodes and code-marked nodes pass through unchanged.
  */
-function buildInlineContent(text: string, mentions: Map<string, string>): ProseMirrorNode[] {
-  const nodes: ProseMirrorNode[] = [];
-  let lastIndex = 0;
+function splitMentions(node: ProseMirrorNode, mentions: Map<string, string>): ProseMirrorNode[] {
+  if (node.type !== "text" || !node.text) {
+    return [node];
+  }
+  // Don't replace mentions inside inline code
+  if (node.marks?.some((m) => m.type === "code")) {
+    return [node];
+  }
 
+  const result: ProseMirrorNode[] = [];
+  let lastIndex = 0;
   const regex = new RegExp(MENTION_REGEX.source, "g");
-  let match: RegExpExecArray | null = regex.exec(text);
+  let match: RegExpExecArray | null = regex.exec(node.text);
 
   while (match !== null) {
     const name = match[1];
     const userId = mentions.get(name);
 
     if (!userId) {
-      match = regex.exec(text);
+      match = regex.exec(node.text);
       continue;
     }
 
     if (match.index > lastIndex) {
-      nodes.push({ type: "text", text: text.slice(lastIndex, match.index) });
+      result.push({
+        type: "text",
+        text: node.text.slice(lastIndex, match.index),
+        ...(node.marks ? { marks: node.marks } : {}),
+      });
     }
 
-    nodes.push({
+    result.push({
       type: "suggestion_userMentions",
       attrs: { id: userId, label: name },
     });
 
     lastIndex = match.index + match[0].length;
-    match = regex.exec(text);
+    match = regex.exec(node.text);
   }
 
-  if (lastIndex < text.length) {
-    nodes.push({ type: "text", text: text.slice(lastIndex) });
+  if (lastIndex < node.text.length) {
+    result.push({
+      type: "text",
+      text: node.text.slice(lastIndex),
+      ...(node.marks ? { marks: node.marks } : {}),
+    });
   }
 
-  return nodes;
+  return result.length > 0 ? result : [node];
 }
