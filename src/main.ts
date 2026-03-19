@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { type Command, program } from "commander";
 import { setupAttachmentsCommands } from "./commands/attachments.js";
+import { setupBatchCommands } from "./commands/batch.js";
 import { setupCommentsCommands } from "./commands/comments.js";
 import { setupConfigCommands } from "./commands/config.js";
 import { setupCyclesCommands } from "./commands/cycles.js";
@@ -43,6 +44,7 @@ program.action(() => {
 });
 
 setupAttachmentsCommands(program);
+setupBatchCommands(program);
 setupSearchCommands(program);
 setupIssuesCommands(program);
 setupCommentsCommands(program);

@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { describe, expect, it } from "vitest";
 
 import { setupAttachmentsCommands } from "./attachments.js";
+import { setupBatchCommands } from "./batch.js";
 import { setupCommentsCommands } from "./comments.js";
 import { setupCyclesCommands } from "./cycles.js";
 import { setupDocumentsCommands } from "./documents.js";
@@ -20,6 +21,7 @@ function buildProgram(): Command {
   program.exitOverride();
 
   setupAttachmentsCommands(program);
+  setupBatchCommands(program);
   setupSearchCommands(program);
   setupIssuesCommands(program);
   setupCommentsCommands(program);
