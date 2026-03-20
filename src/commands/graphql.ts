@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import type { Command, OptionValues } from "commander";
 import { INTROSPECT_ROOT_QUERY, INTROSPECT_TYPE_QUERY } from "../queries/introspect.js";
@@ -37,25 +36,7 @@ async function executeQuery(
   const graphQLService = createGraphQLService(rootOpts);
   const result = await graphQLService.rawRequest(finalQuery, variables);
 
-  if (options.jq) {
-    const json = JSON.stringify(result);
-    // Normalize common shell-escape artifacts that Claude generates:
-    // \!= → != (zsh history expansion escaping leaks into jq filters)
-    const filter = options.jq.replace(/\\!/g, "!");
-    try {
-      const output = execFileSync("jq", ["-r", filter], {
-        input: json,
-        encoding: "utf8",
-        maxBuffer: 10 * 1024 * 1024,
-      });
-      process.stdout.write(output);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(`jq filter failed: ${msg}`);
-    }
-  } else {
-    outputSuccess(result);
-  }
+  outputSuccess(result);
 }
 
 export function setupGraphQLCommands(program: Command): void {
@@ -65,7 +46,6 @@ export function setupGraphQLCommands(program: Command): void {
     .description("Execute a raw GraphQL query against the Linear API.")
     .option("--file <path>", "read query from a file")
     .option("--variables <json>", "JSON string of variables")
-    .option("--jq <filter>", "apply a jq filter to the output (avoids shell escaping issues)")
     .action(handleAsyncCommand(executeQuery));
 
   // Separate introspect command

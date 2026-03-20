@@ -1,10 +1,16 @@
+import { execFileSync } from "node:child_process";
 import { logger } from "./logger.js";
 
 const warningBuffer: string[] = [];
 let rawMode = false;
+let jqFilter: string | null = null;
 
 export function setRawMode(enabled: boolean): void {
   rawMode = enabled;
+}
+
+export function setJqFilter(filter: string | null): void {
+  jqFilter = filter;
 }
 
 export function outputSuccess(data: unknown): void {
@@ -22,7 +28,24 @@ export function outputSuccess(data: unknown): void {
       output = obj.data;
     }
   }
-  logger.info(JSON.stringify(output, null, 2));
+  if (jqFilter) {
+    const json = JSON.stringify(output);
+    // Normalize common shell-escape artifacts (zsh history expansion)
+    const filter = jqFilter.replace(/\\!/g, "!");
+    try {
+      const result = execFileSync("jq", ["-r", filter], {
+        input: json,
+        encoding: "utf8",
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      process.stdout.write(result);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`jq filter failed: ${msg}`);
+    }
+  } else {
+    logger.info(JSON.stringify(output, null, 2));
+  }
 }
 
 export function outputWarning(message: string | string[], _type?: string): void {
