@@ -59,6 +59,37 @@ export const GET_PROJECT_TEAM_ISSUES_QUERY = `
   }
 `;
 
+export const SEARCH_PROJECTS_BY_NAME_QUERY = `
+  query SearchProjectsByName($name: String!) {
+    projects(filter: { name: { containsIgnoreCase: $name } }, first: 10) {
+      nodes {
+        id
+        name
+        state
+        teams {
+          nodes { id key name }
+        }
+      }
+    }
+  }
+`;
+
+export const CREATE_PROJECT_MUTATION = `
+  mutation CreateProject($input: ProjectCreateInput!) {
+    projectCreate(input: $input) {
+      success
+      project {
+        id
+        name
+        state
+        teams {
+          nodes { id key name }
+        }
+      }
+    }
+  }
+`;
+
 export const UPDATE_PROJECT_MUTATION = `
   mutation UpdateProject($id: String!, $input: ProjectUpdateInput!) {
     projectUpdate(id: $id, input: $input) {
