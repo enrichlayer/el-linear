@@ -38,7 +38,7 @@
     "directory": "el-linear"
   },
   "dependencies": {
-    "@linear/sdk": "^77.0.0",
+    "@linear/sdk": "^78.0.0",
     "commander": "^14.0.0",
     "picocolors": "^1.1.1"
   },

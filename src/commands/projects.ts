@@ -1,9 +1,11 @@
 import type { Command, OptionValues } from "commander";
 import { resolveTeam } from "../config/resolver.js";
 import {
+  CREATE_PROJECT_MUTATION,
   GET_PROJECT_QUERY,
   GET_PROJECT_TEAM_ISSUES_QUERY,
   PROJECT_BY_ID_QUERY,
+  SEARCH_PROJECTS_BY_NAME_QUERY,
   UPDATE_PROJECT_MUTATION,
 } from "../queries/projects.js";
 import type { GraphQLResponseData } from "../types/linear.js";
@@ -289,9 +291,89 @@ async function handleRemoveTeam(
   });
 }
 
+async function handleCreateProject(
+  name: string,
+  options: OptionValues,
+  command: Command,
+): Promise<void> {
+  const rootOpts = command.parent!.parent!.opts();
+  const graphQLService = createGraphQLService(rootOpts);
+
+  // Step 1: Check for duplicate projects (case-insensitive)
+  const searchResult = await graphQLService.rawRequest(SEARCH_PROJECTS_BY_NAME_QUERY, { name });
+  const existing = (
+    (searchResult.projects as GraphQLResponseData)?.nodes as GraphQLResponseData[] ?? []
+  ).filter((p: GraphQLResponseData) =>
+    (p.name as string).toLowerCase() === name.toLowerCase(),
+  );
+
+  if (existing.length > 0 && !options.force) {
+    const match = existing[0];
+    const teams = ((match.teams as GraphQLResponseData)?.nodes as GraphQLResponseData[] ?? [])
+      .map((t: GraphQLResponseData) => t.key)
+      .join(", ");
+    throw new Error(
+      `Project "${match.name}" already exists (state: ${match.state}, teams: ${teams}). ` +
+      `Use --force to create anyway, or use the existing project.`,
+    );
+  }
+
+  // Step 2: Resolve team IDs
+  const service = createLinearService(rootOpts);
+  const teamKeys = options.team ? splitList(options.team) : [];
+  const teamIds: string[] = [];
+  for (const key of teamKeys) {
+    teamIds.push(await service.resolveTeamId(resolveTeam(key)));
+  }
+
+  // Step 3: Create the project
+  const input: Record<string, unknown> = {
+    name,
+    ...(options.description ? { description: options.description } : {}),
+    ...(teamIds.length > 0 ? { teamIds } : {}),
+  };
+
+  const createResult = await graphQLService.rawRequest(CREATE_PROJECT_MUTATION, { input });
+  const created = createResult.projectCreate as GraphQLResponseData;
+  if (!created?.success) {
+    throw new Error("Failed to create project");
+  }
+
+  const project = created.project as GraphQLResponseData;
+
+  // Step 4: Set content if provided (separate mutation — Linear API quirk)
+  if (options.content) {
+    await graphQLService.rawRequest(UPDATE_PROJECT_MUTATION, {
+      id: project.id,
+      input: { content: options.content },
+    });
+  }
+
+  const teamList = ((project.teams as GraphQLResponseData)?.nodes as GraphQLResponseData[] ?? [])
+    .map((t: GraphQLResponseData) => t.key)
+    .join(", ");
+
+  outputSuccess({
+    id: project.id,
+    name: project.name,
+    state: project.state ?? "planned",
+    teams: teamList,
+    ...(existing.length > 0 ? { _warnings: [`Created despite existing project "${existing[0].name}" (--force used)`] } : {}),
+  });
+}
+
 export function setupProjectsCommands(program: Command): void {
   const projects = program.command("projects").alias("project").description("Project operations");
   projects.action(() => projects.help());
+
+  projects
+    .command("create <name>")
+    .description("Create a project (checks for duplicates first)")
+    .option("--team <teams>", "comma-separated team keys (e.g., FE,DEV)")
+    .option("-d, --description <text>", "short summary (max 255 chars, shown in lists)")
+    .option("--content <markdown>", "full markdown body (shown in project panel)")
+    .option("--force", "create even if a project with the same name exists")
+    .action(handleAsyncCommand(handleCreateProject));
 
   projects
     .command("list")
