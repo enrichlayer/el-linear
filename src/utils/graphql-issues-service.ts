@@ -1,4 +1,5 @@
 import { resolveUserDisplayName } from "../config/resolver.js";
+import { CREATE_LABEL_MUTATION } from "../queries/labels.js";
 import {
   BATCH_RESOLVE_FOR_CREATE_QUERY,
   BATCH_RESOLVE_FOR_SEARCH_QUERY,
@@ -102,7 +103,7 @@ export class GraphQLIssuesService {
       teamIdForLabels = await this.fetchIssueTeamId(resolvedIssueId);
     }
 
-    const finalLabelIds = this.resolveLabelsWithMode(
+    const finalLabelIds = await this.resolveLabelsWithMode(
       args.labelIds as string[] | undefined,
       resolveResult,
       labelMode,
@@ -259,7 +260,7 @@ export class GraphQLIssuesService {
       teamId = this.validateProjectTeam(teamId as string, args.projectId as string, resolveResult);
     }
 
-    const labelIds = this.resolveLabels(
+    const labelIds = await this.resolveLabels(
       args.labelIds as string[] | undefined,
       resolveResult,
       teamId as string | undefined,
@@ -466,23 +467,23 @@ export class GraphQLIssuesService {
     );
   }
 
-  private resolveLabels(
+  private async resolveLabels(
     labelIds: string[] | undefined,
     resolveResult: GraphQLResponseData,
     teamId?: string,
     teamInput?: string,
-  ): string[] | undefined {
+  ): Promise<string[] | undefined> {
     return this.resolveLabelsWithMode(labelIds, resolveResult, "overwriting", [], teamId, teamInput);
   }
 
-  private resolveLabelsWithMode(
+  private async resolveLabelsWithMode(
     labelIds: string[] | undefined,
     resolveResult: GraphQLResponseData,
     labelMode: string,
     currentIssueLabels: string[],
     teamId?: string,
     teamInput?: string,
-  ): string[] | undefined {
+  ): Promise<string[] | undefined> {
     if (!(labelIds && Array.isArray(labelIds))) {
       return labelIds;
     }
@@ -508,6 +509,12 @@ export class GraphQLIssuesService {
           label = candidates?.[0];
         }
         if (!label) {
+          // Auto-create the missing label on the team
+          const created = await this.autoCreateLabel(labelIdOrName, teamId);
+          if (created) {
+            resolvedLabels.push(created);
+            continue;
+          }
           const teamKey = this.resolveTeamKeyFromResult(resolveResult, teamId, teamInput);
           const hint = teamKey
             ? `— check available labels with: el-linear labels list --team ${teamKey}`
@@ -528,6 +535,28 @@ export class GraphQLIssuesService {
       return [...new Set([...currentIssueLabels, ...resolvedLabels])];
     }
     return resolvedLabels;
+  }
+
+  /** Auto-create a missing label on the team. Returns the new label ID or null on failure. */
+  private async autoCreateLabel(name: string, teamId?: string): Promise<string | null> {
+    try {
+      const input: Record<string, string> = { name };
+      if (teamId) {
+        input.teamId = teamId;
+      }
+      const result = await this.graphQLService.rawRequest(CREATE_LABEL_MUTATION, { input });
+      const created = (result as GraphQLResponseData).issueLabelCreate as GraphQLResponseData | undefined;
+      if (created?.success && created.issueLabel) {
+        const labelData = created.issueLabel as GraphQLResponseData;
+        const teamInfo = labelData.team as GraphQLResponseData | undefined;
+        const teamKey = teamInfo?.key ?? "";
+        process.stderr.write(`Auto-created label "${name}" on team ${teamKey}\n`);
+        return labelData.id as string;
+      }
+      return null;
+    } catch {
+      return null;
+    }
   }
 
   private resolveTeamKeyFromResult(
