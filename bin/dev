@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Dev runner — runs from TypeScript source via tsx (no build needed)
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+exec "$SCRIPT_DIR/node_modules/.bin/tsx" "$SCRIPT_DIR/src/main.ts" "$@"
