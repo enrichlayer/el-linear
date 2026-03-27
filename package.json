@@ -1,5 +1,5 @@
 {
-  "name": "el-linear",
+  "name": "@enrichlayer/el-linear",
   "version": "1.0.0",
   "description": "Enrich Layer CLI for Linear.app — deterministic team/label/member resolution, brand validation, and status defaults.",
   "main": "dist/main.js",
@@ -35,7 +35,10 @@
   "repository": {
     "type": "git",
     "url": "https://gitlab.com/vertical-int/tools.git",
-    "directory": "el-linear"
+    "directory": "cli/el-linear"
+  },
+  "publishConfig": {
+    "@enrichlayer:registry": "https://gitlab.com/api/v4/projects/vertical-int%2Ftools/packages/npm/"
   },
   "dependencies": {
     "@linear/sdk": "^78.0.0",
