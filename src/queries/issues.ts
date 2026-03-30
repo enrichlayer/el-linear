@@ -349,6 +349,46 @@ export const ISSUE_RELATION_CREATE_MUTATION = `
   }
 `;
 
+export const GET_ISSUE_RELATIONS_QUERY = `
+  query GetIssueRelations($id: String!) {
+    issue(id: $id) {
+      id
+      identifier
+      title
+      relations {
+        nodes {
+          id
+          type
+          relatedIssue {
+            id
+            identifier
+            title
+            state { id name }
+            priority
+            assignee { id name }
+            team { id key name }
+          }
+        }
+      }
+      inverseRelations {
+        nodes {
+          id
+          type
+          issue {
+            id
+            identifier
+            title
+            state { id name }
+            priority
+            assignee { id name }
+            team { id key name }
+          }
+        }
+      }
+    }
+  }
+`;
+
 export const SCAN_ISSUES_QUERY = `
   query ScanIssues($filter: IssueFilter, $first: Int) {
     issues(filter: $filter, first: $first, orderBy: updatedAt) {

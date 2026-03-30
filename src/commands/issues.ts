@@ -6,6 +6,7 @@ import { loadConfig } from "../config/config.js";
 import { resolveAssignee, resolveLabels, resolveMember, resolveTeam } from "../config/resolver.js";
 import { resolveDefaultStatus } from "../config/status-defaults.js";
 import {
+  GET_ISSUE_RELATIONS_QUERY,
   GET_ISSUE_STATE_HISTORY_QUERY,
   ISSUE_RELATION_CREATE_MUTATION,
 } from "../queries/issues.js";
@@ -560,6 +561,111 @@ async function handleRelateIssue(
   });
 }
 
+interface RelatedIssueEntry {
+  id: string;
+  type: string;
+  direction: "outgoing" | "incoming";
+  issue: {
+    id: string;
+    identifier: string;
+    title: string;
+    state?: { id: string; name: string };
+    priority?: number;
+    assignee?: { id: string; name: string };
+    team?: { id: string; key: string; name: string };
+  };
+}
+
+/**
+ * Invert relation type for incoming (inverse) relations so the output
+ * reads naturally from the perspective of the queried issue.
+ * e.g. if DEV-100 "blocks" DEV-200, and we query DEV-200,
+ * the inverse relation type is "blocks" but direction is incoming → "blockedBy".
+ */
+function normalizeInverseType(type: string): string {
+  if (type === "blocks") return "blockedBy";
+  return type;
+}
+
+async function handleRelatedIssues(
+  issueId: string,
+  _options: OptionValues,
+  command: Command,
+): Promise<void> {
+  const rootOpts = command.parent!.parent!.opts();
+  const graphQLService = createGraphQLService(rootOpts);
+  const linearService = createLinearService(rootOpts);
+
+  const resolvedId = await linearService.resolveIssueId(issueId);
+  const result = await graphQLService.rawRequest(GET_ISSUE_RELATIONS_QUERY, {
+    id: resolvedId,
+  });
+
+  if (!result.issue) {
+    throw new Error(`Issue "${issueId}" not found`);
+  }
+
+  const issue = result.issue as GraphQLResponseData;
+  const relations = issue.relations as GraphQLResponseData | undefined;
+  const inverseRelations = issue.inverseRelations as GraphQLResponseData | undefined;
+
+  const entries: RelatedIssueEntry[] = [];
+
+  // Outgoing relations: this issue → relatedIssue
+  const outgoing = (relations?.nodes as GraphQLResponseData[] | undefined) ?? [];
+  for (const rel of outgoing) {
+    const relatedIssue = rel.relatedIssue as GraphQLResponseData;
+    const state = relatedIssue.state as GraphQLResponseData | undefined;
+    const assignee = relatedIssue.assignee as GraphQLResponseData | undefined;
+    const team = relatedIssue.team as GraphQLResponseData | undefined;
+    entries.push({
+      id: rel.id as string,
+      type: rel.type as string,
+      direction: "outgoing",
+      issue: {
+        id: relatedIssue.id as string,
+        identifier: relatedIssue.identifier as string,
+        title: relatedIssue.title as string,
+        ...(state ? { state: { id: state.id as string, name: state.name as string } } : {}),
+        ...(relatedIssue.priority != null ? { priority: relatedIssue.priority as number } : {}),
+        ...(assignee ? { assignee: { id: assignee.id as string, name: assignee.name as string } } : {}),
+        ...(team ? { team: { id: team.id as string, key: team.key as string, name: team.name as string } } : {}),
+      },
+    });
+  }
+
+  // Incoming (inverse) relations: other issue → this issue
+  const incoming = (inverseRelations?.nodes as GraphQLResponseData[] | undefined) ?? [];
+  for (const rel of incoming) {
+    const sourceIssue = rel.issue as GraphQLResponseData;
+    const state = sourceIssue.state as GraphQLResponseData | undefined;
+    const assignee = sourceIssue.assignee as GraphQLResponseData | undefined;
+    const team = sourceIssue.team as GraphQLResponseData | undefined;
+    entries.push({
+      id: rel.id as string,
+      type: normalizeInverseType(rel.type as string),
+      direction: "incoming",
+      issue: {
+        id: sourceIssue.id as string,
+        identifier: sourceIssue.identifier as string,
+        title: sourceIssue.title as string,
+        ...(state ? { state: { id: state.id as string, name: state.name as string } } : {}),
+        ...(sourceIssue.priority != null ? { priority: sourceIssue.priority as number } : {}),
+        ...(assignee ? { assignee: { id: assignee.id as string, name: assignee.name as string } } : {}),
+        ...(team ? { team: { id: team.id as string, key: team.key as string, name: team.name as string } } : {}),
+      },
+    });
+  }
+
+  outputSuccess({
+    id: issue.id as string,
+    identifier: issue.identifier as string,
+    title: issue.title as string,
+    data: entries,
+    meta: { count: entries.length },
+  });
+}
+
 async function handleReadIssue(
   issueIds: string[],
   _options: OptionValues,
@@ -858,6 +964,13 @@ export function setupIssuesCommands(program: Command): void {
     .option("--blocked-by <issues>", "issues blocking this (comma-separated)")
     .option("--duplicate-of <issue>", "mark as duplicate of another issue")
     .action(handleAsyncCommand(handleRelateIssue));
+
+  issues
+    .command("related <issueId>")
+    .alias("relations")
+    .description("List all relations for an issue (related, blocks, blockedBy, duplicate).")
+    .addHelpText("after", "\nBoth UUID and identifiers like ABC-123 are supported.")
+    .action(handleAsyncCommand(handleRelatedIssues));
 
   issues
     .command("retrolink")
