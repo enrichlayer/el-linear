@@ -29,6 +29,7 @@ import {
   FILTERED_SEARCH_ISSUES_QUERY,
   GET_ISSUE_BY_ID_QUERY,
   GET_ISSUE_BY_IDENTIFIER_QUERY,
+  GET_ISSUE_RELATIONS_QUERY,
   GET_ISSUE_STATE_HISTORY_QUERY,
   GET_ISSUE_TEAM_QUERY,
   GET_ISSUES_QUERY,
@@ -82,6 +83,7 @@ const CONNECTION_FIELDS = new Set([
   "comments",
   "cycles",
   "documents",
+  "inverseRelations",
   "issueLabels",
   "issues",
   "labels",
@@ -89,6 +91,7 @@ const CONNECTION_FIELDS = new Set([
   "parentIssues",
   "projectMilestones",
   "projects",
+  "relations",
   "releases",
   "releasePipelines",
   "searchIssues",
@@ -138,6 +141,7 @@ const ALL_QUERIES: [string, string][] = [
   ["CREATE_ISSUE_MUTATION", CREATE_ISSUE_MUTATION],
   ["UPDATE_ISSUE_MUTATION", UPDATE_ISSUE_MUTATION],
   ["BATCH_RESOLVE_FOR_CREATE_QUERY", BATCH_RESOLVE_FOR_CREATE_QUERY],
+  ["GET_ISSUE_RELATIONS_QUERY", GET_ISSUE_RELATIONS_QUERY],
   ["GET_ISSUE_STATE_HISTORY_QUERY", GET_ISSUE_STATE_HISTORY_QUERY],
   ["GET_ISSUE_TEAM_QUERY", GET_ISSUE_TEAM_QUERY],
   ["ISSUE_RELATION_CREATE_MUTATION", ISSUE_RELATION_CREATE_MUTATION],
@@ -471,6 +475,13 @@ describe("issues.ts — queries and mutations", () => {
       expect(getOperationType(mutation)).toBe("mutation");
       expect(containsField(mutation, "success")).toBe(true);
     }
+  });
+
+  it("GET_ISSUE_RELATIONS_QUERY fetches both relations and inverseRelations", () => {
+    expect(extractVariables(GET_ISSUE_RELATIONS_QUERY)).toContain("id");
+    expect(containsField(GET_ISSUE_RELATIONS_QUERY, "relations")).toBe(true);
+    expect(containsField(GET_ISSUE_RELATIONS_QUERY, "inverseRelations")).toBe(true);
+    expect(containsField(GET_ISSUE_RELATIONS_QUERY, "relatedIssue")).toBe(true);
   });
 
   it("ISSUE_RELATION_CREATE_MUTATION returns both sides of the relation", () => {
