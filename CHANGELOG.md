@@ -1,5 +1,11 @@
 # @enrichlayer/el-linear
 
+## 1.0.4 (2026-04-07)
+
+### Other
+- DEV-3708: Add config-gated issue creation validation to el-linear CLI (e602f83)
+
+
 ## 1.0.3 (2026-03-30)
 
 ### Other
