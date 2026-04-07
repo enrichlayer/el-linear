@@ -26,6 +26,10 @@ interface ElLinearConfig {
   };
   teamAliases: Record<string, string>;
   teams: Record<string, string>;
+  validation?: {
+    enabled: boolean;
+    typeLabels?: string[];
+  };
 }
 
 const CONFIG_PATH = path.join(os.homedir(), ".config", "el-linear", "config.json");

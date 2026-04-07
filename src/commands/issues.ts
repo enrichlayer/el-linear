@@ -3,6 +3,7 @@ import fs from "node:fs";
 import type { Command, OptionValues } from "commander";
 import { enforceBrandName } from "../config/brand-validator.js";
 import { loadConfig } from "../config/config.js";
+import { enforceValidation, validateIssueCreation } from "../config/issue-validation.js";
 import { resolveAssignee, resolveLabels, resolveMember, resolveTeam } from "../config/resolver.js";
 import { resolveDefaultStatus } from "../config/status-defaults.js";
 import {
@@ -331,6 +332,26 @@ async function resolveCreateInputs(
 }> {
   const config = loadConfig();
   enforceBrandName(title, options.description, options.strict);
+
+  // --- Phase 1 validation (DEV-3708) ---
+  // Runs when config.validation.enabled is true.
+  // Bypassed by --no-validate flag.
+  if (!options.skipValidation) {
+    const rawLabels = options.labels ? splitList(options.labels) : null;
+    const description = resolveDescription(options);
+    const validationResult = validateIssueCreation({
+      labels: rawLabels,
+      description: description || undefined,
+      title,
+    });
+
+    // Apply normalized labels back so resolution uses the canonical names
+    if (validationResult.normalizedLabels) {
+      options.labels = validationResult.normalizedLabels.join(",");
+    }
+
+    enforceValidation(validationResult);
+  }
 
   const missingFields: string[] = [];
   if (!options.assignee) {
@@ -887,6 +908,7 @@ export function setupIssuesCommands(program: Command): void {
     )
     .option("--due-date <date>", "due date (YYYY-MM-DD)")
     .option("--checkout", "create and checkout a git branch named after the issue")
+    .option("--skip-validation", "skip all content validation (labels, description, title checks)")
     .action(
       handleAsyncCommand(
         (titleArg: string | undefined, options: OptionValues, command: Command) => {
