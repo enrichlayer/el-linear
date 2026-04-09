@@ -27,7 +27,6 @@ const LABEL_ALIASES: Record<string, string> = {
   "feature-request": "feature",
   "bug-report": "bug",
   enhancement: "feature",
-  research: "spike",
 };
 
 export interface ValidationResult {
@@ -89,7 +88,13 @@ export function validateIssueCreation(input: ValidationInput): ValidationResult 
 
   // --- Label normalization (always runs when validation is on) ---
   if (input.labels && input.labels.length > 0) {
-    result.normalizedLabels = input.labels.map(normalizeLabel);
+    result.normalizedLabels = input.labels.map((label) => {
+      const normalized = normalizeLabel(label);
+      if (normalized !== label) {
+        result.warnings.push(`Label "${label}" normalized to "${normalized}" (alias)`);
+      }
+      return normalized;
+    });
   }
 
   const effectiveLabels = result.normalizedLabels ?? input.labels ?? [];

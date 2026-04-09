@@ -34,7 +34,10 @@ describe("normalizeLabel", () => {
     expect(normalizeLabel("feature-request")).toBe("feature");
     expect(normalizeLabel("bug-report")).toBe("bug");
     expect(normalizeLabel("enhancement")).toBe("feature");
-    expect(normalizeLabel("research")).toBe("spike");
+  });
+
+  it("does not alias 'research' to 'spike'", () => {
+    expect(normalizeLabel("research")).toBe("research");
   });
 
   it("passes through unknown labels unchanged", () => {
@@ -203,6 +206,18 @@ describe("validateIssueCreation", () => {
 
       expect(result.normalizedLabels).toEqual(["feature", "backend"]);
       expect(result.errors).toHaveLength(0);
+    });
+
+    it("warns when a label is aliased", () => {
+      const result = validateIssueCreation({
+        labels: ["feature-request", "frontend"],
+        description:
+          "## Why we need this\n\nDescription that is long enough to pass the checks.",
+        title: "Add new feature",
+      });
+
+      expect(result.normalizedLabels).toEqual(["feature", "frontend"]);
+      expect(result.warnings.some((w) => w.includes('"feature-request" normalized to "feature"'))).toBe(true);
     });
 
     it("normalizes feature-request to feature", () => {
