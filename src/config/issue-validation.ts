@@ -15,6 +15,26 @@ import { loadConfig } from "./config.js";
 const DEFAULT_TYPE_LABELS = ["bug", "feature", "refactor", "chore", "spike"];
 
 /**
+ * Recommended leading verbs for each type label.
+ * Title verb and type label should express the same intent.
+ */
+const TYPE_VERB_MAP: Record<string, string[]> = {
+  bug: ["Fix", "Resolve", "Patch", "Handle", "Address", "Correct"],
+  feature: [
+    "Add", "Build", "Create", "Implement", "Enable", "Ship", "Launch",
+    "Design", "Wire", "Integrate", "Expose", "Send", "Track", "Alert",
+    "Automate", "Post",
+  ],
+  chore: [
+    "Update", "Remove", "Clean", "Migrate", "Deploy", "Rotate", "Set up",
+    "Configure", "Document", "Review", "Publish", "Standardize", "Accept",
+    "Consolidate", "Teardown", "Upgrade",
+  ],
+  spike: ["Research", "Investigate", "Explore", "Evaluate", "Audit", "Benchmark", "Test"],
+  refactor: ["Refactor", "Restructure", "Extract", "Decouple", "Consolidate", "Simplify"],
+};
+
+/**
  * Common misspellings / wrong-case variants → canonical form.
  * Covers the real mistakes observed in production data.
  */
@@ -164,7 +184,77 @@ export function validateIssueCreation(input: ValidationInput): ValidationResult 
     result.warnings.push("Consider starting the title with an action verb instead of an article.");
   }
 
+  // --- Warning: title-verb / type-label alignment ---
+  const typeLabelsFound = effectiveLabels.filter((l) =>
+    vConfig.typeLabels.includes(l.toLowerCase()),
+  );
+  if (typeLabelsFound.length === 1) {
+    checkTitleVerbAlignment(input.title, typeLabelsFound[0].toLowerCase(), result);
+  }
+
   return result;
+}
+
+/**
+ * Check whether the title's leading verb aligns with the provided type label.
+ * Only warns when the first word is a recognized verb in any type's set —
+ * titles starting with non-verb words (e.g. "Dashboard auth failing") are left alone.
+ */
+function checkTitleVerbAlignment(
+  title: string,
+  typeLabel: string,
+  result: ValidationResult,
+): void {
+  const verbs = TYPE_VERB_MAP[typeLabel];
+  if (!verbs) return;
+
+  // Check multi-word verbs first (e.g. "Set up")
+  for (const [type, typeVerbs] of Object.entries(TYPE_VERB_MAP)) {
+    for (const verb of typeVerbs) {
+      if (!verb.includes(" ")) continue;
+      if (title.toLowerCase().startsWith(verb.toLowerCase() + " ") ||
+          title.toLowerCase() === verb.toLowerCase()) {
+        if (type === typeLabel) return; // match — all good
+        result.warnings.push(
+          `Title starts with "${verb}" but type is "${typeLabel}". ` +
+            `Consider starting with: ${verbs.slice(0, 6).join(", ")}`,
+        );
+        result.warnings.push(
+          `"${verb}" is typically associated with "${type}" issues.`,
+        );
+        return;
+      }
+    }
+  }
+
+  // Single-word verb check
+  const firstWord = title.split(/\s/)[0];
+  if (!firstWord) return;
+
+  // Is the first word in the correct type's verb set?
+  const matchesType = verbs.some((v) => v.toLowerCase() === firstWord.toLowerCase());
+  if (matchesType) return; // match — all good
+
+  // Is the first word in any OTHER type's verb set?
+  let matchedOtherType: string | null = null;
+  for (const [type, typeVerbs] of Object.entries(TYPE_VERB_MAP)) {
+    if (type === typeLabel) continue;
+    if (typeVerbs.some((v) => v.toLowerCase() === firstWord.toLowerCase())) {
+      matchedOtherType = type;
+      break;
+    }
+  }
+
+  // Only warn if the first word IS a recognized verb (just for the wrong type)
+  if (matchedOtherType) {
+    result.warnings.push(
+      `Title starts with "${firstWord}" but type is "${typeLabel}". ` +
+        `Consider starting with: ${verbs.slice(0, 6).join(", ")}`,
+    );
+    result.warnings.push(
+      `"${firstWord}" is typically associated with "${matchedOtherType}" issues.`,
+    );
+  }
 }
 
 /**
