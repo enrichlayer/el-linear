@@ -317,3 +317,72 @@ describe("enforceValidation", () => {
 
 // Need afterEach import at module level for the nested describe
 const { afterEach } = await import("vitest");
+
+describe("title-verb / type-label alignment", () => {
+  const base = { description: "A valid description with enough context for testing." };
+
+  it("no warning when title verb matches type", () => {
+    const cases: [string, string][] = [
+      ["Fix auth token refresh", "bug"],
+      ["Add webhook support", "feature"],
+      ["Update .env.example", "chore"],
+      ["Research vector embeddings", "spike"],
+      ["Refactor data layer", "refactor"],
+    ];
+    for (const [title, type] of cases) {
+      const r = validateIssueCreation({ ...base, title, labels: [type, "backend"] });
+      const verbWarnings = r.warnings.filter((w) => w.includes("but type is"));
+      expect(verbWarnings, `Expected no verb warning for "${title}" with type "${type}"`).toHaveLength(0);
+    }
+  });
+
+  it("warns when title verb mismatches type", () => {
+    const r = validateIssueCreation({ ...base, title: "Build new dashboard", labels: ["bug", "frontend"] });
+    expect(r.warnings.some((w) => w.includes('starts with "Build" but type is "bug"'))).toBe(true);
+  });
+
+  it("hints at the correct type for the verb", () => {
+    const r = validateIssueCreation({ ...base, title: "Fix broken feature", labels: ["feature", "frontend"] });
+    expect(r.warnings.some((w) => w.includes('"Fix" is typically associated with "bug"'))).toBe(true);
+  });
+
+  it("no warning when title starts with non-verb word", () => {
+    const r = validateIssueCreation({ ...base, title: "Dashboard auth is broken", labels: ["bug", "frontend"] });
+    const verbWarnings = r.warnings.filter((w) => w.includes("but type is"));
+    expect(verbWarnings).toHaveLength(0);
+  });
+
+  it("matches case-insensitively", () => {
+    const r = validateIssueCreation({ ...base, title: "fix auth token", labels: ["bug", "backend"] });
+    const verbWarnings = r.warnings.filter((w) => w.includes("but type is"));
+    expect(verbWarnings).toHaveLength(0);
+  });
+
+  it("handles multi-word verb 'Set up'", () => {
+    const r = validateIssueCreation({ ...base, title: "Set up CI pipeline", labels: ["chore", "infrastructure"] });
+    const verbWarnings = r.warnings.filter((w) => w.includes("but type is"));
+    expect(verbWarnings).toHaveLength(0);
+  });
+
+  it("warns on multi-word verb mismatch", () => {
+    const r = validateIssueCreation({ ...base, title: "Set up CI pipeline", labels: ["bug", "infrastructure"] });
+    expect(r.warnings.some((w) => w.includes('"Set up" is typically associated with "chore"'))).toBe(true);
+  });
+
+  it("does not fire when no type label present", () => {
+    const r = validateIssueCreation({ ...base, title: "Fix something", labels: ["frontend"] });
+    const verbWarnings = r.warnings.filter((w) => w.includes("but type is"));
+    expect(verbWarnings).toHaveLength(0);
+  });
+
+  it("does not fire when multiple type labels present", () => {
+    const r = validateIssueCreation({ ...base, title: "Fix something", labels: ["bug", "feature"] });
+    const verbWarnings = r.warnings.filter((w) => w.includes("but type is"));
+    expect(verbWarnings).toHaveLength(0);
+  });
+
+  it("never produces errors, only warnings", () => {
+    const r = validateIssueCreation({ ...base, title: "Build something wrong", labels: ["bug", "backend"] });
+    expect(r.errors.filter((e) => e.includes("verb"))).toHaveLength(0);
+  });
+});
