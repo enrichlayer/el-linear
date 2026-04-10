@@ -1,5 +1,11 @@
 # @enrichlayer/el-linear
 
+## 1.0.5 (2026-04-09)
+
+### Other
+- INF-476: product-finalizer fixes — tests, env docs, catalog check (360c452)
+
+
 ## 1.0.4 (2026-04-07)
 
 ### Other
