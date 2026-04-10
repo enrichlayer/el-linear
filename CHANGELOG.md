@@ -1,5 +1,12 @@
 # @enrichlayer/el-linear
 
+## 1.0.6 (2026-04-10)
+
+### Other
+- Merge branch 'chore/release-20260409-081055' into 'main' (4a133e3)
+- DEV-3768: Fix silent label aliasing — remove research→spike, warn on alias (507239c)
+
+
 ## 1.0.5 (2026-04-09)
 
 ### Other
