@@ -179,12 +179,15 @@ describe("issues commands", () => {
   });
 
   describe("issues create", () => {
+    // Required fields for all create commands (assignee + project enforced)
+    const requiredArgs = ["--assignee", "dima", "--project", "Infrastructure"];
+
     it("creates issue with team resolved from option", async () => {
       mockCreateIssue.mockResolvedValue({ id: "new-issue-id", identifier: "DEV-999" });
 
       const program = createTestProgram();
       setupIssuesCommands(program);
-      await runCommand(program, ["issues", "create", "My Title", "--team", "DEV"]);
+      await runCommand(program, ["issues", "create", "My Title", "--team", "DEV", ...requiredArgs]);
 
       expect(mockResolveTeam).toHaveBeenCalledWith("DEV");
       expect(mockEnforceBrandName).toHaveBeenCalledWith("My Title", undefined, undefined);
@@ -210,6 +213,8 @@ describe("issues commands", () => {
         "DEV",
         "--assignee",
         "dima",
+        "--project",
+        "Infrastructure",
       ]);
 
       expect(mockResolveAssignee).toHaveBeenCalledWith("dima", expect.any(Object));
@@ -234,6 +239,7 @@ describe("issues commands", () => {
         "DEV",
         "--labels",
         "bug,feature",
+        ...requiredArgs,
       ]);
 
       expect(mockResolveLabels).toHaveBeenCalledWith(["bug", "feature"], "DEV");
@@ -269,6 +275,7 @@ describe("issues commands", () => {
         "See the bug below.",
         "--attachment",
         "/tmp/screenshot.png",
+        ...requiredArgs,
       ]);
 
       expect(mockUploadFile).toHaveBeenCalledWith("/tmp/screenshot.png");
@@ -312,6 +319,7 @@ describe("issues commands", () => {
         "See attached report.",
         "--attachment",
         "/tmp/report.pdf",
+        ...requiredArgs,
       ]);
 
       expect(mockCreateIssue).toHaveBeenCalledWith(
@@ -341,6 +349,7 @@ describe("issues commands", () => {
         "DEV",
         "--attachment",
         "/tmp/photo.jpg",
+        ...requiredArgs,
       ]);
 
       expect(mockCreateIssue).toHaveBeenCalledWith(
@@ -366,6 +375,7 @@ describe("issues commands", () => {
         "DEV",
         "--attachment",
         "/tmp/missing.png",
+        ...requiredArgs,
       ]);
 
       expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -381,7 +391,8 @@ describe("issues commands", () => {
 
       const program = createTestProgram();
       setupIssuesCommands(program);
-      await runCommand(program, ["issues", "create", "Task", "--team", "DEV"]);
+      // --skip-validation to bypass assignee/project enforcement (testing status resolution)
+      await runCommand(program, ["issues", "create", "Task", "--team", "DEV", "--skip-validation"]);
 
       expect(mockResolveDefaultStatus).toHaveBeenCalledWith(
         expect.objectContaining({

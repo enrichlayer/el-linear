@@ -353,19 +353,27 @@ async function resolveCreateInputs(
     enforceValidation(validationResult);
   }
 
-  const missingFields: string[] = [];
-  if (!options.assignee) {
-    missingFields.push("--assignee");
-  }
-  if (!options.project) {
-    missingFields.push("--project");
+  // --- Required fields: assignee and project ---
+  // Bypassed by --skip-validation (same escape hatch as content validation).
+  if (!options.skipValidation) {
+    if (!options.assignee) {
+      throw new Error(
+        "Missing --assignee. Every issue must have an assignee.\n" +
+        "  Use `el-linear users list --active` to find valid assignees.\n" +
+        "  Use --skip-validation to bypass this check.",
+      );
+    }
+    if (!options.project) {
+      throw new Error(
+        "Missing --project. Issues with an assignee must also have a project.\n" +
+        "  Use `el-linear projects list` to find valid projects.\n" +
+        "  Use --skip-validation to bypass this check.",
+      );
+    }
   }
   if (!options.priority) {
-    missingFields.push("--priority");
-  }
-  if (missingFields.length > 0) {
     outputWarning(
-      `Creating issue without ${missingFields.join(", ")}. Consider specifying ${missingFields.length === 1 ? "it" : "them"} for better triage.`,
+      "Creating issue without --priority. Consider specifying it for better triage.",
       "missing_fields",
     );
   }
@@ -908,7 +916,7 @@ export function setupIssuesCommands(program: Command): void {
     )
     .option("--due-date <date>", "due date (YYYY-MM-DD)")
     .option("--checkout", "create and checkout a git branch named after the issue")
-    .option("--skip-validation", "skip all content validation (labels, description, title checks)")
+    .option("--skip-validation", "skip all validation (labels, description, assignee, project)")
     .action(
       handleAsyncCommand(
         (titleArg: string | undefined, options: OptionValues, command: Command) => {
