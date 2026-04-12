@@ -19,7 +19,8 @@ import { setupSearchCommands } from "./commands/search.js";
 import { setupTeamsCommands } from "./commands/teams.js";
 import { setupTemplatesCommands } from "./commands/templates.js";
 import { setupUsersCommands } from "./commands/users.js";
-import { setJqFilter, setRawMode } from "./utils/output.js";
+import { setFieldsFilter, setJqFilter, setRawMode } from "./utils/output.js";
+import { splitList } from "./utils/validators.js";
 import { outputUsageInfo } from "./utils/usage.js";
 
 program
@@ -31,7 +32,8 @@ program
   .option("--api-token <token>", "Linear API token")
   .option("--json", "output as JSON (default, accepted for compatibility)")
   .option("--raw", "strip { data, meta } wrapper from list output — emit the array directly")
-  .option("--jq <filter>", "apply a jq filter to the JSON output");
+  .option("--jq <filter>", "apply a jq filter to the JSON output")
+  .option("--fields <fields>", "filter output to specific fields (comma-separated)");
 
 program.hook("preAction", (_thisCommand: Command, actionCommand: Command) => {
   const rootOpts = actionCommand.optsWithGlobals();
@@ -40,6 +42,9 @@ program.hook("preAction", (_thisCommand: Command, actionCommand: Command) => {
   }
   if (rootOpts.jq) {
     setJqFilter(rootOpts.jq);
+  }
+  if (rootOpts.fields) {
+    setFieldsFilter(splitList(rootOpts.fields));
   }
 });
 

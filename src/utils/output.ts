@@ -4,6 +4,7 @@ import { logger } from "./logger.js";
 const warningBuffer: string[] = [];
 let rawMode = false;
 let jqFilter: string | null = null;
+let fieldsFilter: string[] | null = null;
 
 export function setRawMode(enabled: boolean): void {
   rawMode = enabled;
@@ -11,6 +12,27 @@ export function setRawMode(enabled: boolean): void {
 
 export function setJqFilter(filter: string | null): void {
   jqFilter = filter;
+}
+
+export function setFieldsFilter(fields: string[] | null): void {
+  fieldsFilter = fields;
+}
+
+function filterFields(obj: unknown, fields: string[]): unknown {
+  if (Array.isArray(obj)) {
+    return obj.map((item) => filterFields(item, fields));
+  }
+  if (obj !== null && typeof obj === "object") {
+    const source = obj as Record<string, unknown>;
+    const result: Record<string, unknown> = {};
+    for (const field of fields) {
+      if (field in source) {
+        result[field] = source[field];
+      }
+    }
+    return result;
+  }
+  return obj;
 }
 
 export function outputSuccess(data: unknown): void {
@@ -26,6 +48,19 @@ export function outputSuccess(data: unknown): void {
     const obj = output as Record<string, unknown>;
     if (Array.isArray(obj.data)) {
       output = obj.data;
+    }
+  }
+  // --fields: filter object keys (applies to array items or flat objects)
+  if (fieldsFilter) {
+    if (Array.isArray(output)) {
+      output = filterFields(output, fieldsFilter);
+    } else if (output !== null && typeof output === "object") {
+      const obj = output as Record<string, unknown>;
+      if (Array.isArray(obj.data)) {
+        output = { ...obj, data: filterFields(obj.data, fieldsFilter) };
+      } else {
+        output = filterFields(output, fieldsFilter);
+      }
     }
   }
   if (jqFilter) {
