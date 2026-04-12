@@ -4,6 +4,7 @@ import {
   outputSuccess,
   outputWarning,
   resetWarnings,
+  setFieldsFilter,
   setRawMode,
 } from "./output.js";
 
@@ -163,6 +164,98 @@ describe("--raw mode", () => {
     const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
     // raw mode unwraps after warnings are embedded, so the array has no warnings
     expect(Array.isArray(parsed)).toBe(true);
+  });
+});
+
+describe("--fields filter", () => {
+  let stdoutSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    resetWarnings();
+    setRawMode(false);
+    setFieldsFilter(null);
+    stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+  });
+
+  afterEach(() => {
+    setFieldsFilter(null);
+    setRawMode(false);
+    stdoutSpy.mockRestore();
+  });
+
+  it("filters fields on a flat object", () => {
+    setFieldsFilter(["identifier", "title"]);
+    outputSuccess({ identifier: "DEV-1", title: "Fix bug", priority: 2, state: { name: "Done" } });
+    const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+    expect(parsed).toEqual({ identifier: "DEV-1", title: "Fix bug" });
+  });
+
+  it("filters fields on items inside { data: [...] } wrapper", () => {
+    setFieldsFilter(["identifier", "title"]);
+    outputSuccess({
+      data: [
+        { identifier: "DEV-1", title: "First", priority: 2 },
+        { identifier: "DEV-2", title: "Second", priority: 1 },
+      ],
+      meta: { count: 2 },
+    });
+    const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+    expect(parsed.data).toEqual([
+      { identifier: "DEV-1", title: "First" },
+      { identifier: "DEV-2", title: "Second" },
+    ]);
+    expect(parsed.meta).toEqual({ count: 2 });
+  });
+
+  it("composes with --raw: filters the unwrapped array items", () => {
+    setRawMode(true);
+    setFieldsFilter(["identifier", "title"]);
+    outputSuccess({
+      data: [
+        { identifier: "DEV-1", title: "First", priority: 2 },
+        { identifier: "DEV-2", title: "Second", priority: 1 },
+      ],
+      meta: { count: 2 },
+    });
+    const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+    expect(parsed).toEqual([
+      { identifier: "DEV-1", title: "First" },
+      { identifier: "DEV-2", title: "Second" },
+    ]);
+  });
+
+  it("silently omits non-existent field names", () => {
+    setFieldsFilter(["identifier", "nonexistent"]);
+    outputSuccess({ identifier: "DEV-1", title: "Bug", priority: 2 });
+    const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+    expect(parsed).toEqual({ identifier: "DEV-1" });
+  });
+
+  it("includes full nested objects for fields like state", () => {
+    setFieldsFilter(["identifier", "state"]);
+    outputSuccess({
+      identifier: "DEV-1",
+      title: "Bug",
+      state: { id: "s1", name: "In Progress", type: "started" },
+    });
+    const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+    expect(parsed).toEqual({
+      identifier: "DEV-1",
+      state: { id: "s1", name: "In Progress", type: "started" },
+    });
+  });
+
+  it("passes through primitives and null unchanged", () => {
+    setFieldsFilter(["identifier"]);
+    outputSuccess(null);
+    const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+    expect(parsed).toBeNull();
+  });
+
+  it("does not filter when fieldsFilter is null", () => {
+    outputSuccess({ identifier: "DEV-1", title: "Bug", priority: 2 });
+    const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+    expect(parsed).toEqual({ identifier: "DEV-1", title: "Bug", priority: 2 });
   });
 });
 
