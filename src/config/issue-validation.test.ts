@@ -52,14 +52,20 @@ describe("normalizeLabel", () => {
   });
 });
 
+// Required fields for all tests (assignee + project enforced by default)
+const required = { assignee: "nico", project: "Infrastructure" };
+
 describe("validateIssueCreation", () => {
+
   describe("when validation is enabled", () => {
     it("passes with valid input", () => {
       const result = validateIssueCreation({
+        ...required,
         labels: ["bug", "backend"],
         description:
           "## Why we need this\n\nThe auth token refresh logic fails silently when the server returns a 503.",
         title: "Fix auth token refresh on 503 errors",
+        ...required,
       });
 
       expect(result.errors).toHaveLength(0);
@@ -68,6 +74,7 @@ describe("validateIssueCreation", () => {
 
     it("errors when no labels provided", () => {
       const result = validateIssueCreation({
+        ...required,
         labels: null,
         description: "Some description that is long enough to pass the minimum length check.",
         title: "Fix something",
@@ -80,6 +87,7 @@ describe("validateIssueCreation", () => {
 
     it("errors when labels provided but no type label", () => {
       const result = validateIssueCreation({
+        ...required,
         labels: ["backend", "frontend"],
         description:
           "## Why we need this\n\nDescription that is definitely long enough to pass.",
@@ -93,6 +101,7 @@ describe("validateIssueCreation", () => {
 
     it("errors when multiple type labels provided", () => {
       const result = validateIssueCreation({
+        ...required,
         labels: ["bug", "feature", "backend"],
         description:
           "## Why we need this\n\nDescription that is definitely long enough to pass.",
@@ -106,6 +115,7 @@ describe("validateIssueCreation", () => {
 
     it("errors when description is missing", () => {
       const result = validateIssueCreation({
+        ...required,
         labels: ["bug", "backend"],
         description: undefined,
         title: "Fix something",
@@ -117,6 +127,7 @@ describe("validateIssueCreation", () => {
 
     it("errors when description is empty", () => {
       const result = validateIssueCreation({
+        ...required,
         labels: ["bug"],
         description: "   ",
         title: "Fix something",
@@ -128,6 +139,7 @@ describe("validateIssueCreation", () => {
 
     it("warns when description is short", () => {
       const result = validateIssueCreation({
+        ...required,
         labels: ["bug"],
         description: "## Why\n\nShort.",
         title: "Fix something",
@@ -139,6 +151,7 @@ describe("validateIssueCreation", () => {
 
     it("warns when no why section detected", () => {
       const result = validateIssueCreation({
+        ...required,
         labels: ["bug", "backend"],
         description:
           "The auth token refresh logic fails silently when the server returns a 503. This needs to be fixed.",
@@ -163,6 +176,7 @@ describe("validateIssueCreation", () => {
         // Pad short descriptions
         const paddedDesc = desc.length < 50 ? desc + " ".repeat(50 - desc.length) + "padding" : desc;
         const result = validateIssueCreation({
+          ...required,
           labels: ["feature"],
           description: paddedDesc,
           title: "Add new feature",
@@ -174,6 +188,7 @@ describe("validateIssueCreation", () => {
 
     it("warns on long titles", () => {
       const result = validateIssueCreation({
+        ...required,
         labels: ["feature"],
         description:
           "## Why we need this\n\nDescription that is long enough to pass the checks.",
@@ -186,6 +201,7 @@ describe("validateIssueCreation", () => {
     it("warns on titles starting with articles", () => {
       for (const article of ["A ", "An ", "The "]) {
         const result = validateIssueCreation({
+          ...required,
           labels: ["feature"],
           description:
             "## Why we need this\n\nDescription that is long enough to pass the checks.",
@@ -198,6 +214,7 @@ describe("validateIssueCreation", () => {
 
     it("normalizes labels and returns them", () => {
       const result = validateIssueCreation({
+        ...required,
         labels: ["Feature", "backend"],
         description:
           "## Why we need this\n\nDescription that is long enough to pass the checks.",
@@ -210,6 +227,7 @@ describe("validateIssueCreation", () => {
 
     it("warns when a label is aliased", () => {
       const result = validateIssueCreation({
+        ...required,
         labels: ["feature-request", "frontend"],
         description:
           "## Why we need this\n\nDescription that is long enough to pass the checks.",
@@ -222,6 +240,7 @@ describe("validateIssueCreation", () => {
 
     it("normalizes feature-request to feature", () => {
       const result = validateIssueCreation({
+        ...required,
         labels: ["feature-request", "frontend"],
         description:
           "## Why we need this\n\nDescription that is long enough to pass the checks.",
@@ -234,6 +253,7 @@ describe("validateIssueCreation", () => {
 
     it("collects multiple errors at once", () => {
       const result = validateIssueCreation({
+        ...required,
         labels: null,
         description: undefined,
         title: "Fix something",
@@ -259,9 +279,12 @@ describe("validateIssueCreation", () => {
 
     it("returns no errors or warnings", () => {
       const result = validateIssueCreation({
+        ...required,
         labels: null,
         description: undefined,
         title: "",
+        assignee: undefined,
+        project: undefined,
       });
 
       expect(result.errors).toHaveLength(0);
@@ -319,7 +342,7 @@ describe("enforceValidation", () => {
 const { afterEach } = await import("vitest");
 
 describe("title-verb / type-label alignment", () => {
-  const base = { description: "A valid description with enough context for testing." };
+  const base = { description: "A valid description with enough context for testing.", ...required };
 
   it("no warning when title verb matches type", () => {
     const cases: [string, string][] = [

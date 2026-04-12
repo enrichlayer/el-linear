@@ -333,9 +333,9 @@ async function resolveCreateInputs(
   const config = loadConfig();
   enforceBrandName(title, options.description, options.strict);
 
-  // --- Phase 1 validation (DEV-3708) ---
-  // Runs when config.validation.enabled is true.
-  // Bypassed by --no-validate flag.
+  // --- Validation (labels, description, assignee, project, title) ---
+  // Controlled by config.validation.enabled (default: true).
+  // Bypassed by --skip-validation flag.
   if (!options.skipValidation) {
     const rawLabels = options.labels ? splitList(options.labels) : null;
     const description = resolveDescription(options);
@@ -343,6 +343,8 @@ async function resolveCreateInputs(
       labels: rawLabels,
       description: description || undefined,
       title,
+      assignee: options.assignee,
+      project: options.project,
     });
 
     // Apply normalized labels back so resolution uses the canonical names
@@ -351,25 +353,6 @@ async function resolveCreateInputs(
     }
 
     enforceValidation(validationResult);
-  }
-
-  // --- Required fields: assignee and project ---
-  // Bypassed by --skip-validation (same escape hatch as content validation).
-  if (!options.skipValidation) {
-    if (!options.assignee) {
-      throw new Error(
-        "Missing --assignee. Every issue must have an assignee.\n" +
-        "  Use `el-linear users list --active` to find valid assignees.\n" +
-        "  Use --skip-validation to bypass this check.",
-      );
-    }
-    if (!options.project) {
-      throw new Error(
-        "Missing --project. Issues with an assignee must also have a project.\n" +
-        "  Use `el-linear projects list` to find valid projects.\n" +
-        "  Use --skip-validation to bypass this check.",
-      );
-    }
   }
   if (!options.priority) {
     outputWarning(

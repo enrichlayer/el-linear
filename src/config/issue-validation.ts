@@ -60,6 +60,8 @@ export interface ValidationInput {
   labels: string[] | null;
   description: string | undefined;
   title: string;
+  assignee: string | undefined;
+  project: string | undefined;
 }
 
 interface ValidationConfig {
@@ -71,7 +73,7 @@ function getValidationConfig(): ValidationConfig {
   const config = loadConfig();
   const validation = config.validation;
   return {
-    enabled: validation?.enabled ?? false,
+    enabled: validation?.enabled ?? true,
     typeLabels: validation?.typeLabels ?? DEFAULT_TYPE_LABELS,
   };
 }
@@ -192,6 +194,22 @@ export function validateIssueCreation(input: ValidationInput): ValidationResult 
     checkTitleVerbAlignment(input.title, typeLabelsFound[0].toLowerCase(), result);
   }
 
+  // --- Required: assignee ---
+  if (!input.assignee) {
+    result.errors.push(
+      "Missing --assignee. Every issue must have an assignee.\n" +
+        "  Use `el-linear users list --active` to find valid assignees.",
+    );
+  }
+
+  // --- Required: project ---
+  if (!input.project) {
+    result.errors.push(
+      "Missing --project. Every issue must belong to a project.\n" +
+        "  Use `el-linear projects list` to find valid projects.",
+    );
+  }
+
   return result;
 }
 
@@ -269,7 +287,8 @@ export function enforceValidation(result: ValidationResult): void {
     const errorMsg =
       "Issue creation blocked by validation:\n\n" +
       result.errors.map((e) => `  ✗ ${e}`).join("\n\n") +
-      "\n\nUse --skip-validation to bypass all content validation.";
+      "\n\nTo skip validation, pass --skip-validation.\n" +
+      "To disable validation permanently, set validation.enabled: false in ~/.config/el-linear/config.json.";
     throw new Error(errorMsg);
   }
 }

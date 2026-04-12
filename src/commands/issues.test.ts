@@ -60,6 +60,8 @@ vi.mock("../config/config.js", () => ({
     labels: { workspace: {} },
     members: {},
     teams: {},
+    // Validation tested in issue-validation.test.ts — disable here to isolate command wiring
+    validation: { enabled: false },
   }),
 }));
 
