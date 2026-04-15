@@ -787,26 +787,34 @@ async function handleRetrolink(options: OptionValues, command: Command): Promise
       ? commits.map((msg: string) => `- ${msg}`).join("\n")
       : `Retrolinked from branch: ${currentBranch}`;
 
-  // 4. Create Linear issue
   const rootOpts = command.parent!.parent!.opts();
-  const config = loadConfig();
-  const teamInput = options.team || config.defaultTeam;
-  if (!teamInput) {
-    throw new Error("Team is required. Use --team or set a defaultTeam in config.");
-  }
-  const teamId = resolveTeam(teamInput);
-
   const graphQLService = createGraphQLService(rootOpts);
   const linearService = createLinearService(rootOpts);
   const issuesService = new GraphQLIssuesService(graphQLService, linearService);
 
-  const result = await issuesService.createIssue({
-    title,
-    teamId,
-    description,
-  });
+  let result: LinearIssue;
 
-  // 5. Rename branch
+  if (options.issue) {
+    // Link to existing issue — fetch it and rename branch
+    const issueId = options.issue as string;
+    result = await issuesService.getIssueById(issueId);
+  } else {
+    // Create new issue
+    const config = loadConfig();
+    const teamInput = options.team || config.defaultTeam;
+    if (!teamInput) {
+      throw new Error("Team is required. Use --team or set a defaultTeam in config.");
+    }
+    const teamId = resolveTeam(teamInput);
+
+    result = await issuesService.createIssue({
+      title,
+      teamId,
+      description,
+    });
+  }
+
+  // Rename branch to match issue
   const oldBranch = currentBranch;
   let newBranch: string | undefined;
   if (result.branchName) {
@@ -988,9 +996,10 @@ export function setupIssuesCommands(program: Command): void {
   issues
     .command("retrolink")
     .description(
-      "Create a Linear issue from current branch commits and rename the branch to link it.",
+      "Link current branch to a Linear issue. Creates a new issue by default, or links to an existing one with --issue.",
     )
-    .option("--team <team>", "team key or name (required if no config default)")
+    .option("--issue <issueId>", "link to an existing issue instead of creating one (e.g. INF-459)")
+    .option("--team <team>", "team key or name (required if creating, not needed with --issue)")
     .option("--title <title>", "override auto-generated title (default: first commit message)")
     .option("--base <branch>", "base branch for log comparison", "main")
     .action(handleAsyncCommand(handleRetrolink));
