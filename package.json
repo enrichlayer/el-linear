@@ -1,6 +1,6 @@
 {
   "name": "@enrichlayer/el-linear",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Enrich Layer CLI for Linear.app — deterministic team/label/member resolution, brand validation, and status defaults.",
   "main": "dist/main.js",
   "types": "dist/main.d.ts",
