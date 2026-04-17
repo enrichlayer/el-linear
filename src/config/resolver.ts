@@ -71,10 +71,27 @@ export function resolveMember(input: string): string {
     }
   }
 
-  // Check direct name match (case-insensitive)
+  // Check direct name match (case-insensitive) — e.g., "Kamal"
   for (const [name, uuid] of Object.entries(config.members.uuids)) {
     if (name.toLowerCase() === lower) {
       return uuid;
+    }
+  }
+
+  // Check full names (case-insensitive) — e.g., "Kamal Mahmudi"
+  if (config.members.fullNames) {
+    for (const [uuid, fullName] of Object.entries(config.members.fullNames)) {
+      if (fullName.toLowerCase() === lower) {
+        return uuid;
+      }
+    }
+
+    // Partial match on full names — e.g., "mahmudi" matches "Kamal Mahmudi"
+    for (const [uuid, fullName] of Object.entries(config.members.fullNames)) {
+      const parts = fullName.toLowerCase().split(/\s+/);
+      if (parts.some((part) => part === lower)) {
+        return uuid;
+      }
     }
   }
 
@@ -140,9 +157,21 @@ function lookupLabel(
   return undefined;
 }
 
+/** Common label abbreviations → canonical names */
+const LABEL_ALIASES: Record<string, string> = {
+  docs: "documentation",
+  doc: "documentation",
+  feat: "feature-request",
+  infra: "infrastructure",
+  fe: "frontend",
+  be: "backend",
+  ci: "ci/cd",
+};
+
 /**
  * Resolve a label name to its UUID for a specific team.
  * Checks workspace-level labels first, then team-scoped labels.
+ * Falls back to alias resolution and prefix matching.
  */
 function resolveLabel(name: string, teamKey?: string): string | null {
   if (isUuid(name)) {
@@ -166,6 +195,12 @@ function resolveLabel(name: string, teamKey?: string): string | null {
         return team;
       }
     }
+  }
+
+  // Try alias resolution — e.g., "docs" → "documentation"
+  const aliased = LABEL_ALIASES[lower];
+  if (aliased) {
+    return resolveLabel(aliased, teamKey);
   }
 
   return null;
