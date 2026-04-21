@@ -17,6 +17,45 @@ function createService() {
 }
 
 describe("GraphQLIssuesService", () => {
+  describe("resolveTeamId (via internal access)", () => {
+    it("returns team ID when GraphQL exact match succeeds", async () => {
+      const service = createService();
+      const resolveResult = {
+        teams: {
+          nodes: [{ id: "team-uuid", key: "DEV", name: "Dev" }],
+        },
+      };
+      // Access private method for unit testing
+      const result = await (service as any).resolveTeamId("dev", resolveResult);
+      expect(result).toBe("team-uuid");
+    });
+
+    it("falls back to LinearService when GraphQL match fails", async () => {
+      const graphQLService = new GraphQLService("token");
+      const linearService = new LinearService("token");
+      const resolveTeamIdSpy = vi
+        .spyOn(linearService, "resolveTeamId")
+        .mockResolvedValue("prefix-resolved-uuid");
+      const service = new GraphQLIssuesService(graphQLService, linearService);
+
+      const resolveResult = { teams: { nodes: [] } };
+      const result = await (service as any).resolveTeamId("front", resolveResult);
+
+      expect(result).toBe("prefix-resolved-uuid");
+      expect(resolveTeamIdSpy).toHaveBeenCalledWith("front");
+      resolveTeamIdSpy.mockRestore();
+    });
+
+    it("returns UUID directly without any resolution", async () => {
+      const service = createService();
+      const result = await (service as any).resolveTeamId(
+        "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+        {},
+      );
+      expect(result).toBe("f47ac10b-58cc-4372-a567-0e02b2c3d479");
+    });
+  });
+
   describe("transformIssueData", () => {
     it("transforms a minimal issue", () => {
       const service = createService();

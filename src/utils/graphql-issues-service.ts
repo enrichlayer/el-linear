@@ -248,7 +248,7 @@ export class GraphQLIssuesService {
     cycleId: unknown;
   }> {
     let teamId = args.teamId
-      ? this.resolveTeamId(args.teamId as string, resolveResult)
+      ? await this.resolveTeamId(args.teamId as string, resolveResult)
       : args.teamId;
 
     const projectId = args.projectId
@@ -335,7 +335,7 @@ export class GraphQLIssuesService {
     }
 
     const finalTeamId = args.teamId
-      ? this.resolveTeamId(args.teamId as string, resolveResult)
+      ? await this.resolveTeamId(args.teamId as string, resolveResult)
       : args.teamId;
 
     const finalProjectId = args.projectId
@@ -393,7 +393,10 @@ export class GraphQLIssuesService {
 
   // --- Private helper methods for field resolution ---
 
-  private resolveTeamId(teamId: string, resolveResult: GraphQLResponseData): string {
+  private async resolveTeamId(
+    teamId: string,
+    resolveResult: GraphQLResponseData,
+  ): Promise<string> {
     if (isUuid(teamId)) {
       return teamId;
     }
@@ -401,13 +404,14 @@ export class GraphQLIssuesService {
     const teamNodes = teams?.nodes as GraphQLResponseData[] | undefined;
     const resolvedTeam = teamNodes?.[0];
     if (
-      !resolvedTeam ||
-      ((resolvedTeam.key as string).toUpperCase() !== teamId.toUpperCase() &&
-        (resolvedTeam.name as string).toLowerCase() !== teamId.toLowerCase())
+      resolvedTeam &&
+      ((resolvedTeam.key as string).toUpperCase() === teamId.toUpperCase() ||
+        (resolvedTeam.name as string).toLowerCase() === teamId.toLowerCase())
     ) {
-      throw notFoundError("Team", teamId, undefined, "— list teams with: el-linear teams list");
+      return resolvedTeam.id as string;
     }
-    return resolvedTeam.id as string;
+    // Exact GraphQL match failed — fall back to prefix matching via LinearService
+    return this.linearService.resolveTeamId(teamId);
   }
 
   private resolveProjectId(projectId: string, resolveResult: GraphQLResponseData): string {
