@@ -53,32 +53,84 @@ describe("LinearService", () => {
   });
 
   describe("resolveTeamId", () => {
+    const teamNodes = [
+      { id: "dev-uuid", key: "DEV", name: "Dev" },
+      { id: "fe-uuid", key: "FE", name: "Frontend (Lander/Docs/Blog/UIX)" },
+      { id: "emw-uuid", key: "EMW", name: "Endpoints middleware" },
+      { id: "inf-uuid", key: "INF", name: "Infra" },
+    ];
+    const allTeams = {
+      nodes: teamNodes,
+      pageInfo: { hasNextPage: false },
+      fetchNext: vi.fn(),
+    };
+    const noMatch = { nodes: [] };
+
     it("returns UUID directly", async () => {
       const service = new LinearService("token");
       const result = await service.resolveTeamId("f47ac10b-58cc-4372-a567-0e02b2c3d479");
       expect(result).toBe("f47ac10b-58cc-4372-a567-0e02b2c3d479");
     });
 
-    it("resolves by team key", async () => {
-      mockTeams.mockResolvedValueOnce({ nodes: [{ id: "team-uuid" }] });
+    it("resolves by exact team key via server-side filter", async () => {
+      mockTeams.mockResolvedValueOnce({ nodes: [{ id: "dev-uuid" }] });
       const service = new LinearService("token");
-      const result = await service.resolveTeamId("DEV");
-      expect(result).toBe("team-uuid");
+      const result = await service.resolveTeamId("dev");
+      expect(result).toBe("dev-uuid");
     });
 
-    it("falls back to name when key not found", async () => {
+    it("resolves by exact team name via server-side filter", async () => {
       mockTeams
-        .mockResolvedValueOnce({ nodes: [] }) // key lookup fails
-        .mockResolvedValueOnce({ nodes: [{ id: "team-by-name" }] }); // name lookup succeeds
+        .mockResolvedValueOnce(noMatch) // key lookup
+        .mockResolvedValueOnce({ nodes: [{ id: "inf-uuid" }] }); // name lookup
       const service = new LinearService("token");
-      const result = await service.resolveTeamId("Dev Team");
-      expect(result).toBe("team-by-name");
+      const result = await service.resolveTeamId("infra");
+      expect(result).toBe("inf-uuid");
     });
 
-    it("throws when team not found by key or name", async () => {
-      mockTeams.mockResolvedValueOnce({ nodes: [] }).mockResolvedValueOnce({ nodes: [] });
+    it("resolves by unambiguous prefix on name", async () => {
+      mockTeams
+        .mockResolvedValueOnce(noMatch) // key lookup
+        .mockResolvedValueOnce(noMatch) // name lookup
+        .mockResolvedValueOnce(allTeams); // fetch all for prefix
       const service = new LinearService("token");
-      await expect(service.resolveTeamId("NOPE")).rejects.toThrow('"NOPE" not found');
+      const result = await service.resolveTeamId("front");
+      expect(result).toBe("fe-uuid");
+    });
+
+    it("resolves by unambiguous prefix on key", async () => {
+      mockTeams
+        .mockResolvedValueOnce(noMatch) // key lookup
+        .mockResolvedValueOnce(noMatch) // name lookup
+        .mockResolvedValueOnce(allTeams); // fetch all for prefix
+      const service = new LinearService("token");
+      const result = await service.resolveTeamId("em");
+      expect(result).toBe("emw-uuid");
+    });
+
+    it("throws on ambiguous prefix with candidates", async () => {
+      mockTeams
+        .mockResolvedValueOnce(noMatch)
+        .mockResolvedValueOnce(noMatch)
+        .mockResolvedValueOnce({
+          nodes: [
+            { id: "1", key: "INF", name: "Infra" },
+            { id: "2", key: "INT", name: "Integration" },
+          ],
+          pageInfo: { hasNextPage: false },
+          fetchNext: vi.fn(),
+        });
+      const service = new LinearService("token");
+      await expect(service.resolveTeamId("in")).rejects.toThrow("Candidates:");
+    });
+
+    it("throws when team not found and lists available teams", async () => {
+      mockTeams
+        .mockResolvedValueOnce(noMatch)
+        .mockResolvedValueOnce(noMatch)
+        .mockResolvedValueOnce(allTeams);
+      const service = new LinearService("token");
+      await expect(service.resolveTeamId("NOPE")).rejects.toThrow("Available teams:");
     });
   });
 

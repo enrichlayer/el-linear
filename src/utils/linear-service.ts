@@ -173,21 +173,59 @@ export class LinearService {
     if (isUuid(teamKeyOrNameOrId)) {
       return teamKeyOrNameOrId;
     }
+
+    // 1. Exact match via server-side filter (case-sensitive key, case-insensitive name)
     const byKey = await this.client.teams({
-      filter: { key: { eq: teamKeyOrNameOrId } },
+      filter: { key: { eq: teamKeyOrNameOrId.toUpperCase() } },
       first: 1,
     });
     if (byKey.nodes.length > 0) {
       return byKey.nodes[0].id;
     }
     const byName = await this.client.teams({
-      filter: { name: { eq: teamKeyOrNameOrId } },
+      filter: { name: { eqIgnoreCase: teamKeyOrNameOrId } },
       first: 1,
     });
-    if (byName.nodes.length === 0) {
-      throw notFoundError("Team", teamKeyOrNameOrId);
+    if (byName.nodes.length > 0) {
+      return byName.nodes[0].id;
     }
-    return byName.nodes[0].id;
+
+    // 2. No exact match — fetch all teams for prefix matching
+    let page = await this.client.teams({ first: 50 });
+    const allNodes = [...page.nodes];
+    while (page.pageInfo.hasNextPage) {
+      page = await page.fetchNext();
+      allNodes.push(...page.nodes);
+    }
+    const input = teamKeyOrNameOrId.toLowerCase();
+
+    const prefixMatches = allNodes.filter(
+      (team) =>
+        team.key.toLowerCase().startsWith(input) ||
+        team.name.toLowerCase().startsWith(input),
+    );
+
+    if (prefixMatches.length === 1) {
+      return prefixMatches[0].id;
+    }
+
+    if (prefixMatches.length > 1) {
+      throw multipleMatchesError(
+        "team",
+        teamKeyOrNameOrId,
+        prefixMatches.map((t) => `${t.key} (${t.name})`),
+        "use a more specific prefix or the full team key",
+      );
+    }
+
+    // 3. No match
+    const available = allNodes.map((t) => `${t.key} (${t.name})`);
+    throw notFoundError(
+      "Team",
+      teamKeyOrNameOrId,
+      undefined,
+      `\n  Available teams: ${available.join(", ")}`,
+    );
   }
 
   async resolveStatusId(statusName: string, teamId?: string): Promise<string> {
