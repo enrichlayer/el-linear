@@ -48,6 +48,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.4.0",
     "@types/node": "^25.0.0",
+    "graphql": "^16.0.0",
     "tsx": "^4.20.5",
     "typescript": "^5.0.0",
     "vitest": "^4.0.18"
