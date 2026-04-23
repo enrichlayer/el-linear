@@ -153,3 +153,38 @@ describe("parseInline", () => {
     expect(nodes[2].marks![0].type).toBe("code");
   });
 });
+
+describe("table support", () => {
+  it("converts a markdown table to ProseMirror table node", () => {
+    const md = `| Vendor | Purpose |
+| --- | --- |
+| Stripe | Payments |
+| Sentry | Errors |`;
+    const doc = markdownToProseMirror(md);
+    expect(doc.content).toHaveLength(1);
+    expect(doc.content![0].type).toBe("table");
+    const rows = doc.content![0].content!;
+    expect(rows).toHaveLength(3); // header + 2 body rows
+    expect(rows[0].content![0].type).toBe("tableHeader");
+    expect(rows[0].content![0].content![0].content![0].text).toBe("Vendor");
+    expect(rows[1].content![0].type).toBe("tableCell");
+    expect(rows[1].content![0].content![0].content![0].text).toBe("Stripe");
+  });
+
+  it("does not treat pipe-only lines as tables without separator", () => {
+    const md = "| not a table |";
+    const doc = markdownToProseMirror(md);
+    expect(doc.content![0].type).toBe("paragraph");
+  });
+
+  it("handles inline formatting in table cells", () => {
+    const md = `| Name | Status |
+| --- | --- |
+| **Stripe** | \`active\` |`;
+    const doc = markdownToProseMirror(md);
+    const bodyRow = doc.content![0].content![1];
+    const nameCell = bodyRow.content![0].content![0].content![0];
+    expect(nameCell.marks![0].type).toBe("bold");
+    expect(nameCell.text).toBe("Stripe");
+  });
+});

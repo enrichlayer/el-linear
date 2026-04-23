@@ -73,7 +73,20 @@ async function handleCreateComment(
     input.body = body;
   }
 
-  const result = await graphQLService.rawRequest(CREATE_COMMENT_MUTATION, { input });
+  let result: Record<string, unknown>;
+  try {
+    result = await graphQLService.rawRequest(CREATE_COMMENT_MUTATION, { input });
+  } catch (err: unknown) {
+    // If ProseMirror document is invalid (e.g. unsupported markdown syntax),
+    // fall back to raw body text and let Linear handle the conversion.
+    const msg = err instanceof Error ? err.message : String(err);
+    if (input.bodyData && msg.includes("prosemirror")) {
+      const fallbackInput: Record<string, unknown> = { issueId: resolvedIssueId, body };
+      result = await graphQLService.rawRequest(CREATE_COMMENT_MUTATION, { input: fallbackInput });
+    } else {
+      throw err;
+    }
+  }
   const mutation = result.commentCreate as GraphQLResponseData;
   if (!mutation.success) {
     throw new Error("Failed to create comment");

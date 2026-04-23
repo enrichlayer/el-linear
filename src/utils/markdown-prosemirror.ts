@@ -26,6 +26,8 @@ const BULLET_RE = /^[\t ]*[-*]\s+(.+)$/;
 const ORDERED_RE = /^[\t ]*\d+[.)]\s+(.+)$/;
 const BLOCKQUOTE_RE = /^>\s?(.*)$/;
 const HR_RE = /^([-*_])\1{2,}\s*$/;
+const TABLE_ROW_RE = /^\|(.+)\|$/;
+const TABLE_SEP_RE = /^\|[\s:]*-{2,}[\s:]*(\|[\s:]*-{2,}[\s:]*)*\|$/;
 const FENCE_OPEN_RE = /^```(\w*)$/;
 const FENCE_CLOSE_RE = /^```\s*$/;
 
@@ -68,6 +70,9 @@ export function markdownToProseMirror(text: string): ProseMirrorNode {
       continue;
     }
     if (parseBlockquote(state)) {
+      continue;
+    }
+    if (parseTable(state, line)) {
       continue;
     }
     parseParagraph(state);
@@ -174,6 +179,46 @@ function parseBlockquote(state: ParseState): boolean {
   return true;
 }
 
+function parseTable(state: ParseState, line: string): boolean {
+  if (!TABLE_ROW_RE.test(line)) {
+    return false;
+  }
+  // Peek ahead: a table needs at least a header row + separator row
+  if (state.i + 1 >= state.lines.length || !TABLE_SEP_RE.test(state.lines[state.i + 1].trim())) {
+    return false;
+  }
+
+  const rows: ProseMirrorNode[] = [];
+
+  // Parse header row
+  const headerCells = line.split("|").slice(1, -1).map(cell => cell.trim());
+  rows.push({
+    type: "tableRow",
+    content: headerCells.map(cell => ({
+      type: "tableHeader",
+      content: [{ type: "paragraph", content: parseInline(cell) }],
+    })),
+  });
+  state.i++; // header row
+  state.i++; // separator row
+
+  // Parse body rows
+  while (state.i < state.lines.length && TABLE_ROW_RE.test(state.lines[state.i].trim())) {
+    const cells = state.lines[state.i].split("|").slice(1, -1).map(cell => cell.trim());
+    rows.push({
+      type: "tableRow",
+      content: cells.map(cell => ({
+        type: "tableCell",
+        content: [{ type: "paragraph", content: parseInline(cell) }],
+      })),
+    });
+    state.i++;
+  }
+
+  state.content.push({ type: "table", content: rows });
+  return true;
+}
+
 function isBlockStart(line: string): boolean {
   return (
     HEADING_RE.test(line) ||
@@ -181,7 +226,8 @@ function isBlockStart(line: string): boolean {
     HR_RE.test(line) ||
     BULLET_RE.test(line) ||
     ORDERED_RE.test(line) ||
-    BLOCKQUOTE_RE.test(line)
+    BLOCKQUOTE_RE.test(line) ||
+    TABLE_ROW_RE.test(line)
   );
 }
 
