@@ -22,6 +22,18 @@ function readBody(options: OptionValues): string {
   throw new Error("Either --body or --file is required");
 }
 
+async function fetchSelfUserId(
+  graphQLService: ReturnType<typeof createGraphQLService>,
+): Promise<string | undefined> {
+  try {
+    const result = await graphQLService.rawRequest("{ viewer { id } }");
+    const viewer = result.viewer as { id?: string } | undefined;
+    return viewer?.id;
+  } catch {
+    return;
+  }
+}
+
 function transformComment(comment: GraphQLResponseData): Record<string, unknown> {
   const user = comment.user as GraphQLResponseData;
   return {
@@ -48,7 +60,12 @@ async function handleCreateComment(
   const body = readBody(options);
   const resolvedIssueId = await linearService.resolveIssueId(issueId);
 
-  const mentionResult = await resolveMentions(body, linearService);
+  const autoMention = options.autoMention !== false;
+  const selfUserId = autoMention ? await fetchSelfUserId(graphQLService) : undefined;
+  const mentionResult = await resolveMentions(body, linearService, {
+    autoMention,
+    selfUserId,
+  });
   const input: Record<string, unknown> = { issueId: resolvedIssueId };
   if (mentionResult) {
     input.bodyData = mentionResult.bodyData;
@@ -74,7 +91,12 @@ async function handleUpdateComment(
   const linearService = createLinearService(rootOpts);
   const body = readBody(options);
 
-  const mentionResult = await resolveMentions(body, linearService);
+  const autoMention = options.autoMention !== false;
+  const selfUserId = autoMention ? await fetchSelfUserId(graphQLService) : undefined;
+  const mentionResult = await resolveMentions(body, linearService, {
+    autoMention,
+    selfUserId,
+  });
   const input: Record<string, unknown> = {};
   if (mentionResult) {
     input.bodyData = mentionResult.bodyData;
@@ -128,9 +150,13 @@ export function setupCommentsCommands(program: Command): void {
   comments
     .command("create <issueId>")
     .description("Create new comment on issue.")
-    .addHelpText("after", "\nBoth UUID and identifiers like ABC-123 are supported.")
+    .addHelpText(
+      "after",
+      "\nBoth UUID and identifiers like ABC-123 are supported.\nBare references to known team members (e.g. 'Dima') are auto-converted to @mentions — pass --no-auto-mention to disable.",
+    )
     .option("--body <body>", "comment body (inline)")
     .option("--file <path>", "read comment body from file")
+    .option("--no-auto-mention", "do not auto-convert bare team-member names to @mentions")
     .action(handleAsyncCommand(handleCreateComment));
 
   comments
@@ -138,6 +164,7 @@ export function setupCommentsCommands(program: Command): void {
     .description("Update an existing comment.")
     .option("--body <body>", "new comment body (inline)")
     .option("--file <path>", "read new comment body from file")
+    .option("--no-auto-mention", "do not auto-convert bare team-member names to @mentions")
     .action(handleAsyncCommand(handleUpdateComment));
 
   comments
