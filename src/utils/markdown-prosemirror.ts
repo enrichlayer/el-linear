@@ -232,7 +232,12 @@ function isBlockStart(line: string): boolean {
 }
 
 function parseParagraph(state: ParseState): void {
-  const paraLines: string[] = [];
+  // Always consume the current line — the main loop has already determined no
+  // block parser handled it. Skipping the first-line block-start check avoids
+  // an infinite loop when a line looks like a block (e.g. table row) but fails
+  // the stricter block parser (e.g. table row with no separator line).
+  const paraLines: string[] = [state.lines[state.i]];
+  state.i++;
   while (
     state.i < state.lines.length &&
     state.lines[state.i].trim() !== "" &&
@@ -241,11 +246,9 @@ function parseParagraph(state: ParseState): void {
     paraLines.push(state.lines[state.i]);
     state.i++;
   }
-  if (paraLines.length > 0) {
-    const inlineNodes = parseInline(paraLines.join("\n"));
-    if (inlineNodes.length > 0) {
-      state.content.push({ type: "paragraph", content: inlineNodes });
-    }
+  const inlineNodes = parseInline(paraLines.join("\n"));
+  if (inlineNodes.length > 0) {
+    state.content.push({ type: "paragraph", content: inlineNodes });
   }
 }
 
