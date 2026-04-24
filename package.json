@@ -41,7 +41,7 @@
     "@enrichlayer:registry": "https://gitlab.com/api/v4/projects/vertical-int%2Ftools/packages/npm/"
   },
   "dependencies": {
-    "@linear/sdk": "^78.0.0",
+    "@linear/sdk": "^82.1.0",
     "commander": "^14.0.0",
     "picocolors": "^1.1.1"
   },

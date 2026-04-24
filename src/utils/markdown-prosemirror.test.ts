@@ -187,4 +187,47 @@ describe("table support", () => {
     expect(nameCell.marks![0].type).toBe("bold");
     expect(nameCell.text).toBe("Stripe");
   });
+
+  it("treats escaped pipes as literal characters inside cells", () => {
+    const md = `| Pattern | Description |
+| --- | --- |
+| \\|-delimited\\| | uses a pipe |`;
+    const doc = markdownToProseMirror(md);
+    const bodyRow = doc.content![0].content![1];
+    expect(bodyRow.content).toHaveLength(2);
+    const patternText = bodyRow.content![0].content![0].content![0].text;
+    expect(patternText).toBe("|-delimited|");
+  });
+
+  it("pads body rows with empty cells to match header column count", () => {
+    const md = `| A | B | C |
+| --- | --- | --- |
+| x | y |`;
+    const doc = markdownToProseMirror(md);
+    const bodyRow = doc.content![0].content![1];
+    expect(bodyRow.content).toHaveLength(3);
+    expect(bodyRow.content![2].type).toBe("tableCell");
+    expect(bodyRow.content![2].content![0].content).toEqual([]);
+  });
+
+  it("truncates body rows to match header column count", () => {
+    const md = `| A | B |
+| --- | --- |
+| x | y | extra |`;
+    const doc = markdownToProseMirror(md);
+    const bodyRow = doc.content![0].content![1];
+    expect(bodyRow.content).toHaveLength(2);
+    expect(bodyRow.content![1].content![0].content![0].text).toBe("y");
+  });
+
+  it("renders empty cells as empty paragraph content (valid ProseMirror)", () => {
+    const md = `| A | B |
+| --- | --- |
+| | filled |`;
+    const doc = markdownToProseMirror(md);
+    const bodyRow = doc.content![0].content![1];
+    expect(bodyRow.content![0].content![0].type).toBe("paragraph");
+    expect(bodyRow.content![0].content![0].content).toEqual([]);
+    expect(bodyRow.content![1].content![0].content![0].text).toBe("filled");
+  });
 });

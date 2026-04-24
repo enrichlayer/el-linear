@@ -179,8 +179,35 @@ function parseBlockquote(state: ParseState): boolean {
   return true;
 }
 
+// Split a table row's inner content on unescaped `|`, preserving `\|` as a literal pipe.
+// Caller strips leading/trailing pipes before calling; each returned cell is trimmed.
+function splitTableRow(inner: string): string[] {
+  const cells: string[] = [];
+  let current = "";
+  for (let i = 0; i < inner.length; i++) {
+    if (inner[i] === "\\" && inner[i + 1] === "|") {
+      current += "|";
+      i++;
+    } else if (inner[i] === "|") {
+      cells.push(current.trim());
+      current = "";
+    } else {
+      current += inner[i];
+    }
+  }
+  cells.push(current.trim());
+  return cells;
+}
+
+// Build ProseMirror inline content for a cell, handling empty strings gracefully.
+function cellContent(cell: string): ProseMirrorNode[] {
+  const inline = parseInline(cell);
+  return inline.length > 0 ? inline : [];
+}
+
 function parseTable(state: ParseState, line: string): boolean {
-  if (!TABLE_ROW_RE.test(line)) {
+  const rowMatch = line.match(TABLE_ROW_RE);
+  if (!rowMatch) {
     return false;
   }
   // Peek ahead: a table needs at least a header row + separator row
@@ -189,27 +216,36 @@ function parseTable(state: ParseState, line: string): boolean {
   }
 
   const rows: ProseMirrorNode[] = [];
+  const headerCells = splitTableRow(rowMatch[1]);
+  const cols = headerCells.length;
 
-  // Parse header row
-  const headerCells = line.split("|").slice(1, -1).map(cell => cell.trim());
   rows.push({
     type: "tableRow",
-    content: headerCells.map(cell => ({
+    content: headerCells.map((cell) => ({
       type: "tableHeader",
-      content: [{ type: "paragraph", content: parseInline(cell) }],
+      content: [{ type: "paragraph", content: cellContent(cell) }],
     })),
   });
   state.i++; // header row
   state.i++; // separator row
 
-  // Parse body rows
-  while (state.i < state.lines.length && TABLE_ROW_RE.test(state.lines[state.i].trim())) {
-    const cells = state.lines[state.i].split("|").slice(1, -1).map(cell => cell.trim());
+  // Parse body rows — pad/truncate to match header column count so Linear gets a
+  // rectangular table (ProseMirror tolerates uneven rows but Linear's validator may not).
+  while (state.i < state.lines.length) {
+    const bodyMatch = state.lines[state.i].trim().match(TABLE_ROW_RE);
+    if (!bodyMatch) {
+      break;
+    }
+    const cells = splitTableRow(bodyMatch[1]);
+    while (cells.length < cols) {
+      cells.push("");
+    }
+    cells.length = cols;
     rows.push({
       type: "tableRow",
-      content: cells.map(cell => ({
+      content: cells.map((cell) => ({
         type: "tableCell",
-        content: [{ type: "paragraph", content: parseInline(cell) }],
+        content: [{ type: "paragraph", content: cellContent(cell) }],
       })),
     });
     state.i++;
