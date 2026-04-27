@@ -6,10 +6,12 @@ import { loadConfig } from "../config/config.js";
 import { enforceValidation, validateIssueCreation } from "../config/issue-validation.js";
 import { resolveAssignee, resolveLabels, resolveMember, resolveTeam } from "../config/resolver.js";
 import { resolveDefaultStatus } from "../config/status-defaults.js";
+import { LIST_COMMENTS_QUERY } from "../queries/comments.js";
 import {
   GET_ISSUE_RELATIONS_QUERY,
   GET_ISSUE_STATE_HISTORY_QUERY,
   ISSUE_RELATION_CREATE_MUTATION,
+  SCAN_ISSUES_QUERY,
 } from "../queries/issues.js";
 import type {
   GraphQLResponseData,
@@ -19,18 +21,28 @@ import type {
   LinearIssueRelation,
 } from "../types/linear.js";
 import { getApiToken } from "../utils/auth.js";
+import { type AutoLinkResult, autoLinkReferences } from "../utils/auto-link-references.js";
 import { downloadLinearUploads } from "../utils/download-uploads.js";
 import { FileService } from "../utils/file-service.js";
 import { createGraphQLAttachmentsService } from "../utils/graphql-attachments-service.js";
 import { GraphQLIssuesService } from "../utils/graphql-issues-service.js";
 import { createGraphQLService, type GraphQLService } from "../utils/graphql-service.js";
+import { extractIssueReferences } from "../utils/issue-reference-extractor.js";
+import {
+  DEFAULT_WORKSPACE_URL_KEY,
+  wrapIssueReferencesAsLinks,
+} from "../utils/issue-reference-wrapper.js";
 import { createLinearService, type LinearService } from "../utils/linear-service.js";
 import { logger } from "../utils/logger.js";
 import { handleAsyncCommand, outputSuccess, outputWarning } from "../utils/output.js";
 import { formatCsv, formatMarkdown, formatTable } from "../utils/table-formatter.js";
+import { validateReferences } from "../utils/validate-references.js";
 import { parsePriorityFilter, splitList, validatePriority } from "../utils/validators.js";
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico"]);
+
+const LINEAR_BRANCH_REGEX = /^([a-zA-Z]+)-(\d+)-(.+)$/;
+const COMMIT_HASH_PREFIX_REGEX = /^[a-f0-9]+ /;
 
 /**
  * Transform Linear's branchName (e.g. "dev-3549-slug") into our convention:
@@ -39,7 +51,7 @@ const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".sv
 function toBranchName(linearBranchName: string, prefix = "feature/"): string {
   // Linear branch names look like "dev-123-some-slug"
   // We need to uppercase the team key: "DEV-123-some-slug"
-  const match = linearBranchName.match(/^([a-zA-Z]+)-(\d+)-(.+)$/);
+  const match = linearBranchName.match(LINEAR_BRANCH_REGEX);
   if (!match) {
     return `${prefix}${linearBranchName}`;
   }
@@ -146,6 +158,94 @@ async function createRelations(
   }
 
   return relations;
+}
+
+interface PreparedDescription {
+  /** The (possibly rewritten) description text to send to Linear */
+  description: string | undefined;
+  /** Map<identifier, uuid> of refs that resolved — passed to autoLink to avoid re-resolution */
+  preResolved: Map<string, string>;
+  /** True when the original description was rewritten (i.e. at least one link was wrapped) */
+  rewritten: boolean;
+}
+
+/**
+ * Pre-process a description before sending to Linear:
+ * 1. Extract all issue references from the description.
+ * 2. Validate them (drop those that don't resolve in this workspace — handles "ISO-1424"-style false positives).
+ * 3. Wrap valid identifiers as markdown links — skipping any already inside a link, code block, or backtick span.
+ *
+ * Returns the rewritten description plus the validated map for downstream auto-linking.
+ *
+ * No-ops (returns the original description with an empty map) when:
+ * - description is empty/undefined
+ * - the user passed `--no-auto-link`
+ */
+async function prepareAutoLinkedDescription(
+  description: string | undefined,
+  options: OptionValues,
+  selfIdentifier: string | undefined,
+  linearService: LinearService,
+): Promise<PreparedDescription> {
+  if (!description || options.autoLink === false) {
+    return { description, preResolved: new Map(), rewritten: false };
+  }
+  const refs = extractIssueReferences(description, selfIdentifier);
+  if (refs.length === 0) {
+    return { description, preResolved: new Map(), rewritten: false };
+  }
+  const preResolved = await validateReferences(
+    refs.map((r) => r.identifier),
+    linearService,
+  );
+  if (preResolved.size === 0) {
+    return { description, preResolved, rewritten: false };
+  }
+  const validIds = new Set(preResolved.keys());
+  const wrapped = wrapIssueReferencesAsLinks(description, validIds, DEFAULT_WORKSPACE_URL_KEY);
+  return {
+    description: wrapped,
+    preResolved,
+    rewritten: wrapped !== description,
+  };
+}
+
+interface MaybeAutoLinkInput {
+  description: string | null | undefined;
+  graphQLService: GraphQLService;
+  identifier: string;
+  issueId: string;
+  linearService: LinearService;
+  options: OptionValues;
+  preResolved?: Map<string, string>;
+}
+
+/**
+ * Run auto-linking for issue references found in a description, unless the user opted out
+ * with --no-auto-link or no description was provided. Returns undefined when nothing was linked
+ * and nothing was skipped/failed (so callers can omit the field from JSON output).
+ */
+async function maybeAutoLink(input: MaybeAutoLinkInput): Promise<AutoLinkResult | undefined> {
+  const { issueId, identifier, description, options, graphQLService, linearService, preResolved } =
+    input;
+  if (options.autoLink === false) {
+    return;
+  }
+  if (!description) {
+    return;
+  }
+  const result = await autoLinkReferences({
+    issueId,
+    identifier,
+    description,
+    graphQLService,
+    linearService,
+    preResolved,
+  });
+  if (result.linked.length === 0 && result.skipped.length === 0 && result.failed.length === 0) {
+    return;
+  }
+  return result;
 }
 
 function validateUpdateOptions(options: OptionValues): void {
@@ -454,11 +554,21 @@ async function handleCreateIssue(
   const linearService = createLinearService(rootOpts);
   const issuesService = new GraphQLIssuesService(graphQLService, linearService);
 
+  // Wrap valid issue identifiers as markdown links before creating, so the description
+  // saved on Linear has clickable refs from the start. Self-reference can't apply here
+  // because the issue doesn't exist yet — pass undefined.
+  const prepared = await prepareAutoLinkedDescription(
+    description || undefined,
+    options,
+    undefined,
+    linearService,
+  );
+
   const result = await issuesService.createIssue({
     title,
     teamId,
     teamInput,
-    description: description || undefined,
+    description: prepared.description,
     assigneeId,
     priority: options.priority ? validatePriority(options.priority) : undefined,
     projectId: options.project,
@@ -471,6 +581,15 @@ async function handleCreateIssue(
     dueDate: options.dueDate,
   });
   const relations = await createRelations(result.id, options, graphQLService, linearService);
+  const autoLinked = await maybeAutoLink({
+    issueId: result.id,
+    identifier: result.identifier,
+    description: prepared.description,
+    options,
+    preResolved: prepared.preResolved,
+    graphQLService,
+    linearService,
+  });
 
   // Images are already embedded inline as markdown in the description,
   // so only create separate attachment records for non-image files.
@@ -499,6 +618,7 @@ async function handleCreateIssue(
     ...result,
     ...(branch ? { branch } : {}),
     ...(relations.length > 0 ? { relations } : {}),
+    ...(autoLinked ? { autoLinked } : {}),
     ...(attachments.length === 1
       ? { attachment: attachments[0] }
       : attachments.length > 1
@@ -574,9 +694,8 @@ async function handleRelateIssue(
 }
 
 interface RelatedIssueEntry {
-  id: string;
-  type: string;
   direction: "outgoing" | "incoming";
+  id: string;
   issue: {
     id: string;
     identifier: string;
@@ -586,6 +705,7 @@ interface RelatedIssueEntry {
     assignee?: { id: string; name: string };
     team?: { id: string; key: string; name: string };
   };
+  type: string;
 }
 
 /**
@@ -595,8 +715,49 @@ interface RelatedIssueEntry {
  * the inverse relation type is "blocks" but direction is incoming → "blockedBy".
  */
 function normalizeInverseType(type: string): string {
-  if (type === "blocks") return "blockedBy";
+  if (type === "blocks") {
+    return "blockedBy";
+  }
   return type;
+}
+
+function buildRelatedIssueSummary(peer: GraphQLResponseData): RelatedIssueEntry["issue"] {
+  const state = peer.state as GraphQLResponseData | undefined;
+  const assignee = peer.assignee as GraphQLResponseData | undefined;
+  const team = peer.team as GraphQLResponseData | undefined;
+  return {
+    id: peer.id as string,
+    identifier: peer.identifier as string,
+    title: peer.title as string,
+    ...(state ? { state: { id: state.id as string, name: state.name as string } } : {}),
+    ...(peer.priority == null ? {} : { priority: peer.priority as number }),
+    ...(assignee ? { assignee: { id: assignee.id as string, name: assignee.name as string } } : {}),
+    ...(team
+      ? { team: { id: team.id as string, key: team.key as string, name: team.name as string } }
+      : {}),
+  };
+}
+
+function buildRelationEntries(
+  nodes: GraphQLResponseData[] | undefined,
+  peerKey: "relatedIssue" | "issue",
+  direction: "outgoing" | "incoming",
+  normalizeType: (raw: string) => string,
+): RelatedIssueEntry[] {
+  const entries: RelatedIssueEntry[] = [];
+  for (const rel of nodes ?? []) {
+    const peer = rel[peerKey] as GraphQLResponseData | undefined;
+    if (!peer) {
+      continue;
+    }
+    entries.push({
+      id: rel.id as string,
+      type: normalizeType(rel.type as string),
+      direction,
+      issue: buildRelatedIssueSummary(peer),
+    });
+  }
+  return entries;
 }
 
 async function handleRelatedIssues(
@@ -621,53 +782,20 @@ async function handleRelatedIssues(
   const relations = issue.relations as GraphQLResponseData | undefined;
   const inverseRelations = issue.inverseRelations as GraphQLResponseData | undefined;
 
-  const entries: RelatedIssueEntry[] = [];
-
-  // Outgoing relations: this issue → relatedIssue
-  const outgoing = (relations?.nodes as GraphQLResponseData[] | undefined) ?? [];
-  for (const rel of outgoing) {
-    const relatedIssue = rel.relatedIssue as GraphQLResponseData;
-    const state = relatedIssue.state as GraphQLResponseData | undefined;
-    const assignee = relatedIssue.assignee as GraphQLResponseData | undefined;
-    const team = relatedIssue.team as GraphQLResponseData | undefined;
-    entries.push({
-      id: rel.id as string,
-      type: rel.type as string,
-      direction: "outgoing",
-      issue: {
-        id: relatedIssue.id as string,
-        identifier: relatedIssue.identifier as string,
-        title: relatedIssue.title as string,
-        ...(state ? { state: { id: state.id as string, name: state.name as string } } : {}),
-        ...(relatedIssue.priority != null ? { priority: relatedIssue.priority as number } : {}),
-        ...(assignee ? { assignee: { id: assignee.id as string, name: assignee.name as string } } : {}),
-        ...(team ? { team: { id: team.id as string, key: team.key as string, name: team.name as string } } : {}),
-      },
-    });
-  }
-
-  // Incoming (inverse) relations: other issue → this issue
-  const incoming = (inverseRelations?.nodes as GraphQLResponseData[] | undefined) ?? [];
-  for (const rel of incoming) {
-    const sourceIssue = rel.issue as GraphQLResponseData;
-    const state = sourceIssue.state as GraphQLResponseData | undefined;
-    const assignee = sourceIssue.assignee as GraphQLResponseData | undefined;
-    const team = sourceIssue.team as GraphQLResponseData | undefined;
-    entries.push({
-      id: rel.id as string,
-      type: normalizeInverseType(rel.type as string),
-      direction: "incoming",
-      issue: {
-        id: sourceIssue.id as string,
-        identifier: sourceIssue.identifier as string,
-        title: sourceIssue.title as string,
-        ...(state ? { state: { id: state.id as string, name: state.name as string } } : {}),
-        ...(sourceIssue.priority != null ? { priority: sourceIssue.priority as number } : {}),
-        ...(assignee ? { assignee: { id: assignee.id as string, name: assignee.name as string } } : {}),
-        ...(team ? { team: { id: team.id as string, key: team.key as string, name: team.name as string } } : {}),
-      },
-    });
-  }
+  const entries: RelatedIssueEntry[] = [
+    ...buildRelationEntries(
+      relations?.nodes as GraphQLResponseData[] | undefined,
+      "relatedIssue",
+      "outgoing",
+      (raw) => raw,
+    ),
+    ...buildRelationEntries(
+      inverseRelations?.nodes as GraphQLResponseData[] | undefined,
+      "issue",
+      "incoming",
+      normalizeInverseType,
+    ),
+  ];
 
   outputSuccess({
     id: issue.id as string,
@@ -676,6 +804,177 @@ async function handleRelatedIssues(
     data: entries,
     meta: { count: entries.length },
   });
+}
+
+async function fetchCommentBodies(
+  issueUuid: string,
+  graphQLService: GraphQLService,
+): Promise<string[]> {
+  const result = await graphQLService.rawRequest(LIST_COMMENTS_QUERY, {
+    issueId: issueUuid,
+    first: 250,
+  });
+  const issue = result.issue as GraphQLResponseData | undefined;
+  const comments = issue?.comments as GraphQLResponseData | undefined;
+  const nodes = (comments?.nodes as GraphQLResponseData[] | undefined) ?? [];
+  return nodes
+    .map((c) => c.body as string | null | undefined)
+    .filter((b): b is string => typeof b === "string" && b.length > 0);
+}
+
+async function linkReferencesForIssue(args: {
+  issueUuid: string;
+  identifier: string;
+  description: string;
+  includeComments: boolean;
+  dryRun: boolean;
+  graphQLService: GraphQLService;
+  linearService: LinearService;
+}): Promise<AutoLinkResult> {
+  const comments = args.includeComments
+    ? await fetchCommentBodies(args.issueUuid, args.graphQLService)
+    : undefined;
+  return autoLinkReferences({
+    issueId: args.issueUuid,
+    identifier: args.identifier,
+    description: args.description,
+    comments,
+    dryRun: args.dryRun,
+    graphQLService: args.graphQLService,
+    linearService: args.linearService,
+  });
+}
+
+async function handleLinkReferencesSingle(
+  issueId: string,
+  options: OptionValues,
+  graphQLService: GraphQLService,
+  linearService: LinearService,
+): Promise<void> {
+  const resolvedId = await linearService.resolveIssueId(issueId);
+  // GET_ISSUE_RELATIONS_QUERY also returns description, so this single call gives us everything
+  // we need for the description-only path. Comments are fetched separately on demand.
+  const issueResult = await graphQLService.rawRequest(GET_ISSUE_RELATIONS_QUERY, {
+    id: resolvedId,
+  });
+  if (!issueResult.issue) {
+    throw new Error(`Issue "${issueId}" not found`);
+  }
+  const issue = issueResult.issue as GraphQLResponseData;
+  const identifier = issue.identifier as string;
+  const description = (issue.description as string | null | undefined) ?? "";
+
+  const dryRun = Boolean(options.dryRun);
+  const includeComments = Boolean(options.includeComments);
+  const autoLinked = await linkReferencesForIssue({
+    issueUuid: resolvedId,
+    identifier,
+    description,
+    includeComments,
+    dryRun,
+    graphQLService,
+    linearService,
+  });
+
+  outputSuccess({
+    id: resolvedId,
+    identifier,
+    title: issue.title as string,
+    autoLinked,
+    meta: { dryRun, includeComments },
+  });
+}
+
+interface BatchEntry {
+  autoLinked: AutoLinkResult;
+  identifier: string;
+}
+
+async function handleLinkReferencesBatch(
+  teamInput: string,
+  options: OptionValues,
+  graphQLService: GraphQLService,
+  linearService: LinearService,
+): Promise<void> {
+  const teamId = resolveTeam(teamInput);
+  const limit = options.limit ? Number.parseInt(options.limit as string, 10) : 100;
+  if (!Number.isFinite(limit) || limit <= 0) {
+    throw new Error(`--limit must be a positive integer, got: ${options.limit}`);
+  }
+
+  const dryRun = Boolean(options.dryRun);
+  const includeComments = Boolean(options.includeComments);
+
+  const scan = await graphQLService.rawRequest(SCAN_ISSUES_QUERY, {
+    filter: { team: { id: { eq: teamId } } },
+    first: limit,
+  });
+  const issues = (scan.issues as GraphQLResponseData | undefined)?.nodes as
+    | GraphQLResponseData[]
+    | undefined;
+  const nodes = issues ?? [];
+
+  const entries: BatchEntry[] = [];
+  for (const node of nodes) {
+    const issueUuid = node.id as string;
+    const identifier = node.identifier as string;
+    const description = (node.description as string | null | undefined) ?? "";
+    const autoLinked = await linkReferencesForIssue({
+      issueUuid,
+      identifier,
+      description,
+      includeComments,
+      dryRun,
+      graphQLService,
+      linearService,
+    });
+    entries.push({ identifier, autoLinked });
+  }
+
+  // Summary counts across the batch
+  const totalLinked = entries.reduce((n, e) => n + e.autoLinked.linked.length, 0);
+  const totalSkipped = entries.reduce((n, e) => n + e.autoLinked.skipped.length, 0);
+  const totalFailed = entries.reduce((n, e) => n + e.autoLinked.failed.length, 0);
+
+  outputSuccess({
+    data: entries,
+    meta: {
+      count: entries.length,
+      team: teamInput,
+      dryRun,
+      includeComments,
+      totals: { linked: totalLinked, skipped: totalSkipped, failed: totalFailed },
+    },
+  });
+}
+
+function handleLinkReferencesIssue(
+  issueIdOrTeamFlag: string | undefined,
+  options: OptionValues,
+  command: Command,
+): Promise<void> {
+  const rootOpts = command.parent!.parent!.opts();
+  const graphQLService = createGraphQLService(rootOpts);
+  const linearService = createLinearService(rootOpts);
+
+  if (options.team) {
+    if (issueIdOrTeamFlag) {
+      throw new Error(
+        "Provide either an issueId positional argument OR --team, not both. With --team, omit the issueId.",
+      );
+    }
+    return handleLinkReferencesBatch(
+      options.team as string,
+      options,
+      graphQLService,
+      linearService,
+    );
+  }
+
+  if (!issueIdOrTeamFlag) {
+    throw new Error("issueId is required (or use --team <key> to scan a whole team)");
+  }
+  return handleLinkReferencesSingle(issueIdOrTeamFlag, options, graphQLService, linearService);
 }
 
 async function handleReadIssue(
@@ -738,13 +1037,38 @@ async function handleUpdateIssue(
   if (options.title || options.description) {
     enforceBrandName(options.title || "", options.description, options.strict);
   }
+  // Wrap valid refs as markdown links before sending the update. Idempotent against
+  // already-wrapped refs (the wrapper skips text inside existing markdown link syntax).
+  const prepared = options.description
+    ? await prepareAutoLinkedDescription(
+        options.description as string,
+        options,
+        undefined,
+        linearService,
+      )
+    : { description: undefined, preResolved: new Map<string, string>(), rewritten: false };
+  if (prepared.description !== undefined) {
+    options.description = prepared.description;
+  }
+
   const issuesService = new GraphQLIssuesService(graphQLService, linearService);
   const assigneeId = options.assignee
     ? await resolveAssignee(options.assignee, rootOpts)
     : undefined;
   const updateArgs = buildUpdateArgs(issueId, options, assigneeId);
   const result = await issuesService.updateIssue(updateArgs, options.labelBy || "adding");
-  outputSuccess(result);
+  const autoLinked = options.description
+    ? await maybeAutoLink({
+        issueId: result.id,
+        identifier: result.identifier,
+        description: options.description as string,
+        options,
+        preResolved: prepared.preResolved,
+        graphQLService,
+        linearService,
+      })
+    : undefined;
+  outputSuccess(autoLinked ? { ...result, autoLinked } : result);
 }
 
 async function handleRetrolink(options: OptionValues, command: Command): Promise<void> {
@@ -777,7 +1101,7 @@ async function handleRetrolink(options: OptionValues, command: Command): Promise
   }
 
   const commits = commitLog
-    ? commitLog.split("\n").map((line: string) => line.replace(/^[a-f0-9]+ /, ""))
+    ? commitLog.split("\n").map((line: string) => line.replace(COMMIT_HASH_PREFIX_REGEX, ""))
     : [];
 
   // 3. Build title and description
@@ -908,6 +1232,7 @@ export function setupIssuesCommands(program: Command): void {
     .option("--due-date <date>", "due date (YYYY-MM-DD)")
     .option("--checkout", "create and checkout a git branch named after the issue")
     .option("--skip-validation", "skip all validation (labels, description, assignee, project)")
+    .option("--no-auto-link", "skip auto-linking issue references found in the description")
     .action(
       handleAsyncCommand(
         (titleArg: string | undefined, options: OptionValues, command: Command) => {
@@ -969,6 +1294,7 @@ export function setupIssuesCommands(program: Command): void {
     .option("--due-date <date>", "due date (YYYY-MM-DD)")
     .option("--clear-due-date", "clear due date")
     .option("--strict", "strict brand validation")
+    .option("--no-auto-link", "skip auto-linking issue references found in the description")
     .action(handleAsyncCommand(handleUpdateIssue));
 
   issues
@@ -992,6 +1318,21 @@ export function setupIssuesCommands(program: Command): void {
     .description("List all relations for an issue (related, blocks, blockedBy, duplicate).")
     .addHelpText("after", "\nBoth UUID and identifiers like ABC-123 are supported.")
     .action(handleAsyncCommand(handleRelatedIssues));
+
+  issues
+    .command("link-references [issueId]")
+    .description(
+      "Scan an issue's description (and optionally comments) for issue identifiers and auto-create relations for any not already linked. Default relation is 'related'; prose keywords like 'blocked by' or 'duplicates' upgrade the type.",
+    )
+    .addHelpText(
+      "after",
+      "\nBoth UUID and identifiers like ABC-123 are supported.\nSkips references that already have any relation (related, blocks, blockedBy, duplicate) to the source issue.\nKeyword detection: 'blocked by'/'depends on' → blocks, 'blocks' → blocks, 'duplicates'/'duplicate of' → duplicate, 'duplicated by' → duplicate (reversed).\nUse --team <key> to backfill an entire team instead of a single issue.",
+    )
+    .option("--dry-run", "show what would be linked without creating relations")
+    .option("--include-comments", "also scan comment bodies for references")
+    .option("--team <team>", "batch mode: scan all issues in a team (omit issueId)")
+    .option("--limit <number>", "max issues to scan in --team mode", "100")
+    .action(handleAsyncCommand(handleLinkReferencesIssue));
 
   issues
     .command("retrolink")

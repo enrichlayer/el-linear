@@ -56,6 +56,10 @@ export const UPDATE_COMMENT_MUTATION = `
           displayName
           url
         }
+        issue {
+          id
+          identifier
+        }
       }
     }
   }
