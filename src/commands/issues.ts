@@ -12,6 +12,7 @@ import {
   GET_ISSUE_STATE_HISTORY_QUERY,
   ISSUE_RELATION_CREATE_MUTATION,
   SCAN_ISSUES_QUERY,
+  UPDATE_ISSUE_MUTATION,
 } from "../queries/issues.js";
 import type {
   GraphQLResponseData,
@@ -830,6 +831,7 @@ async function linkReferencesForIssue(args: {
   dryRun: boolean;
   graphQLService: GraphQLService;
   linearService: LinearService;
+  preResolved?: Map<string, string>;
 }): Promise<AutoLinkResult> {
   const comments = args.includeComments
     ? await fetchCommentBodies(args.issueUuid, args.graphQLService)
@@ -842,7 +844,58 @@ async function linkReferencesForIssue(args: {
     dryRun: args.dryRun,
     graphQLService: args.graphQLService,
     linearService: args.linearService,
+    preResolved: args.preResolved,
   });
+}
+
+interface PreparedRewrite {
+  /** Resolved id→uuid map (passed to autoLink to skip duplicate resolution) */
+  preResolved: Map<string, string> | undefined;
+  /** New description text — undefined when wrapping wouldn't change anything */
+  wrapped: string | undefined;
+}
+
+/**
+ * Prepare a description rewrite: validate refs, wrap valid IDs as markdown links,
+ * and return the rewritten text (or undefined if nothing would change).
+ */
+async function prepareDescriptionRewrite(
+  description: string,
+  selfIdentifier: string,
+  linearService: LinearService,
+): Promise<PreparedRewrite> {
+  if (!description) {
+    return { preResolved: undefined, wrapped: undefined };
+  }
+  const refs = extractIssueReferences(description, selfIdentifier);
+  if (refs.length === 0) {
+    return { preResolved: undefined, wrapped: undefined };
+  }
+  const preResolved = await validateReferences(
+    refs.map((r) => r.identifier),
+    linearService,
+  );
+  if (preResolved.size === 0) {
+    return { preResolved, wrapped: undefined };
+  }
+  const validIds = new Set(preResolved.keys());
+  const wrapped = wrapIssueReferencesAsLinks(description, validIds, DEFAULT_WORKSPACE_URL_KEY);
+  return { preResolved, wrapped: wrapped === description ? undefined : wrapped };
+}
+
+async function pushDescriptionUpdate(
+  issueUuid: string,
+  description: string,
+  graphQLService: GraphQLService,
+): Promise<void> {
+  const updateResult = await graphQLService.rawRequest(UPDATE_ISSUE_MUTATION, {
+    id: issueUuid,
+    input: { description },
+  });
+  const mutation = updateResult.issueUpdate as GraphQLResponseData | undefined;
+  if (!mutation?.success) {
+    throw new Error("Failed to rewrite description");
+  }
 }
 
 async function handleLinkReferencesSingle(
@@ -866,6 +919,14 @@ async function handleLinkReferencesSingle(
 
   const dryRun = Boolean(options.dryRun);
   const includeComments = Boolean(options.includeComments);
+  const rewriteDescription = Boolean(options.rewriteDescription);
+
+  // If rewriting, validate refs once up front so we can both wrap the description and
+  // pass the resolved map down to autoLink — avoids a second resolve round trip.
+  const rewrite = rewriteDescription
+    ? await prepareDescriptionRewrite(description, identifier, linearService)
+    : { preResolved: undefined, wrapped: undefined };
+
   const autoLinked = await linkReferencesForIssue({
     issueUuid: resolvedId,
     identifier,
@@ -874,14 +935,31 @@ async function handleLinkReferencesSingle(
     dryRun,
     graphQLService,
     linearService,
+    preResolved: rewrite.preResolved,
   });
+
+  let descriptionRewritten = false;
+  if (rewriteDescription && rewrite.wrapped && !dryRun) {
+    await pushDescriptionUpdate(resolvedId, rewrite.wrapped, graphQLService);
+    descriptionRewritten = true;
+  }
 
   outputSuccess({
     id: resolvedId,
     identifier,
     title: issue.title as string,
     autoLinked,
-    meta: { dryRun, includeComments },
+    ...(rewriteDescription
+      ? {
+          descriptionRewritten,
+          ...(dryRun && rewrite.wrapped ? { descriptionPreview: rewrite.wrapped } : {}),
+        }
+      : {}),
+    meta: {
+      dryRun,
+      includeComments,
+      ...(rewriteDescription ? { rewriteDescription: true } : {}),
+    },
   });
 }
 
@@ -961,6 +1039,11 @@ function handleLinkReferencesIssue(
     if (issueIdOrTeamFlag) {
       throw new Error(
         "Provide either an issueId positional argument OR --team, not both. With --team, omit the issueId.",
+      );
+    }
+    if (options.rewriteDescription) {
+      throw new Error(
+        "--rewrite-description is single-issue only. Use it case by case (one issueId per invocation) — bulk description rewrites bot-author the whole team's history.",
       );
     }
     return handleLinkReferencesBatch(
@@ -1326,12 +1409,16 @@ export function setupIssuesCommands(program: Command): void {
     )
     .addHelpText(
       "after",
-      "\nBoth UUID and identifiers like ABC-123 are supported.\nSkips references that already have any relation (related, blocks, blockedBy, duplicate) to the source issue.\nKeyword detection: 'blocked by'/'depends on' → blocks, 'blocks' → blocks, 'duplicates'/'duplicate of' → duplicate, 'duplicated by' → duplicate (reversed).\nUse --team <key> to backfill an entire team instead of a single issue.",
+      "\nBoth UUID and identifiers like ABC-123 are supported.\nSkips references that already have any relation (related, blocks, blockedBy, duplicate) to the source issue.\nKeyword detection: 'blocked by'/'depends on' → blocks, 'blocks' → blocks, 'duplicates'/'duplicate of' → duplicate, 'duplicated by' → duplicate (reversed).\nUse --team <key> to backfill an entire team instead of a single issue.\nUse --rewrite-description to also wrap bare identifiers as markdown links inside the description (single-issue only).",
     )
     .option("--dry-run", "show what would be linked without creating relations")
     .option("--include-comments", "also scan comment bodies for references")
     .option("--team <team>", "batch mode: scan all issues in a team (omit issueId)")
     .option("--limit <number>", "max issues to scan in --team mode", "100")
+    .option(
+      "--rewrite-description",
+      "also rewrite the issue description to wrap bare identifiers as markdown links (single-issue only; not allowed with --team)",
+    )
     .action(handleAsyncCommand(handleLinkReferencesIssue));
 
   issues
