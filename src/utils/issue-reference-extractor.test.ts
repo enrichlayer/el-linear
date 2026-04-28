@@ -192,4 +192,17 @@ describe("extractIssueReferences", () => {
       "blocked by something not described here.\n\nLater, in another paragraph, we mention DEV-100 in passing.";
     expect(extractIssueReferences(text)).toEqual([related("DEV-100")]);
   });
+
+  // Regression guard for the bug Nico flagged on MR !428: when the identifier is already
+  // wrapped as a markdown link, the inserted `[` between the keyword and the identifier
+  // breaks the trailing-whitespace anchor in the keyword regex, and inference falls back
+  // to "related". Callers MUST pass the pre-wrap text to keep type inference correct.
+  it("does NOT infer relation type when identifier is already markdown-wrapped (caller must pass pre-wrap text)", () => {
+    expect(
+      extractIssueReferences("blocked by [DEV-100](https://linear.app/x/issue/DEV-100/)"),
+    ).toEqual([related("DEV-100")]);
+    expect(
+      extractIssueReferences("this duplicates [DEV-50](https://linear.app/x/issue/DEV-50/)"),
+    ).toEqual([related("DEV-50")]);
+  });
 });

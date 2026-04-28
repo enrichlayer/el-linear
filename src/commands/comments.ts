@@ -181,10 +181,13 @@ async function handleCreateComment(
   // but we don't need it for self-exclusion in comments — wrapping a self-ref in a
   // comment body is harmless. Use the user-provided issueId if it looks like one.
   const parentIdentifier = ISSUE_IDENTIFIER_REGEX.test(issueId) ? issueId.toUpperCase() : "";
+  // Pass rawBody (pre-wrap) to autoLink so prose-keyword inference ("blocked by", etc.)
+  // sees `keyword DEV-100` rather than `keyword [DEV-100](url)`. After wrapping the inserted
+  // `[` defeats the trailing-whitespace anchor and inference falls back to "related".
   const autoLinked = await autoLinkCommentReferences({
     parentIssueUuid: resolvedIssueId,
     parentIssueIdentifier: parentIdentifier,
-    body,
+    body: rawBody,
     preResolved,
     options,
     graphQLService,
@@ -231,10 +234,11 @@ async function handleUpdateComment(
   const issue = comment.issue as GraphQLResponseData | undefined;
   let autoLinked: AutoLinkResult | undefined;
   if (issue) {
+    // rawBody (pre-wrap) — see note in handleCreateComment about keyword inference
     autoLinked = await autoLinkCommentReferences({
       parentIssueUuid: issue.id as string,
       parentIssueIdentifier: (issue.identifier as string) ?? "",
-      body,
+      body: rawBody,
       preResolved,
       options,
       graphQLService,

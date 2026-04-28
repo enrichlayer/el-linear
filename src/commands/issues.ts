@@ -582,10 +582,13 @@ async function handleCreateIssue(
     dueDate: options.dueDate,
   });
   const relations = await createRelations(result.id, options, graphQLService, linearService);
+  // Pass the ORIGINAL description (pre-wrap) so the extractor's prose-keyword inference
+  // ("blocked by", "duplicates", etc.) sees `keyword DEV-100` instead of `keyword [DEV-100](url)`.
+  // After wrapping, the keyword regex's trailing-whitespace anchor fails to match the inserted `[`.
   const autoLinked = await maybeAutoLink({
     issueId: result.id,
     identifier: result.identifier,
-    description: prepared.description,
+    description: description || undefined,
     options,
     preResolved: prepared.preResolved,
     graphQLService,
@@ -1120,6 +1123,10 @@ async function handleUpdateIssue(
   if (options.title || options.description) {
     enforceBrandName(options.title || "", options.description, options.strict);
   }
+  // Save the original (pre-wrap) description so we can pass it to maybeAutoLink later.
+  // The wrapped form breaks prose-keyword inference because the inserted `[` defeats the
+  // trailing-whitespace anchor in patterns like /\bblocked by\s*$/.
+  const originalDescription = options.description as string | undefined;
   // Wrap valid refs as markdown links before sending the update. Idempotent against
   // already-wrapped refs (the wrapper skips text inside existing markdown link syntax).
   const prepared = options.description
@@ -1140,11 +1147,11 @@ async function handleUpdateIssue(
     : undefined;
   const updateArgs = buildUpdateArgs(issueId, options, assigneeId);
   const result = await issuesService.updateIssue(updateArgs, options.labelBy || "adding");
-  const autoLinked = options.description
+  const autoLinked = originalDescription
     ? await maybeAutoLink({
         issueId: result.id,
         identifier: result.identifier,
-        description: options.description as string,
+        description: originalDescription,
         options,
         preResolved: prepared.preResolved,
         graphQLService,
