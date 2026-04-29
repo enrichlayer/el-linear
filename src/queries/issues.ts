@@ -355,6 +355,7 @@ export const GET_ISSUE_RELATIONS_QUERY = `
       id
       identifier
       title
+      description
       relations {
         nodes {
           id

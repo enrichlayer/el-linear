@@ -498,4 +498,285 @@ describe("issues commands", () => {
       expect(mockOutputSuccess).toHaveBeenCalled();
     });
   });
+
+  // Handler-level integration tests for the auto-link composition.
+  // Unit tests on extractIssueReferences + autoLinkReferences pass with raw input,
+  // but the create/update handlers wrap the description before passing it down — which
+  // previously broke prose-keyword inference (Nico, MR !428). These tests exercise the
+  // composed flow end-to-end and assert the relation-create mutation receives the
+  // correct {type, issueId↔relatedIssueId} based on prose keywords.
+  describe("auto-link composition (handler integration)", () => {
+    const requiredArgs = ["--assignee", "dima", "--project", "Infrastructure"];
+
+    function setupAutoLinkMocks(resolvedIds: Record<string, string>): void {
+      mockLinearService.resolveIssueId.mockImplementation((id: string) => {
+        if (id in resolvedIds) {
+          return Promise.resolve(resolvedIds[id]);
+        }
+        if (id === "DEV-999") {
+          return Promise.resolve("uuid-source");
+        }
+        return Promise.reject(new Error(`Issue "${id}" not found`));
+      });
+      mockGraphQLService.rawRequest.mockImplementation((query: string, vars: unknown) => {
+        if (query.includes("GetIssueRelations")) {
+          return Promise.resolve({
+            issue: {
+              relations: { nodes: [] },
+              inverseRelations: { nodes: [] },
+            },
+          });
+        }
+        if (query.includes("IssueRelationCreate")) {
+          const input = (
+            vars as { input: { issueId: string; relatedIssueId: string; type: string } }
+          ).input;
+          return Promise.resolve({
+            issueRelationCreate: {
+              success: true,
+              issueRelation: {
+                id: "rel-new",
+                type: input.type,
+                issue: { id: input.issueId, identifier: "X", title: "" },
+                relatedIssue: { id: input.relatedIssueId, identifier: "Y", title: "" },
+              },
+            },
+          });
+        }
+        return Promise.resolve({});
+      });
+    }
+
+    function findRelationCreateInput():
+      | {
+          issueId: string;
+          relatedIssueId: string;
+          type: string;
+        }
+      | undefined {
+      const call = mockGraphQLService.rawRequest.mock.calls.find(
+        (c: unknown[]) =>
+          typeof c[0] === "string" && (c[0] as string).includes("IssueRelationCreate"),
+      );
+      return (
+        call?.[1] as
+          | { input: { issueId: string; relatedIssueId: string; type: string } }
+          | undefined
+      )?.input;
+    }
+
+    beforeEach(() => {
+      mockCreateIssue.mockResolvedValue({ id: "uuid-source", identifier: "DEV-999" });
+      mockUpdateIssue.mockResolvedValue({ id: "uuid-source", identifier: "DEV-999" });
+    });
+
+    it("create: bare reference creates a 'related' relation (forward)", async () => {
+      setupAutoLinkMocks({ "DEV-100": "uuid-100" });
+      const program = createTestProgram();
+      setupIssuesCommands(program);
+      await runCommand(program, [
+        "issues",
+        "create",
+        "Test",
+        "--team",
+        "DEV",
+        "--description",
+        "see DEV-100 for details",
+        ...requiredArgs,
+      ]);
+      expect(findRelationCreateInput()).toEqual({
+        issueId: "uuid-source",
+        relatedIssueId: "uuid-100",
+        type: "related",
+      });
+    });
+
+    it("create: 'blocked by DEV-X' creates a reversed 'blocks' relation", async () => {
+      setupAutoLinkMocks({ "DEV-100": "uuid-100" });
+      const program = createTestProgram();
+      setupIssuesCommands(program);
+      await runCommand(program, [
+        "issues",
+        "create",
+        "Test",
+        "--team",
+        "DEV",
+        "--description",
+        "blocked by DEV-100",
+        ...requiredArgs,
+      ]);
+      expect(findRelationCreateInput()).toEqual({
+        issueId: "uuid-100",
+        relatedIssueId: "uuid-source",
+        type: "blocks",
+      });
+    });
+
+    it("create: 'this blocks DEV-X' creates a forward 'blocks' relation", async () => {
+      setupAutoLinkMocks({ "DEV-200": "uuid-200" });
+      const program = createTestProgram();
+      setupIssuesCommands(program);
+      await runCommand(program, [
+        "issues",
+        "create",
+        "Test",
+        "--team",
+        "DEV",
+        "--description",
+        "this blocks DEV-200",
+        ...requiredArgs,
+      ]);
+      expect(findRelationCreateInput()).toEqual({
+        issueId: "uuid-source",
+        relatedIssueId: "uuid-200",
+        type: "blocks",
+      });
+    });
+
+    it("create: 'duplicates DEV-X' creates a forward 'duplicate' relation", async () => {
+      setupAutoLinkMocks({ "DEV-50": "uuid-50" });
+      const program = createTestProgram();
+      setupIssuesCommands(program);
+      await runCommand(program, [
+        "issues",
+        "create",
+        "Test",
+        "--team",
+        "DEV",
+        "--description",
+        "this duplicates DEV-50",
+        ...requiredArgs,
+      ]);
+      expect(findRelationCreateInput()).toEqual({
+        issueId: "uuid-source",
+        relatedIssueId: "uuid-50",
+        type: "duplicate",
+      });
+    });
+
+    it("create: 'duplicated by DEV-X' creates a reversed 'duplicate' relation", async () => {
+      setupAutoLinkMocks({ "DEV-50": "uuid-50" });
+      const program = createTestProgram();
+      setupIssuesCommands(program);
+      await runCommand(program, [
+        "issues",
+        "create",
+        "Test",
+        "--team",
+        "DEV",
+        "--description",
+        "this was duplicated by DEV-50",
+        ...requiredArgs,
+      ]);
+      expect(findRelationCreateInput()).toEqual({
+        issueId: "uuid-50",
+        relatedIssueId: "uuid-source",
+        type: "duplicate",
+      });
+    });
+
+    it("create: 'depends on DEV-X' creates a reversed 'blocks' relation (alias for blocked-by)", async () => {
+      setupAutoLinkMocks({ "DEV-77": "uuid-77" });
+      const program = createTestProgram();
+      setupIssuesCommands(program);
+      await runCommand(program, [
+        "issues",
+        "create",
+        "Test",
+        "--team",
+        "DEV",
+        "--description",
+        "this depends on DEV-77",
+        ...requiredArgs,
+      ]);
+      expect(findRelationCreateInput()).toEqual({
+        issueId: "uuid-77",
+        relatedIssueId: "uuid-source",
+        type: "blocks",
+      });
+    });
+
+    it("create: invalid identifier (e.g. ISO-1424) does NOT trigger a relation create", async () => {
+      setupAutoLinkMocks({ "DEV-100": "uuid-100" });
+      const program = createTestProgram();
+      setupIssuesCommands(program);
+      await runCommand(program, [
+        "issues",
+        "create",
+        "Test",
+        "--team",
+        "DEV",
+        "--description",
+        "real DEV-100 plus fake ISO-1424",
+        ...requiredArgs,
+      ]);
+      // Only DEV-100 should trigger a relation create — ISO-1424 fails validation
+      const createCalls = mockGraphQLService.rawRequest.mock.calls.filter(
+        (c: unknown[]) =>
+          typeof c[0] === "string" && (c[0] as string).includes("IssueRelationCreate"),
+      );
+      expect(createCalls).toHaveLength(1);
+      expect(
+        (createCalls[0]?.[1] as { input: { relatedIssueId: string } }).input.relatedIssueId,
+      ).toBe("uuid-100");
+    });
+
+    it("create: --no-auto-link suppresses both wrapping and sidebar creation", async () => {
+      setupAutoLinkMocks({ "DEV-100": "uuid-100" });
+      const program = createTestProgram();
+      setupIssuesCommands(program);
+      await runCommand(program, [
+        "issues",
+        "create",
+        "Test",
+        "--team",
+        "DEV",
+        "--description",
+        "blocked by DEV-100",
+        "--no-auto-link",
+        ...requiredArgs,
+      ]);
+      expect(findRelationCreateInput()).toBeUndefined();
+      // The description sent to createIssue should be unchanged (no markdown wrap)
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({ description: "blocked by DEV-100" }),
+      );
+    });
+
+    it("update: 'blocked by DEV-X' creates a reversed 'blocks' relation (regression)", async () => {
+      setupAutoLinkMocks({ "DEV-100": "uuid-100" });
+      const program = createTestProgram();
+      setupIssuesCommands(program);
+      await runCommand(program, [
+        "issues",
+        "update",
+        "DEV-999",
+        "--description",
+        "blocked by DEV-100",
+      ]);
+      expect(findRelationCreateInput()).toEqual({
+        issueId: "uuid-100",
+        relatedIssueId: "uuid-source",
+        type: "blocks",
+      });
+    });
+
+    it("update: 'duplicates DEV-X' creates a forward 'duplicate' relation", async () => {
+      setupAutoLinkMocks({ "DEV-50": "uuid-50" });
+      const program = createTestProgram();
+      setupIssuesCommands(program);
+      await runCommand(program, [
+        "issues",
+        "update",
+        "DEV-999",
+        "--description",
+        "this duplicates DEV-50",
+      ]);
+      expect(findRelationCreateInput()).toEqual({
+        issueId: "uuid-source",
+        relatedIssueId: "uuid-50",
+        type: "duplicate",
+      });
+    });
+  });
 });

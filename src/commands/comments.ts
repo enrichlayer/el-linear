@@ -7,14 +7,22 @@ import {
   UPDATE_COMMENT_MUTATION,
 } from "../queries/comments.js";
 import type { GraphQLResponseData } from "../types/linear.js";
-import { createGraphQLService } from "../utils/graphql-service.js";
-import { createLinearService } from "../utils/linear-service.js";
+import { type AutoLinkResult, autoLinkReferences } from "../utils/auto-link-references.js";
+import { createGraphQLService, type GraphQLService } from "../utils/graphql-service.js";
+import { extractIssueReferences } from "../utils/issue-reference-extractor.js";
+import {
+  DEFAULT_WORKSPACE_URL_KEY,
+  wrapIssueReferencesAsLinks,
+} from "../utils/issue-reference-wrapper.js";
+import { createLinearService, type LinearService } from "../utils/linear-service.js";
 import { resolveMentions } from "../utils/mention-resolver.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
+import { validateReferences } from "../utils/validate-references.js";
 
 // Match Linear's bodyData validation error in multiple phrasings so a wording
 // tweak on their side doesn't silently regress the fallback path.
 const BODY_DATA_ERROR_RE = /prosemirror|bodydata|invalid.*body/i;
+const ISSUE_IDENTIFIER_REGEX = /^[A-Z][A-Z0-9]*-\d+$/;
 
 function readBody(options: OptionValues): string {
   if (options.file) {
@@ -53,6 +61,75 @@ function transformComment(comment: GraphQLResponseData): Record<string, unknown>
   };
 }
 
+interface PreparedCommentBody {
+  body: string;
+  preResolved: Map<string, string>;
+}
+
+/**
+ * Wrap valid issue references in a comment body as markdown links — same logic as for
+ * issue descriptions. Returns the rewritten body plus the validated identifier→UUID map
+ * so the caller can reuse it for sidebar relation creation without re-resolving.
+ *
+ * No-op (returns the original body with an empty map) when:
+ * - body has no candidate refs
+ * - the user passed `--no-auto-link`
+ */
+async function prepareCommentBodyWithLinks(
+  body: string,
+  options: OptionValues,
+  linearService: LinearService,
+): Promise<PreparedCommentBody> {
+  if (options.autoLink === false || !body) {
+    return { body, preResolved: new Map() };
+  }
+  const refs = extractIssueReferences(body);
+  if (refs.length === 0) {
+    return { body, preResolved: new Map() };
+  }
+  const preResolved = await validateReferences(
+    refs.map((r) => r.identifier),
+    linearService,
+  );
+  if (preResolved.size === 0) {
+    return { body, preResolved };
+  }
+  const validIds = new Set(preResolved.keys());
+  const wrapped = wrapIssueReferencesAsLinks(body, validIds, DEFAULT_WORKSPACE_URL_KEY);
+  return { body: wrapped, preResolved };
+}
+
+/**
+ * After a comment is saved, create sidebar relations on the parent issue for the
+ * referenced issues — same de-dup and prose-keyword inference logic as descriptions.
+ * Returns undefined when nothing was linked, skipped, or failed.
+ */
+async function autoLinkCommentReferences(args: {
+  parentIssueUuid: string;
+  parentIssueIdentifier: string;
+  body: string;
+  preResolved: Map<string, string>;
+  options: OptionValues;
+  graphQLService: GraphQLService;
+  linearService: LinearService;
+}): Promise<AutoLinkResult | undefined> {
+  if (args.options.autoLink === false) {
+    return;
+  }
+  const result = await autoLinkReferences({
+    issueId: args.parentIssueUuid,
+    identifier: args.parentIssueIdentifier,
+    description: args.body,
+    preResolved: args.preResolved,
+    graphQLService: args.graphQLService,
+    linearService: args.linearService,
+  });
+  if (result.linked.length === 0 && result.skipped.length === 0 && result.failed.length === 0) {
+    return;
+  }
+  return result;
+}
+
 async function handleCreateComment(
   issueId: string,
   options: OptionValues,
@@ -61,8 +138,12 @@ async function handleCreateComment(
   const rootOpts = command.parent!.parent!.opts();
   const graphQLService = createGraphQLService(rootOpts);
   const linearService = createLinearService(rootOpts);
-  const body = readBody(options);
+  const rawBody = readBody(options);
   const resolvedIssueId = await linearService.resolveIssueId(issueId);
+
+  // Wrap valid refs as markdown links before mention resolution. Idempotent against
+  // already-wrapped refs.
+  const { body, preResolved } = await prepareCommentBodyWithLinks(rawBody, options, linearService);
 
   const autoMention = options.autoMention !== false;
   const selfUserId = autoMention ? await fetchSelfUserId(graphQLService) : undefined;
@@ -96,7 +177,24 @@ async function handleCreateComment(
   if (!mutation.success) {
     throw new Error("Failed to create comment");
   }
-  outputSuccess(transformComment(mutation.comment as GraphQLResponseData));
+  // We don't have the parent issue's identifier from the create mutation response,
+  // but we don't need it for self-exclusion in comments — wrapping a self-ref in a
+  // comment body is harmless. Use the user-provided issueId if it looks like one.
+  const parentIdentifier = ISSUE_IDENTIFIER_REGEX.test(issueId) ? issueId.toUpperCase() : "";
+  // Pass rawBody (pre-wrap) to autoLink so prose-keyword inference ("blocked by", etc.)
+  // sees `keyword DEV-100` rather than `keyword [DEV-100](url)`. After wrapping the inserted
+  // `[` defeats the trailing-whitespace anchor and inference falls back to "related".
+  const autoLinked = await autoLinkCommentReferences({
+    parentIssueUuid: resolvedIssueId,
+    parentIssueIdentifier: parentIdentifier,
+    body: rawBody,
+    preResolved,
+    options,
+    graphQLService,
+    linearService,
+  });
+  const output = transformComment(mutation.comment as GraphQLResponseData);
+  outputSuccess(autoLinked ? { ...output, autoLinked } : output);
 }
 
 async function handleUpdateComment(
@@ -107,7 +205,9 @@ async function handleUpdateComment(
   const rootOpts = command.parent!.parent!.opts();
   const graphQLService = createGraphQLService(rootOpts);
   const linearService = createLinearService(rootOpts);
-  const body = readBody(options);
+  const rawBody = readBody(options);
+
+  const { body, preResolved } = await prepareCommentBodyWithLinks(rawBody, options, linearService);
 
   const autoMention = options.autoMention !== false;
   const selfUserId = autoMention ? await fetchSelfUserId(graphQLService) : undefined;
@@ -130,7 +230,23 @@ async function handleUpdateComment(
   if (!mutation.success) {
     throw new Error("Failed to update comment");
   }
-  outputSuccess(transformComment(mutation.comment as GraphQLResponseData));
+  const comment = mutation.comment as GraphQLResponseData;
+  const issue = comment.issue as GraphQLResponseData | undefined;
+  let autoLinked: AutoLinkResult | undefined;
+  if (issue) {
+    // rawBody (pre-wrap) — see note in handleCreateComment about keyword inference
+    autoLinked = await autoLinkCommentReferences({
+      parentIssueUuid: issue.id as string,
+      parentIssueIdentifier: (issue.identifier as string) ?? "",
+      body: rawBody,
+      preResolved,
+      options,
+      graphQLService,
+      linearService,
+    });
+  }
+  const output = transformComment(comment);
+  outputSuccess(autoLinked ? { ...output, autoLinked } : output);
 }
 
 async function handleListComments(
@@ -170,11 +286,15 @@ export function setupCommentsCommands(program: Command): void {
     .description("Create new comment on issue.")
     .addHelpText(
       "after",
-      "\nBoth UUID and identifiers like ABC-123 are supported.\nBare references to known team members (e.g. 'Dima') are auto-converted to @mentions — pass --no-auto-mention to disable.",
+      "\nBoth UUID and identifiers like ABC-123 are supported.\nBare references to known team members (e.g. 'Dima') are auto-converted to @mentions — pass --no-auto-mention to disable.\nIssue identifiers (e.g. DEV-123) are wrapped as markdown links and added as 'related' relations on the parent issue — pass --no-auto-link to disable.",
     )
     .option("--body <body>", "comment body (inline)")
     .option("--file <path>", "read comment body from file")
     .option("--no-auto-mention", "do not auto-convert bare team-member names to @mentions")
+    .option(
+      "--no-auto-link",
+      "skip wrapping issue refs as markdown links and creating sidebar relations",
+    )
     .action(handleAsyncCommand(handleCreateComment));
 
   comments
@@ -183,6 +303,10 @@ export function setupCommentsCommands(program: Command): void {
     .option("--body <body>", "new comment body (inline)")
     .option("--file <path>", "read new comment body from file")
     .option("--no-auto-mention", "do not auto-convert bare team-member names to @mentions")
+    .option(
+      "--no-auto-link",
+      "skip wrapping issue refs as markdown links and creating sidebar relations",
+    )
     .action(handleAsyncCommand(handleUpdateComment));
 
   comments
