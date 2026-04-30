@@ -17,15 +17,21 @@ describe("parsePositiveInt", () => {
 	});
 
 	it("rejects zero", () => {
-		expect(() => parsePositiveInt("0", "--limit")).toThrow("not a positive integer");
+		expect(() => parsePositiveInt("0", "--limit")).toThrow(
+			"not a positive integer",
+		);
 	});
 
 	it("rejects negative numbers", () => {
-		expect(() => parsePositiveInt("-5", "--limit")).toThrow("not a positive integer");
+		expect(() => parsePositiveInt("-5", "--limit")).toThrow(
+			"not a positive integer",
+		);
 	});
 
 	it("rejects non-numeric strings", () => {
-		expect(() => parsePositiveInt("abc", "--limit")).toThrow("not a positive integer");
+		expect(() => parsePositiveInt("abc", "--limit")).toThrow(
+			"not a positive integer",
+		);
 	});
 
 	it("includes flag name in error", () => {
@@ -38,7 +44,9 @@ describe("parsePositiveInt", () => {
 	});
 
 	it("rejects empty string", () => {
-		expect(() => parsePositiveInt("", "--limit")).toThrow("not a positive integer");
+		expect(() => parsePositiveInt("", "--limit")).toThrow(
+			"not a positive integer",
+		);
 	});
 });
 
@@ -101,7 +109,9 @@ describe("validateHexColor", () => {
 	});
 
 	it("rejects 8-digit hex (with alpha)", () => {
-		expect(() => validateHexColor("#ff000080")).toThrow("not a valid hex color");
+		expect(() => validateHexColor("#ff000080")).toThrow(
+			"not a valid hex color",
+		);
 	});
 });
 

@@ -1,4 +1,4 @@
-import { parse, Kind, visit } from "graphql";
+import { Kind, parse, visit } from "graphql";
 import { describe, expect, it } from "vitest";
 import {
 	CREATE_PROJECT_MUTATION,
@@ -107,7 +107,9 @@ describe("GET_PROJECT_TEAM_ISSUES_QUERY", () => {
 
 	it("returns issues filtered by team", () => {
 		expect(containsField(GET_PROJECT_TEAM_ISSUES_QUERY, "issues")).toBe(true);
-		expect(containsField(GET_PROJECT_TEAM_ISSUES_QUERY, "identifier")).toBe(true);
+		expect(containsField(GET_PROJECT_TEAM_ISSUES_QUERY, "identifier")).toBe(
+			true,
+		);
 		expect(containsField(GET_PROJECT_TEAM_ISSUES_QUERY, "title")).toBe(true);
 	});
 });

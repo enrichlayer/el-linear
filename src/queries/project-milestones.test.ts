@@ -1,4 +1,4 @@
-import { parse, Kind, visit } from "graphql";
+import { Kind, parse, visit } from "graphql";
 import { describe, expect, it } from "vitest";
 import {
 	CREATE_PROJECT_MILESTONE_MUTATION,
@@ -51,9 +51,15 @@ describe("LIST_PROJECT_MILESTONES_QUERY", () => {
 
 	it("returns milestone metadata fields", () => {
 		expect(containsField(LIST_PROJECT_MILESTONES_QUERY, "name")).toBe(true);
-		expect(containsField(LIST_PROJECT_MILESTONES_QUERY, "description")).toBe(true);
-		expect(containsField(LIST_PROJECT_MILESTONES_QUERY, "targetDate")).toBe(true);
-		expect(containsField(LIST_PROJECT_MILESTONES_QUERY, "sortOrder")).toBe(true);
+		expect(containsField(LIST_PROJECT_MILESTONES_QUERY, "description")).toBe(
+			true,
+		);
+		expect(containsField(LIST_PROJECT_MILESTONES_QUERY, "targetDate")).toBe(
+			true,
+		);
+		expect(containsField(LIST_PROJECT_MILESTONES_QUERY, "sortOrder")).toBe(
+			true,
+		);
 	});
 });
 
@@ -70,11 +76,15 @@ describe("GET_PROJECT_MILESTONE_BY_ID_QUERY", () => {
 	});
 
 	it("includes associated issues", () => {
-		expect(containsField(GET_PROJECT_MILESTONE_BY_ID_QUERY, "issues")).toBe(true);
+		expect(containsField(GET_PROJECT_MILESTONE_BY_ID_QUERY, "issues")).toBe(
+			true,
+		);
 	});
 
 	it("includes parent project info", () => {
-		expect(containsField(GET_PROJECT_MILESTONE_BY_ID_QUERY, "project")).toBe(true);
+		expect(containsField(GET_PROJECT_MILESTONE_BY_ID_QUERY, "project")).toBe(
+			true,
+		);
 	});
 });
 
@@ -94,7 +104,9 @@ describe("FIND_PROJECT_MILESTONE_BY_NAME_SCOPED", () => {
 	});
 
 	it("returns project association", () => {
-		expect(containsField(FIND_PROJECT_MILESTONE_BY_NAME_SCOPED, "project")).toBe(true);
+		expect(
+			containsField(FIND_PROJECT_MILESTONE_BY_NAME_SCOPED, "project"),
+		).toBe(true);
 	});
 });
 
@@ -109,14 +121,18 @@ describe("FIND_PROJECT_MILESTONE_BY_NAME_GLOBAL", () => {
 	});
 
 	it("returns project association for disambiguation", () => {
-		expect(containsField(FIND_PROJECT_MILESTONE_BY_NAME_GLOBAL, "project")).toBe(true);
+		expect(
+			containsField(FIND_PROJECT_MILESTONE_BY_NAME_GLOBAL, "project"),
+		).toBe(true);
 	});
 });
 
 describe("CREATE_PROJECT_MILESTONE_MUTATION", () => {
 	it("is a valid mutation", () => {
 		expect(() => parse(CREATE_PROJECT_MILESTONE_MUTATION)).not.toThrow();
-		expect(getOperationType(CREATE_PROJECT_MILESTONE_MUTATION)).toBe("mutation");
+		expect(getOperationType(CREATE_PROJECT_MILESTONE_MUTATION)).toBe(
+			"mutation",
+		);
 	});
 
 	it("requires projectId and name, optional description and targetDate", () => {
@@ -128,16 +144,22 @@ describe("CREATE_PROJECT_MILESTONE_MUTATION", () => {
 	});
 
 	it("returns success and full milestone data", () => {
-		expect(containsField(CREATE_PROJECT_MILESTONE_MUTATION, "success")).toBe(true);
+		expect(containsField(CREATE_PROJECT_MILESTONE_MUTATION, "success")).toBe(
+			true,
+		);
 		expect(containsField(CREATE_PROJECT_MILESTONE_MUTATION, "name")).toBe(true);
-		expect(containsField(CREATE_PROJECT_MILESTONE_MUTATION, "project")).toBe(true);
+		expect(containsField(CREATE_PROJECT_MILESTONE_MUTATION, "project")).toBe(
+			true,
+		);
 	});
 });
 
 describe("UPDATE_PROJECT_MILESTONE_MUTATION", () => {
 	it("is a valid mutation", () => {
 		expect(() => parse(UPDATE_PROJECT_MILESTONE_MUTATION)).not.toThrow();
-		expect(getOperationType(UPDATE_PROJECT_MILESTONE_MUTATION)).toBe("mutation");
+		expect(getOperationType(UPDATE_PROJECT_MILESTONE_MUTATION)).toBe(
+			"mutation",
+		);
 	});
 
 	it("accepts id and optional update fields", () => {
@@ -150,19 +172,27 @@ describe("UPDATE_PROJECT_MILESTONE_MUTATION", () => {
 	});
 
 	it("returns success and updated milestone", () => {
-		expect(containsField(UPDATE_PROJECT_MILESTONE_MUTATION, "success")).toBe(true);
-		expect(containsField(UPDATE_PROJECT_MILESTONE_MUTATION, "updatedAt")).toBe(true);
+		expect(containsField(UPDATE_PROJECT_MILESTONE_MUTATION, "success")).toBe(
+			true,
+		);
+		expect(containsField(UPDATE_PROJECT_MILESTONE_MUTATION, "updatedAt")).toBe(
+			true,
+		);
 	});
 });
 
 describe("scoped vs global milestone queries", () => {
 	it("scoped query accesses milestones through project", () => {
 		// Scoped uses project(id:) -> projectMilestones
-		expect(FIND_PROJECT_MILESTONE_BY_NAME_SCOPED).toContain("project(id: $projectId)");
+		expect(FIND_PROJECT_MILESTONE_BY_NAME_SCOPED).toContain(
+			"project(id: $projectId)",
+		);
 	});
 
 	it("global query accesses projectMilestones directly", () => {
-		expect(FIND_PROJECT_MILESTONE_BY_NAME_GLOBAL).toContain("projectMilestones(");
+		expect(FIND_PROJECT_MILESTONE_BY_NAME_GLOBAL).toContain(
+			"projectMilestones(",
+		);
 	});
 
 	it("both return the same fields", () => {

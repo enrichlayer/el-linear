@@ -1,4 +1,7 @@
-import { COMPLETE_ISSUE_FRAGMENT, COMPLETE_ISSUE_WITH_COMMENTS_FRAGMENT } from "./common.js";
+import {
+	COMPLETE_ISSUE_FRAGMENT,
+	COMPLETE_ISSUE_WITH_COMMENTS_FRAGMENT,
+} from "./common.js";
 
 export const GET_ISSUES_QUERY = `
   query GetIssues($first: Int!, $orderBy: PaginationOrderBy) {
@@ -267,18 +270,18 @@ export const BATCH_RESOLVE_FOR_CREATE_QUERY = `
  * Uses `or` + `eqIgnoreCase` since Linear's `in` filter may be case-sensitive.
  */
 export function buildResolveLabelsByNameQuery(labelNames: string[]): {
-  query: string;
-  variables: Record<string, string>;
+	query: string;
+	variables: Record<string, string>;
 } {
-  const varDecls = labelNames.map((_, i) => `$label${i}: String!`).join(", ");
-  const filterConditions = labelNames
-    .map((_, i) => `{ name: { eqIgnoreCase: $label${i} } }`)
-    .join("\n          ");
-  const variables: Record<string, string> = {};
-  for (let i = 0; i < labelNames.length; i++) {
-    variables[`label${i}`] = labelNames[i];
-  }
-  const query = `
+	const varDecls = labelNames.map((_, i) => `$label${i}: String!`).join(", ");
+	const filterConditions = labelNames
+		.map((_, i) => `{ name: { eqIgnoreCase: $label${i} } }`)
+		.join("\n          ");
+	const variables: Record<string, string> = {};
+	for (let i = 0; i < labelNames.length; i++) {
+		variables[`label${i}`] = labelNames[i];
+	}
+	const query = `
   query ResolveLabels(${varDecls}) {
     labels: issueLabels(
       filter: {
@@ -299,7 +302,7 @@ export function buildResolveLabelsByNameQuery(labelNames: string[]): {
     }
   }
 `;
-  return { query, variables };
+	return { query, variables };
 }
 
 export const GET_ISSUE_STATE_HISTORY_QUERY = `

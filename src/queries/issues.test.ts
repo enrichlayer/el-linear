@@ -1,4 +1,4 @@
-import { parse, Kind, visit } from "graphql";
+import { Kind, parse, visit } from "graphql";
 import { describe, expect, it } from "vitest";
 import {
 	BATCH_RESOLVE_FOR_CREATE_QUERY,
@@ -96,7 +96,9 @@ describe("BATCH_RESOLVE_FOR_SEARCH_QUERY", () => {
 
 	it("returns teams, projects, and users data", () => {
 		expect(containsField(BATCH_RESOLVE_FOR_SEARCH_QUERY, "teams")).toBe(true);
-		expect(containsField(BATCH_RESOLVE_FOR_SEARCH_QUERY, "projects")).toBe(true);
+		expect(containsField(BATCH_RESOLVE_FOR_SEARCH_QUERY, "projects")).toBe(
+			true,
+		);
 		expect(containsField(BATCH_RESOLVE_FOR_SEARCH_QUERY, "users")).toBe(true);
 	});
 });
@@ -169,7 +171,9 @@ describe("BATCH_RESOLVE_FOR_CREATE_QUERY", () => {
 	});
 
 	it("returns project milestones for inline resolution", () => {
-		expect(containsField(BATCH_RESOLVE_FOR_CREATE_QUERY, "projectMilestones")).toBe(true);
+		expect(
+			containsField(BATCH_RESOLVE_FOR_CREATE_QUERY, "projectMilestones"),
+		).toBe(true);
 	});
 });
 
@@ -183,7 +187,11 @@ describe("buildResolveLabelsByNameQuery", () => {
 	});
 
 	it("generates query for multiple labels", () => {
-		const { query, variables } = buildResolveLabelsByNameQuery(["bug", "feature", "enhancement"]);
+		const { query, variables } = buildResolveLabelsByNameQuery([
+			"bug",
+			"feature",
+			"enhancement",
+		]);
 		expect(() => parse(query)).not.toThrow();
 		expect(variables).toEqual({
 			label0: "bug",
@@ -208,7 +216,10 @@ describe("buildResolveLabelsByNameQuery", () => {
 	});
 
 	it("handles labels with special characters", () => {
-		const { query, variables } = buildResolveLabelsByNameQuery(["P0 - Critical", "won't fix"]);
+		const { query, variables } = buildResolveLabelsByNameQuery([
+			"P0 - Critical",
+			"won't fix",
+		]);
 		expect(() => parse(query)).not.toThrow();
 		expect(variables.label0).toBe("P0 - Critical");
 		expect(variables.label1).toBe("won't fix");
@@ -217,8 +228,12 @@ describe("buildResolveLabelsByNameQuery", () => {
 
 describe("GET_ISSUE_STATE_HISTORY_QUERY", () => {
 	it("returns state history with timing info", () => {
-		expect(containsField(GET_ISSUE_STATE_HISTORY_QUERY, "stateHistory")).toBe(true);
-		expect(containsField(GET_ISSUE_STATE_HISTORY_QUERY, "startedAt")).toBe(true);
+		expect(containsField(GET_ISSUE_STATE_HISTORY_QUERY, "stateHistory")).toBe(
+			true,
+		);
+		expect(containsField(GET_ISSUE_STATE_HISTORY_QUERY, "startedAt")).toBe(
+			true,
+		);
 		expect(containsField(GET_ISSUE_STATE_HISTORY_QUERY, "endedAt")).toBe(true);
 	});
 });
@@ -239,7 +254,9 @@ describe("ISSUE_RELATION_CREATE_MUTATION", () => {
 
 	it("returns both sides of the relation", () => {
 		expect(containsField(ISSUE_RELATION_CREATE_MUTATION, "issue")).toBe(true);
-		expect(containsField(ISSUE_RELATION_CREATE_MUTATION, "relatedIssue")).toBe(true);
+		expect(containsField(ISSUE_RELATION_CREATE_MUTATION, "relatedIssue")).toBe(
+			true,
+		);
 		expect(containsField(ISSUE_RELATION_CREATE_MUTATION, "type")).toBe(true);
 	});
 });
@@ -247,7 +264,9 @@ describe("ISSUE_RELATION_CREATE_MUTATION", () => {
 describe("GET_ISSUE_RELATIONS_QUERY", () => {
 	it("fetches both relations and inverseRelations", () => {
 		expect(containsField(GET_ISSUE_RELATIONS_QUERY, "relations")).toBe(true);
-		expect(containsField(GET_ISSUE_RELATIONS_QUERY, "inverseRelations")).toBe(true);
+		expect(containsField(GET_ISSUE_RELATIONS_QUERY, "inverseRelations")).toBe(
+			true,
+		);
 	});
 });
 

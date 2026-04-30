@@ -5,7 +5,7 @@
 
 const IDENTIFIER_REGEX = /\b([A-Z][A-Z0-9]*-\d+)\b/g;
 const FENCED_CODE_BLOCK_REGEX =
-  /(?:^|\n)([ \t]*)(?:```|~~~)[^\n]*\n[\s\S]*?\n\1?(?:```|~~~)(?=\n|$)/g;
+	/(?:^|\n)([ \t]*)(?:```|~~~)[^\n]*\n[\s\S]*?\n\1?(?:```|~~~)(?=\n|$)/g;
 // Inline backtick spans — `EMW-258`. Markdown allows multiple backticks for spans containing
 // backticks; we keep it simple and match single-backtick spans.
 const INLINE_CODE_REGEX = /`[^`\n]+?`/g;
@@ -18,8 +18,8 @@ const ANGLE_AUTOLINK_REGEX = /<[^>\s]+>/g;
 const BARE_URL_REGEX = /https?:\/\/\S+/g;
 
 interface ProtectedRange {
-  end: number;
-  start: number;
+	end: number;
+	start: number;
 }
 
 /**
@@ -33,33 +33,33 @@ interface ProtectedRange {
  * inside any protected range" so overlap is fine.
  */
 function findProtectedRanges(text: string): ProtectedRange[] {
-  const ranges: ProtectedRange[] = [];
-  for (const re of [
-    FENCED_CODE_BLOCK_REGEX,
-    INLINE_CODE_REGEX,
-    MARKDOWN_LINK_REGEX,
-    ANGLE_AUTOLINK_REGEX,
-    BARE_URL_REGEX,
-  ]) {
-    for (const m of text.matchAll(re)) {
-      const start = m.index ?? 0;
-      ranges.push({ start, end: start + m[0].length });
-    }
-  }
-  return ranges;
+	const ranges: ProtectedRange[] = [];
+	for (const re of [
+		FENCED_CODE_BLOCK_REGEX,
+		INLINE_CODE_REGEX,
+		MARKDOWN_LINK_REGEX,
+		ANGLE_AUTOLINK_REGEX,
+		BARE_URL_REGEX,
+	]) {
+		for (const m of text.matchAll(re)) {
+			const start = m.index ?? 0;
+			ranges.push({ start, end: start + m[0].length });
+		}
+	}
+	return ranges;
 }
 
 function isProtected(pos: number, ranges: ProtectedRange[]): boolean {
-  for (const r of ranges) {
-    if (pos >= r.start && pos < r.end) {
-      return true;
-    }
-  }
-  return false;
+	for (const r of ranges) {
+		if (pos >= r.start && pos < r.end) {
+			return true;
+		}
+	}
+	return false;
 }
 
 function buildIssueUrl(identifier: string, workspaceUrlKey: string): string {
-  return `https://linear.app/${workspaceUrlKey}/issue/${identifier}/`;
+	return `https://linear.app/${workspaceUrlKey}/issue/${identifier}/`;
 }
 
 /**
@@ -74,34 +74,34 @@ function buildIssueUrl(identifier: string, workspaceUrlKey: string): string {
  * alone (it's inside a protected range), so this function is idempotent.
  */
 export function wrapIssueReferencesAsLinks(
-  text: string,
-  validIdentifiers: Set<string>,
-  workspaceUrlKey: string,
+	text: string,
+	validIdentifiers: Set<string>,
+	workspaceUrlKey: string,
 ): string {
-  if (!text || validIdentifiers.size === 0) {
-    return text;
-  }
-  const ranges = findProtectedRanges(text);
+	if (!text || validIdentifiers.size === 0) {
+		return text;
+	}
+	const ranges = findProtectedRanges(text);
 
-  // Walk through matches and build the result string in pieces.
-  // We can't use String.replace with a callback because we need positional protection checks.
-  let result = "";
-  let cursor = 0;
-  for (const m of text.matchAll(IDENTIFIER_REGEX)) {
-    const id = m[1];
-    const start = m.index ?? 0;
-    const end = start + m[0].length;
-    if (!validIdentifiers.has(id)) {
-      continue;
-    }
-    if (isProtected(start, ranges)) {
-      continue;
-    }
-    // Append everything up to this match unchanged
-    result += text.slice(cursor, start);
-    result += `[${id}](${buildIssueUrl(id, workspaceUrlKey)})`;
-    cursor = end;
-  }
-  result += text.slice(cursor);
-  return result;
+	// Walk through matches and build the result string in pieces.
+	// We can't use String.replace with a callback because we need positional protection checks.
+	let result = "";
+	let cursor = 0;
+	for (const m of text.matchAll(IDENTIFIER_REGEX)) {
+		const id = m[1];
+		const start = m.index ?? 0;
+		const end = start + m[0].length;
+		if (!validIdentifiers.has(id)) {
+			continue;
+		}
+		if (isProtected(start, ranges)) {
+			continue;
+		}
+		// Append everything up to this match unchanged
+		result += text.slice(cursor, start);
+		result += `[${id}](${buildIssueUrl(id, workspaceUrlKey)})`;
+		cursor = end;
+	}
+	result += text.slice(cursor);
+	return result;
 }

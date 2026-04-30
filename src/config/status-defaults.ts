@@ -9,20 +9,20 @@ import { loadConfig } from "./config.js";
  * - Missing assignee OR project → "Triage"
  */
 export function resolveDefaultStatus(opts: {
-  explicitStatus?: string;
-  hasAssignee: boolean;
-  hasProject: boolean;
+	explicitStatus?: string;
+	hasAssignee: boolean;
+	hasProject: boolean;
 }): string | undefined {
-  // Explicit status always wins
-  if (opts.explicitStatus) {
-    return opts.explicitStatus;
-  }
+	// Explicit status always wins
+	if (opts.explicitStatus) {
+		return opts.explicitStatus;
+	}
 
-  const config = loadConfig();
+	const config = loadConfig();
 
-  if (opts.hasAssignee && opts.hasProject) {
-    return config.statusDefaults.withAssigneeAndProject;
-  }
+	if (opts.hasAssignee && opts.hasProject) {
+		return config.statusDefaults.withAssigneeAndProject;
+	}
 
-  return config.statusDefaults.noProject;
+	return config.statusDefaults.noProject;
 }

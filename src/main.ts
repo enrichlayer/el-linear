@@ -21,36 +21,42 @@ import { setupTeamsCommands } from "./commands/teams.js";
 import { setupTemplatesCommands } from "./commands/templates.js";
 import { setupUsersCommands } from "./commands/users.js";
 import { setFieldsFilter, setJqFilter, setRawMode } from "./utils/output.js";
-import { splitList } from "./utils/validators.js";
 import { outputUsageInfo } from "./utils/usage.js";
+import { splitList } from "./utils/validators.js";
 
 program
-  .name("linctl")
-  .description(
-    "A pragmatic CLI for Linear.app — deterministic resolution, structured validation, GraphQL escape hatch.",
-  )
-  .version("1.1.0")
-  .option("--api-token <token>", "Linear API token")
-  .option("--json", "output as JSON (default, accepted for compatibility)")
-  .option("--raw", "strip { data, meta } wrapper from list output — emit the array directly")
-  .option("--jq <filter>", "apply a jq filter to the JSON output")
-  .option("--fields <fields>", "filter output to specific fields (comma-separated)");
+	.name("linctl")
+	.description(
+		"A pragmatic CLI for Linear.app — deterministic resolution, structured validation, GraphQL escape hatch.",
+	)
+	.version("1.1.0")
+	.option("--api-token <token>", "Linear API token")
+	.option("--json", "output as JSON (default, accepted for compatibility)")
+	.option(
+		"--raw",
+		"strip { data, meta } wrapper from list output — emit the array directly",
+	)
+	.option("--jq <filter>", "apply a jq filter to the JSON output")
+	.option(
+		"--fields <fields>",
+		"filter output to specific fields (comma-separated)",
+	);
 
 program.hook("preAction", (_thisCommand: Command, actionCommand: Command) => {
-  const rootOpts = actionCommand.optsWithGlobals();
-  if (rootOpts.raw) {
-    setRawMode(true);
-  }
-  if (rootOpts.jq) {
-    setJqFilter(rootOpts.jq);
-  }
-  if (rootOpts.fields) {
-    setFieldsFilter(splitList(rootOpts.fields));
-  }
+	const rootOpts = actionCommand.optsWithGlobals();
+	if (rootOpts.raw) {
+		setRawMode(true);
+	}
+	if (rootOpts.jq) {
+		setJqFilter(rootOpts.jq);
+	}
+	if (rootOpts.fields) {
+		setFieldsFilter(splitList(rootOpts.fields));
+	}
 });
 
 program.action(() => {
-  program.help();
+	program.help();
 });
 
 setupAttachmentsCommands(program);
@@ -75,8 +81,8 @@ setupConfigCommands(program);
 setupReadShortcut(program);
 
 program
-  .command("usage")
-  .description("show usage info for *all* commands")
-  .action(() => outputUsageInfo(program));
+	.command("usage")
+	.description("show usage info for *all* commands")
+	.action(() => outputUsageInfo(program));
 
 program.parse();

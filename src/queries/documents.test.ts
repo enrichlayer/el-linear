@@ -1,4 +1,4 @@
-import { parse, Kind, visit } from "graphql";
+import { Kind, parse, visit } from "graphql";
 import { describe, expect, it } from "vitest";
 import {
 	CREATE_DOCUMENT_MUTATION,
@@ -146,7 +146,17 @@ describe("DELETE_DOCUMENT_MUTATION", () => {
 
 describe("document fragment consistency", () => {
 	it("all document queries share the same fields", () => {
-		const sharedFields = ["id", "title", "content", "slugId", "url", "icon", "color", "createdAt", "updatedAt"];
+		const sharedFields = [
+			"id",
+			"title",
+			"content",
+			"slugId",
+			"url",
+			"icon",
+			"color",
+			"createdAt",
+			"updatedAt",
+		];
 		const queries = [
 			CREATE_DOCUMENT_MUTATION,
 			UPDATE_DOCUMENT_MUTATION,
@@ -156,7 +166,9 @@ describe("document fragment consistency", () => {
 
 		for (const query of queries) {
 			for (const field of sharedFields) {
-				expect(containsField(query, field), `${field} missing in query`).toBe(true);
+				expect(containsField(query, field), `${field} missing in query`).toBe(
+					true,
+				);
 			}
 		}
 	});

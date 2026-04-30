@@ -12,14 +12,14 @@ import { loadConfig } from "./config.js";
  *   { canonical: "GitHub", reject: ["Github", "github", "GitHUB"] }
  */
 export interface TermRule {
-  canonical: string;
-  reject: string[];
+	canonical: string;
+	reject: string[];
 }
 
 interface TermViolation {
-  matched: string;
-  occurrences: number;
-  rule: TermRule;
+	matched: string;
+	occurrences: number;
+	rule: TermRule;
 }
 
 /**
@@ -29,25 +29,32 @@ interface TermViolation {
  * `path/to/enrichlayer` (file path).
  */
 function buildRejectRegex(rejected: string): RegExp {
-  return new RegExp(`(?<!\\w|\\.|/)${escapeRegExp(rejected)}(?!\\w|\\.com|\\.co|\\.io)`, "g");
+	return new RegExp(
+		`(?<!\\w|\\.|/)${escapeRegExp(rejected)}(?!\\w|\\.com|\\.co|\\.io)`,
+		"g",
+	);
 }
 
 function findViolations(text: string, rules: TermRule[]): TermViolation[] {
-  const violations: TermViolation[] = [];
-  for (const rule of rules) {
-    for (const rejected of rule.reject) {
-      const matches = text.match(buildRejectRegex(rejected));
-      if (matches) {
-        violations.push({ rule, matched: rejected, occurrences: matches.length });
-      }
-    }
-  }
-  return violations;
+	const violations: TermViolation[] = [];
+	for (const rule of rules) {
+		for (const rejected of rule.reject) {
+			const matches = text.match(buildRejectRegex(rejected));
+			if (matches) {
+				violations.push({
+					rule,
+					matched: rejected,
+					occurrences: matches.length,
+				});
+			}
+		}
+	}
+	return violations;
 }
 
 function formatViolation(v: TermViolation): string {
-  const plural = v.occurrences > 1 ? "s" : "";
-  return `Found "${v.matched}" — use "${v.rule.canonical}" instead (${v.occurrences} occurrence${plural})`;
+	const plural = v.occurrences > 1 ? "s" : "";
+	return `Found "${v.matched}" — use "${v.rule.canonical}" instead (${v.occurrences} occurrence${plural})`;
 }
 
 /**
@@ -65,34 +72,36 @@ function formatViolation(v: TermViolation): string {
  * If no rules are configured, this is a no-op.
  */
 export function enforceTerms(
-  texts: Array<string | null | undefined>,
-  options: { strict?: boolean } = {},
+	texts: Array<string | null | undefined>,
+	options: { strict?: boolean } = {},
 ): void {
-  const { terms } = loadConfig();
-  if (!terms || terms.length === 0) {
-    return;
-  }
+	const { terms } = loadConfig();
+	if (!terms || terms.length === 0) {
+		return;
+	}
 
-  const allViolations: TermViolation[] = [];
-  for (const text of texts) {
-    if (!text) {
-      continue;
-    }
-    allViolations.push(...findViolations(text, terms));
-  }
+	const allViolations: TermViolation[] = [];
+	for (const text of texts) {
+		if (!text) {
+			continue;
+		}
+		allViolations.push(...findViolations(text, terms));
+	}
 
-  if (allViolations.length === 0) {
-    return;
-  }
+	if (allViolations.length === 0) {
+		return;
+	}
 
-  const warnings = allViolations.map(formatViolation);
+	const warnings = allViolations.map(formatViolation);
 
-  if (options.strict) {
-    throw new Error(`Term enforcement failed:\n${warnings.map((w) => `  - ${w}`).join("\n")}`);
-  }
-  outputWarning(warnings, "term_enforcement");
+	if (options.strict) {
+		throw new Error(
+			`Term enforcement failed:\n${warnings.map((w) => `  - ${w}`).join("\n")}`,
+		);
+	}
+	outputWarning(warnings, "term_enforcement");
 }
 
 function escapeRegExp(string: string): string {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
