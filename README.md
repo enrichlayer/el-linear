@@ -1,217 +1,203 @@
-# el-linear
+# linctl
 
-Enrich Layer CLI for Linear.app — deterministic team/label/member resolution, brand validation, status defaults, and natural language search.
+A pragmatic CLI for [Linear.app](https://linear.app) — deterministic team /
+label / member resolution, structured issue validation, configurable term
+enforcement, and a GraphQL escape hatch for everything that isn't a
+first-class command.
+
+> **Note on naming.** This package was previously published as
+> `@enrichlayer/el-linear` with binary `el-linear`. The current name is
+> `@enrichlayer/linctl` (binary `linctl`). See [CHANGELOG.md](./CHANGELOG.md)
+> for the migration recipe.
 
 ## Install
 
 ```bash
-cd tools/cli/el-linear
-npm install
-npm run build
-npm link  # makes `el-linear` available globally
+pnpm add -g @enrichlayer/linctl
+# or
+npm install -g @enrichlayer/linctl
 ```
 
-Requires Node.js >= 22.
+Requires Node.js ≥ 22.
+
+## Quickstart
+
+```bash
+# 1. Set your Linear API token
+export LINEAR_API_TOKEN="lin_api_..."  # from https://linear.app/settings/account/security
+
+# 2. Sanity-check
+linctl teams list
+
+# 3. Create your first issue
+linctl issues create "Investigate flaky deploy" \
+  --team ENG --assignee alice --project "Reliability" \
+  --description "..."
+```
+
+Output is JSON by default. Pipe through `jq` for ad-hoc queries, or use the
+built-in `--jq` / `--fields` / `--raw` flags.
+
+## Why linctl
+
+The Linear API + SDK are excellent. linctl adds the layer above them that
+every team ends up writing themselves:
+
+| Concern | What linctl gives you |
+|---------|----------------------|
+| **Name resolution** | Map team keys, member aliases, and label names to UUIDs from one config file. No fuzzy matching, no API roundtrips per call. |
+| **Issue hygiene** | Required labels, required assignee, required project, type-label-to-verb conventions — all configurable. Warn or hard-fail. |
+| **Term enforcement** | Catch misspellings of brand and project names in issue titles and descriptions ("EnrichLayer" → "Enrich Layer"). |
+| **Status defaults** | "No project? → Triage. Has assignee+project? → Todo." Per-workspace, configurable. |
+| **Auto-link & relate** | When you write `EMW-258` in a description, linctl wraps it as a markdown link **and** creates the corresponding sidebar relation. Prose like "blocked by EMW-258" infers the relation type. |
+| **`--claude` flag** | Tag issues delegated to [Claude Code](https://claude.ai/code) for autonomous work. The label is plain config; the flag is muscle memory. |
+| **GraphQL escape hatch** | Anything not covered by built-in commands: `linctl graphql '{ viewer { id } }'`. Schema introspection included. |
+| **Bundled Claude skill** | The published tarball includes a `claude-skills/linear-operations/` directory you can symlink into your project's `.claude/skills/`. |
 
 ## Authentication
 
-The API token is resolved in order:
+The API token is resolved in this order:
 
-1. `--api-token <token>` flag
-2. `LINEAR_API_TOKEN` environment variable
-3. `~/.config/el-linear/token` file
-4. `~/.linear_api_token` file
+1. `--api-token <token>` flag.
+2. `LINEAR_API_TOKEN` environment variable.
+3. `~/.config/linctl/token` file (recommended for human use).
+4. `~/.linear_api_token` file (legacy, still honored).
 
-## Commands
-
-### Search
-
-| Command | Description |
-|---------|-------------|
-| `search <query>` | Natural language search across issues, projects, initiatives, and documents |
-
-```bash
-el-linear search "login authentication bug"
-el-linear search "database optimization" --type issue --team DEV
-el-linear search "onboarding" --type issue,project --limit 20
-```
-
-Options: `--type <types>` (comma-separated: issue, project, initiative, document), `--team <team>`, `-l, --limit <n>` (default: 10)
-
-### Issues
-
-| Command | Description |
-|---------|-------------|
-| `issues list` | List issues (with team filter) |
-| `issues search <query>` | Search issues by text or filters |
-| `issues create <title>` | Create an issue with auto-resolution |
-| `issues read <issueId>` | Read a single issue by identifier or UUID |
-| `issues update <issueId>` | Update an existing issue |
-| `issues history <issueId>` | Show state transition history (time in each status) |
-| `issues relate <issueId>` | Create issue relations (blocks, related-to, duplicate-of) |
-
-Issue output includes AI-generated summaries when available.
-
-Both UUIDs and identifiers like `DEV-123` are supported for all issue commands.
-
-### Comments
-
-| Command | Description |
-|---------|-------------|
-| `comments create <issueId>` | Add a comment to an issue |
-
-### Labels
-
-| Command | Description |
-|---------|-------------|
-| `labels list` | List labels (optionally filtered by team) |
-| `labels create <name>` | Create a label on a team |
-| `labels retire <labelId>` | Soft-delete a label (can be restored) |
-| `labels restore <labelId>` | Restore a previously retired label |
-
-### Releases
-
-| Command | Description |
-|---------|-------------|
-| `releases list` | List releases (optionally filtered by pipeline) |
-| `releases read <releaseId>` | Get release details including linked documents |
-| `releases create <name>` | Create a new release in a pipeline |
-| `releases pipelines` | List release pipelines and their stages |
-
-Requires the Release Management feature to be enabled in your Linear workspace.
-
-### Projects
-
-| Command | Description |
-|---------|-------------|
-| `projects list` | List projects |
-
-### Cycles
-
-| Command | Description |
-|---------|-------------|
-| `cycles list` | List cycles (with team/active filters) |
-| `cycles read <cycleIdOrName>` | Read a cycle with its issues |
-
-### Project Milestones
-
-| Command | Description |
-|---------|-------------|
-| `project-milestones list` | List milestones for a project |
-| `project-milestones read <id>` | Read milestone details with issues |
-| `project-milestones create <name>` | Create a new milestone |
-| `project-milestones update <id>` | Update a milestone |
-
-### Documents
-
-| Command | Description |
-|---------|-------------|
-| `documents list` | List documents (filter by project or issue) |
-| `documents create` | Create a document (optionally linked to an issue) |
-| `documents read <documentId>` | Read a document |
-| `documents update <documentId>` | Update a document |
-| `documents delete <documentId>` | Delete (trash) a document |
-
-### Embeds (File Operations)
-
-| Command | Description |
-|---------|-------------|
-| `embeds download <url>` | Download a file from Linear storage |
-| `embeds upload <file>` | Upload a file to Linear storage |
-
-### Other
-
-| Command | Description |
-|---------|-------------|
-| `teams list` | List teams |
-| `users list` | List users |
-| `graphql [query]` | Execute raw GraphQL queries |
-| `usage` | Show usage info for all commands |
-
-All `list` commands support `-l, --limit <n>`.
-
-## EL-Specific Features
-
-### Natural Language Search
-
-Uses Linear's semantic search API to find issues, projects, initiatives, and documents using natural language queries:
-
-```bash
-el-linear search "improve API response times"
-el-linear search "customer onboarding flow" --type issue --team DEV
-```
-
-### Deterministic Name Resolution
-
-Names resolve to UUIDs via config — no fuzzy matching:
-
-```bash
-el-linear issues create "Title" --team FE --assignee dima --labels "feature-request"
-```
-
-- `--team FE` resolves team key to UUID (case-insensitive)
-- `--assignee dima` resolves alias "dima" to Dmitrii to UUID
-- `--labels "feature-request"` resolves per-team label UUID
-
-### Brand Validation
-
-Issue titles and descriptions are checked for common misspellings of "Enrich Layer" (e.g., "EnrichLayer", "enrichlayer"). Warns by default, blocks with `--strict`.
-
-### Status Defaults
-
-- No project assigned: status = "Triage"
-- Has assignee + project: status = "Todo"
-- Explicit `--status` always wins
-
-### Default Labels
-
-The `--claude` flag adds the workspace-level "claude" label automatically.
-
-### Issue Summaries
-
-All issue output automatically includes AI-generated summaries from Linear when available. The summary is extracted from Linear's Prosemirror document format and included as plain text.
+linctl never logs the token.
 
 ## Configuration
 
-Default config has empty values. Create `~/.config/el-linear/config.json` with your workspace UUIDs:
+linctl reads `~/.config/linctl/config.json` on startup. All keys are
+optional; defaults work for casual use.
 
 ```json
 {
-  "defaultTeam": "DEV",
+  "defaultTeam": "ENG",
   "defaultLabels": ["claude"],
-  "brand": {
-    "name": "Enrich Layer",
-    "reject": ["EnrichLayer", "Enrichlayer"]
-  },
   "members": {
-    "aliases": { "dima": "Dmitrii" },
-    "uuids": { "Dmitrii": "uuid-here" }
+    "aliases": { "alice": "Alice Anderson" },
+    "uuids": { "Alice Anderson": "<uuid-from-linear>" }
   },
-  "teams": { "DEV": "uuid-here", "FE": "uuid-here" },
+  "teams": { "ENG": "<uuid-from-linear>" },
   "labels": {
-    "workspace": { "claude": "uuid-here" },
-    "teams": { "FE": { "feature-request": "uuid-here" } }
+    "workspace": { "claude": "<uuid-from-linear>" },
+    "teams": { "ENG": { "feature": "<uuid-from-linear>" } }
   },
   "statusDefaults": {
     "noProject": "Triage",
     "withAssigneeAndProject": "Todo"
-  }
+  },
+  "terms": [
+    { "canonical": "Enrich Layer", "reject": ["EnrichLayer", "enrichlayer"] }
+  ]
 }
 ```
 
-See `config.example.json` for a full example. User config is deep-merged with defaults.
+A full reference with every key documented lives in [config.example.json](./config.example.json).
+
+UUIDs come from the Linear UI (URL bars, settings pages) or via linctl
+itself: `linctl teams list --raw | jq '.[] | {key, id}'`, etc.
+
+## Term enforcement (with brand-promotion examples)
+
+The `terms` rules let you keep a list of canonical names and the misspellings
+to reject. linctl warns (or in `--strict` mode, throws) when an issue title
+or description contains a rejected form.
+
+```json
+{
+  "terms": [
+    { "canonical": "Enrich Layer", "reject": ["EnrichLayer", "enrichlayer", "Enrichlayer"] },
+    { "canonical": "Linear",       "reject": ["linear.app", "Linear App"] },
+    { "canonical": "GitHub",       "reject": ["Github", "GitHUB"] }
+  ]
+}
+```
+
+```bash
+$ linctl issues create "Add EnrichLayer auth flow" --team ENG --description "..." --strict
+Term enforcement failed:
+  - Found "EnrichLayer" — use "Enrich Layer" instead (1 occurrence)
+```
+
+URLs and file paths are exempt — `enrichlayer.com` and `path/to/enrichlayer`
+are allowed even though `enrichlayer` is rejected.
+
+If you don't define any rules, term enforcement is a no-op.
+
+## The `--claude` delegation pattern
+
+`linctl issues create` accepts `--claude`, which applies the workspace label
+configured at `config.labels.workspace.claude`. The label is the contract:
+it tells [Claude Code](https://claude.ai/code) "this issue is delegated to
+you for autonomous execution."
+
+```bash
+linctl issues create "Migrate auth middleware to new session store" \
+  --team ENG --assignee alice --project "Auth Refactor" \
+  --description "..." --claude
+```
+
+Claude finds delegated work with `linctl issues search "claude" --status "Todo"`.
+
+## Commands at a glance
+
+```bash
+linctl usage                  # full reference for all commands
+linctl <command> --help       # detailed help for one command
+```
+
+| Group | Common commands |
+|-------|-----------------|
+| Issues | `issues {list, search, create, read, update, delete, history, related, link-references}` |
+| Comments | `comments {list, create, update}` |
+| Labels | `labels {list, create, retire, restore}` |
+| Projects | `projects {list, add-team, remove-team}` |
+| Cycles | `cycles {list, read}` |
+| Documents | `documents {list, read, create, update, delete}` |
+| Releases | `releases {list, read, create, pipelines}` |
+| Files | `embeds {upload, download}`, `attachments {list, create, delete}` |
+| Search | `search <query>` (semantic, cross-resource) |
+| Escape hatch | `graphql [query]` (with `--introspect`) |
+| Config | `config show`, `users list`, `teams list`, `templates list` |
+
+All `list` subcommands support `-l, --limit <n>`. All commands accept the
+top-level filters: `--raw`, `--jq <expr>`, `--fields <list>`.
+
+## Use with Claude Code
+
+linctl ships a Claude Code skill at `claude-skills/linear-operations/SKILL.md`.
+After installing the package, symlink it into your project:
+
+```bash
+PKG=$(npm root -g)/@enrichlayer/linctl
+ln -s "$PKG/claude-skills/linear-operations" .claude/skills/linear-operations
+```
+
+The skill teaches Claude Code linctl's syntax, the duplicate/related issue
+check, the label taxonomy, the auto-link flow, and the `--claude` delegation
+pattern.
 
 ## Development
 
 ```bash
-npm run start          # run from source (tsx)
-npm run build          # compile TypeScript
-npm run test           # run tests (vitest)
-npm run test:watch     # run tests in watch mode
-npm run lint           # lint with Biome
-npm run lint:fix       # auto-fix lint issues
+git clone https://github.com/enrichlayer/linctl.git
+cd linctl
+pnpm install
+
+pnpm test                # vitest
+pnpm exec tsc --noEmit   # typecheck
+pnpm exec biome check src/
+pnpm run build
+node dist/main.js --version
 ```
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full guide.
+
+## Built by
+
+[Enrich Layer](https://enrichlayer.com) — data enrichment APIs.
 
 ## License
 
-MIT
+[MIT](./LICENSE).

@@ -1,31 +1,59 @@
-# @enrichlayer/el-linear
+# Changelog
 
-## 1.0.6 (2026-04-10)
+All notable changes to `@enrichlayer/linctl` are documented here. The format
+follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
+project adheres to [Semantic Versioning](https://semver.org/).
 
-### Other
-- Merge branch 'chore/release-20260409-081055' into 'main' (4a133e3)
-- DEV-3768: Fix silent label aliasing — remove research→spike, warn on alias (507239c)
+## [Unreleased]
 
+## [1.1.0] — 2026-04-30
 
-## 1.0.5 (2026-04-09)
+This release renames the package from `@enrichlayer/el-linear` to
+`@enrichlayer/linctl` ahead of an open-source release. It generalizes the
+internal feature set, removes brand-specific defaults, and ships a Claude
+Code skill with the package.
 
-### Other
-- INF-476: product-finalizer fixes — tests, env docs, catalog check (360c452)
+### Added
+- Bundled Claude Code skill at `claude-skills/linear-operations/` — included
+  in the published tarball so consumers can symlink it into their projects.
+- `terms: TermRule[]` config key — multi-rule term enforcement (replaces the
+  single-rule `brand: { name, reject }`). The legacy shape auto-migrates with
+  a deprecation warning.
+- Optional `workspaceUrlKey` config key to override the workspace slug used
+  when wrapping issue references as markdown links. When omitted, linctl
+  fetches it from `viewer.organization.urlKey` once per session.
+- `LINCTL_DEBUG=1` env var enables debug stack traces (the legacy
+  `EL_LINEAR_DEBUG` is honored as a fallback for one release).
 
+### Changed
+- **Renamed binary**: `el-linear` → `linctl`. Update your shell scripts and
+  any CI invocations.
+- **Renamed package**: `@enrichlayer/el-linear` → `@enrichlayer/linctl`.
+- **Renamed config dir**: `~/.config/el-linear/` → `~/.config/linctl/`. If
+  you have an existing config there, copy it (or symlink the new path to
+  the old file).
+- The `brand-validator` module is now `term-enforcer` with a more general
+  multi-rule shape. Existing `brand: { name, reject }` configs are auto-
+  migrated on load.
 
-## 1.0.4 (2026-04-07)
+### Removed
+- Hardcoded `verticalint` workspace URL key. Use `config.workspaceUrlKey`
+  to override, or rely on the runtime API lookup.
 
-### Other
-- DEV-3708: Add config-gated issue creation validation to el-linear CLI (e602f83)
+### Migration
 
+```bash
+# 1. Move config (or set up a symlink — both work)
+mv ~/.config/el-linear ~/.config/linctl
 
-## 1.0.3 (2026-03-30)
+# 2. Re-link your CLI (if you used npm link locally)
+cd path/to/linctl && npm link
 
-### Other
-- DEV-3672: Add issues related command and expand skill duplicate check (5760c7c)
+# 3. Update aliases / scripts
+sed -i.bak 's/\bel-linear\b/linctl/g' your-scripts.sh
+```
 
+The legacy `brand` config block is auto-migrated to `terms[]` on first run.
 
-## 1.0.2 (2026-03-27)
-
-### Other
-- chore(release): sync package.json versions to 1.0.1 (b7c20b8)
+[Unreleased]: https://github.com/enrichlayer/linctl/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/enrichlayer/linctl/releases/tag/v1.1.0
