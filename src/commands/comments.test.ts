@@ -19,6 +19,21 @@ vi.mock("../utils/graphql-service.js", () => ({
   createGraphQLService: vi.fn().mockReturnValue({ rawRequest: mockRawRequest }),
 }));
 
+// Pin the workspace URL so getWorkspaceUrlKey skips the API roundtrip in tests.
+vi.mock("../config/config.js", () => ({
+  loadConfig: vi.fn().mockReturnValue({
+    defaultTeam: "",
+    defaultLabels: [],
+    labels: { workspace: {}, teams: {} },
+    members: { aliases: {}, fullNames: {}, handles: {}, uuids: {} },
+    teams: {},
+    teamAliases: {},
+    statusDefaults: { noProject: "Triage", withAssigneeAndProject: "Todo" },
+    terms: [],
+    workspaceUrlKey: "test",
+  }),
+}));
+
 vi.mock("../utils/output.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../utils/output.js")>();
   return {

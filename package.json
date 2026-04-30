@@ -1,7 +1,7 @@
 {
-  "name": "@enrichlayer/el-linear",
-  "version": "1.0.6",
-  "description": "Enrich Layer CLI for Linear.app — deterministic team/label/member resolution, brand validation, and status defaults.",
+  "name": "@enrichlayer/linctl",
+  "version": "1.1.0",
+  "description": "A pragmatic CLI for Linear.app — deterministic team/label/member resolution, structured issue validation, configurable term enforcement, and a GraphQL escape hatch.",
   "main": "dist/main.js",
   "types": "dist/main.d.ts",
   "type": "module",
@@ -13,11 +13,13 @@
   },
   "sideEffects": false,
   "bin": {
-    "el-linear": "dist/main.js"
+    "linctl": "dist/main.js"
   },
   "files": [
     "dist/",
-    "LICENSE"
+    "claude-skills/",
+    "LICENSE",
+    "README.md"
   ],
   "scripts": {
     "build": "tsc && chmod +x dist/main.js",
@@ -34,11 +36,23 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://gitlab.com/vertical-int/tools.git",
-    "directory": "cli/el-linear"
+    "url": "https://github.com/enrichlayer/linctl.git"
   },
+  "homepage": "https://enrichlayer.com/tools/linctl",
+  "bugs": {
+    "url": "https://github.com/enrichlayer/linctl/issues"
+  },
+  "keywords": [
+    "linear",
+    "linear.app",
+    "cli",
+    "issue-tracker",
+    "graphql",
+    "claude",
+    "claude-code"
+  ],
   "publishConfig": {
-    "@enrichlayer:registry": "https://gitlab.com/api/v4/projects/vertical-int%2Ftools/packages/npm/"
+    "access": "public"
   },
   "dependencies": {
     "@linear/sdk": "^82.1.0",

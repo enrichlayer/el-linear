@@ -1,24 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 import { resolveMentions } from "./mention-resolver.js";
 
-const UUID_DIMA = "a1a780e3-a411-466e-b6c8-0fe04ff355fa";
-const UUID_KAMAL = "b2b890f4-b522-477f-a7d9-1af15aa466ab";
-const UUID_RAEFALDHI = "d4d012b6-d744-499b-c9fb-3fb37ff688fd";
+const UUID_BOB = "a1a780e3-a411-466e-b6c8-0fe04ff355fa";
+const UUID_DAVID = "b2b890f4-b522-477f-a7d9-1af15aa466ab";
+const UUID_ERIN = "d4d012b6-d744-499b-c9fb-3fb37ff688fd";
 
 vi.mock("../config/resolver.js", () => ({
   resolveMember: vi.fn((name: string) => {
     // Mirror the real resolver: alias keys, uuid keys, and partial matches on
     // fullName tokens all resolve to the same UUID.
     const known: Record<string, string> = {
-      dima: UUID_DIMA,
-      dmitrii: UUID_DIMA,
-      surkov: UUID_DIMA,
-      kamal: UUID_KAMAL,
-      mahmudi: UUID_KAMAL,
-      raefaldhi: UUID_RAEFALDHI,
-      rae: UUID_RAEFALDHI,
-      amartya: UUID_RAEFALDHI,
-      junior: UUID_RAEFALDHI,
+      bob: UUID_BOB,
+      bobby: UUID_BOB,
+      marley: UUID_BOB,
+      david: UUID_DAVID,
+      doe: UUID_DAVID,
+      erin: UUID_ERIN,
+      rae: UUID_ERIN,
+      smith: UUID_ERIN,
     };
     return known[name.toLowerCase()] ?? name;
   }),
@@ -27,12 +26,12 @@ vi.mock("../config/resolver.js", () => ({
 vi.mock("../config/config.js", () => ({
   loadConfig: vi.fn(() => ({
     members: {
-      aliases: { dima: "Dmitrii", rae: "Raefaldhi" },
-      uuids: { Dmitrii: UUID_DIMA, Kamal: UUID_KAMAL, Raefaldhi: UUID_RAEFALDHI },
+      aliases: { bob: "Bob", rae: "Erin" },
+      uuids: { Bob: UUID_BOB, David: UUID_DAVID, Erin: UUID_ERIN },
       fullNames: {
-        [UUID_DIMA]: "Dmitrii Surkov",
-        [UUID_KAMAL]: "Kamal Mahmudi",
-        [UUID_RAEFALDHI]: "Raefaldhi Amartya Junior",
+        [UUID_BOB]: "Bob Marley",
+        [UUID_DAVID]: "David Doe",
+        [UUID_ERIN]: "Erin Smith",
       },
       handles: {},
     },
@@ -59,7 +58,7 @@ describe("resolveMentions", () => {
   });
 
   it("resolves config-based mentions", async () => {
-    const result = await resolveMentions("Hey @dima check this", mockLinearService());
+    const result = await resolveMentions("Hey @bob check this", mockLinearService());
     expect(result).not.toBeNull();
     const doc = result!.bodyData;
     expect(doc.type).toBe("doc");
@@ -71,13 +70,13 @@ describe("resolveMentions", () => {
     expect(nodes[0]).toEqual({ type: "text", text: "Hey " });
     expect(nodes[1]).toEqual({
       type: "suggestion_userMentions",
-      attrs: { id: "a1a780e3-a411-466e-b6c8-0fe04ff355fa", label: "dima" },
+      attrs: { id: "a1a780e3-a411-466e-b6c8-0fe04ff355fa", label: "bob" },
     });
     expect(nodes[2]).toEqual({ type: "text", text: " check this" });
   });
 
   it("resolves multiple mentions in one paragraph", async () => {
-    const result = await resolveMentions("@dima and @kamal please review", mockLinearService());
+    const result = await resolveMentions("@bob and @david please review", mockLinearService());
     expect(result).not.toBeNull();
     const nodes = result!.bodyData.content![0].content!;
     const mentionNodes = nodes.filter((n) => n.type === "suggestion_userMentions");
@@ -101,14 +100,14 @@ describe("resolveMentions", () => {
   });
 
   it("handles multiple paragraphs separated by blank lines", async () => {
-    const result = await resolveMentions("@dima first\n\n@kamal second", mockLinearService());
+    const result = await resolveMentions("@bob first\n\n@david second", mockLinearService());
     expect(result).not.toBeNull();
     expect(result!.bodyData.content).toHaveLength(2);
   });
 
   it("deduplicates mentions of the same user", async () => {
     const service = mockLinearService();
-    const result = await resolveMentions("@dima see @dima comment", service);
+    const result = await resolveMentions("@bob see @bob comment", service);
     expect(result).not.toBeNull();
     const nodes = result!.bodyData.content![0].content!;
     const mentions = nodes.filter((n) => n.type === "suggestion_userMentions");
@@ -118,103 +117,103 @@ describe("resolveMentions", () => {
   });
 
   it("preserves text around unresolved mentions", async () => {
-    const result = await resolveMentions("@unknown text @dima end", mockLinearService());
+    const result = await resolveMentions("@unknown text @bob end", mockLinearService());
     expect(result).not.toBeNull();
     const nodes = result!.bodyData.content![0].content!;
-    // @unknown should appear as plain text, @dima as mention
+    // @unknown should appear as plain text, @bob as mention
     const mentions = nodes.filter((n) => n.type === "suggestion_userMentions");
     expect(mentions).toHaveLength(1);
-    expect(mentions[0].attrs!.label).toBe("dima");
+    expect(mentions[0].attrs!.label).toBe("bob");
   });
 });
 
 describe("resolveMentions — auto-mention for bare names", () => {
-  it("auto-converts bare alias to mention (e.g. 'Dima')", async () => {
-    const result = await resolveMentions("Dima owns the design", mockLinearService());
+  it("auto-converts bare alias to mention (e.g. 'Bob')", async () => {
+    const result = await resolveMentions("Bob owns the design", mockLinearService());
     expect(result).not.toBeNull();
     const mentions = result!.bodyData.content![0].content!.filter(
       (n) => n.type === "suggestion_userMentions",
     );
     expect(mentions).toHaveLength(1);
-    expect(mentions[0].attrs!.id).toBe(UUID_DIMA);
-    expect(mentions[0].attrs!.label).toBe("Dima");
+    expect(mentions[0].attrs!.id).toBe(UUID_BOB);
+    expect(mentions[0].attrs!.label).toBe("Bob");
   });
 
-  it("auto-converts bare display name (e.g. 'Raefaldhi')", async () => {
-    const result = await resolveMentions("Raefaldhi's research concluded X", mockLinearService());
+  it("auto-converts bare display name (e.g. 'Erin')", async () => {
+    const result = await resolveMentions("Erin's research concluded X", mockLinearService());
     expect(result).not.toBeNull();
     const mentions = result!.bodyData.content![0].content!.filter(
       (n) => n.type === "suggestion_userMentions",
     );
     expect(mentions).toHaveLength(1);
-    expect(mentions[0].attrs!.id).toBe(UUID_RAEFALDHI);
+    expect(mentions[0].attrs!.id).toBe(UUID_ERIN);
   });
 
-  it("auto-converts last name from fullName (e.g. 'Surkov')", async () => {
-    const result = await resolveMentions("Surkov will decide", mockLinearService());
+  it("auto-converts last name from fullName (e.g. 'Marley')", async () => {
+    const result = await resolveMentions("Marley will decide", mockLinearService());
     expect(result).not.toBeNull();
     const mentions = result!.bodyData.content![0].content!.filter(
       (n) => n.type === "suggestion_userMentions",
     );
     expect(mentions).toHaveLength(1);
-    expect(mentions[0].attrs!.id).toBe(UUID_DIMA);
+    expect(mentions[0].attrs!.id).toBe(UUID_BOB);
   });
 
   it("combines explicit @mention and bare name", async () => {
-    const result = await resolveMentions("@dima and Kamal should sync", mockLinearService());
+    const result = await resolveMentions("@bob and David should sync", mockLinearService());
     expect(result).not.toBeNull();
     const mentions = result!.bodyData.content![0].content!.filter(
       (n) => n.type === "suggestion_userMentions",
     );
     expect(mentions).toHaveLength(2);
-    expect(mentions[0].attrs!.id).toBe(UUID_DIMA);
-    expect(mentions[1].attrs!.id).toBe(UUID_KAMAL);
+    expect(mentions[0].attrs!.id).toBe(UUID_BOB);
+    expect(mentions[1].attrs!.id).toBe(UUID_DAVID);
   });
 
-  it("does not match lowercase 'dima' in prose", async () => {
-    const result = await resolveMentions("the dima parameter is fine", mockLinearService());
+  it("does not match lowercase 'bob' in prose", async () => {
+    const result = await resolveMentions("the bob parameter is fine", mockLinearService());
     expect(result).toBeNull();
   });
 
   it("does not match inside inline code", async () => {
-    const result = await resolveMentions("the `Dima` variable", mockLinearService());
+    const result = await resolveMentions("the `Bob` variable", mockLinearService());
     expect(result).toBeNull();
   });
 
   it("does not match inside code blocks", async () => {
-    const result = await resolveMentions("```\nconst Dima = 1;\n```", mockLinearService());
+    const result = await resolveMentions("```\nconst Bob = 1;\n```", mockLinearService());
     expect(result).toBeNull();
   });
 
   it("does not match link text", async () => {
     const result = await resolveMentions(
-      "see [Dima's doc](https://example.com)",
+      "see [Bob's doc](https://example.com)",
       mockLinearService(),
     );
     expect(result).toBeNull();
   });
 
-  it("respects word boundaries (Dima inside Dimadex is skipped)", async () => {
-    const result = await resolveMentions("the Dimadex product", mockLinearService());
+  it("respects word boundaries (Bob inside Bobdex is skipped)", async () => {
+    const result = await resolveMentions("the Bobdex product", mockLinearService());
     expect(result).toBeNull();
   });
 
   it("skips self when selfUserId is provided", async () => {
-    const result = await resolveMentions("Dima owns this", mockLinearService(), {
-      selfUserId: UUID_DIMA,
+    const result = await resolveMentions("Bob owns this", mockLinearService(), {
+      selfUserId: UUID_BOB,
     });
     expect(result).toBeNull();
   });
 
   it("disables auto-conversion when autoMention is false", async () => {
-    const result = await resolveMentions("Dima owns this", mockLinearService(), {
+    const result = await resolveMentions("Bob owns this", mockLinearService(), {
       autoMention: false,
     });
     expect(result).toBeNull();
   });
 
   it("still resolves explicit @mentions when autoMention is false", async () => {
-    const result = await resolveMentions("@dima owns this", mockLinearService(), {
+    const result = await resolveMentions("@bob owns this", mockLinearService(), {
       autoMention: false,
     });
     expect(result).not.toBeNull();
@@ -224,14 +223,14 @@ describe("resolveMentions — auto-mention for bare names", () => {
     expect(mentions).toHaveLength(1);
   });
 
-  it("does not duplicate a mention when both @dima and Dima appear", async () => {
-    const result = await resolveMentions("@dima and Dima are the same", mockLinearService());
+  it("does not duplicate a mention when both @bob and Bob appear", async () => {
+    const result = await resolveMentions("@bob and Bob are the same", mockLinearService());
     expect(result).not.toBeNull();
     const mentions = result!.bodyData.content![0].content!.filter(
       (n) => n.type === "suggestion_userMentions",
     );
     expect(mentions).toHaveLength(2);
-    expect(mentions[0].attrs!.id).toBe(UUID_DIMA);
-    expect(mentions[1].attrs!.id).toBe(UUID_DIMA);
+    expect(mentions[0].attrs!.id).toBe(UUID_BOB);
+    expect(mentions[1].attrs!.id).toBe(UUID_BOB);
   });
 });

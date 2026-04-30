@@ -50,11 +50,11 @@ describe("loadConfig", () => {
   it("deeply merges nested objects", async () => {
     existsSyncReturn = true;
     readFileSyncReturn = JSON.stringify({
-      members: { aliases: { dima: "Dmitrii" } },
+      members: { aliases: { bob: "Bob" } },
     });
     const { loadConfig } = await import("./config.js");
     const config = loadConfig();
-    expect(config.members.aliases.dima).toBe("Dmitrii");
+    expect(config.members.aliases.bob).toBe("Bob");
     expect(config.members.uuids).toEqual({});
   });
 

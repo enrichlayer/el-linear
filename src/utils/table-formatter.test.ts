@@ -7,7 +7,7 @@ function makeIssue(overrides: Partial<LinearIssue> = {}): LinearIssue {
     id: "issue-1",
     identifier: "DEV-100",
     title: "Test issue",
-    url: "https://linear.app/verticalint/issue/DEV-100",
+    url: "https://linear.app/acme/issue/DEV-100",
     priority: 2,
     state: { id: "s1", name: "In Progress", type: "started" },
     team: { id: "t1", key: "DEV", name: "Dev" },
@@ -103,7 +103,7 @@ describe("formatMarkdown", () => {
 
   it("renders issue link in identifier column", () => {
     const output = formatMarkdown([makeIssue()]);
-    expect(output).toContain("[DEV-100](https://linear.app/verticalint/issue/DEV-100)");
+    expect(output).toContain("[DEV-100](https://linear.app/acme/issue/DEV-100)");
   });
 
   it("escapes pipe characters in cell content", () => {

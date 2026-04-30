@@ -37,7 +37,7 @@ export function resolveTeam(input: string): string {
 
 /**
  * Resolve a member name/alias/handle to their UUID.
- * Supports: "dima" → alias, "Yury" → name, "@ytspar" → gitlab handle. Case-insensitive.
+ * Supports: "bob" → alias, "Alice" → name, "@alice-handle" → gitlab handle. Case-insensitive.
  */
 export function resolveMember(input: string): string {
   if (isUuid(input)) {
@@ -71,14 +71,14 @@ export function resolveMember(input: string): string {
     }
   }
 
-  // Check direct name match (case-insensitive) — e.g., "Kamal"
+  // Check direct name match (case-insensitive) — e.g., "David"
   for (const [name, uuid] of Object.entries(config.members.uuids)) {
     if (name.toLowerCase() === lower) {
       return uuid;
     }
   }
 
-  // Check full names (case-insensitive) — e.g., "Kamal Mahmudi"
+  // Check full names (case-insensitive) — e.g., "David Doe"
   if (config.members.fullNames) {
     for (const [uuid, fullName] of Object.entries(config.members.fullNames)) {
       if (fullName.toLowerCase() === lower) {
@@ -86,7 +86,7 @@ export function resolveMember(input: string): string {
       }
     }
 
-    // Partial match on full names — e.g., "mahmudi" matches "Kamal Mahmudi"
+    // Partial match on full names — e.g., "doe" matches "David Doe"
     for (const [uuid, fullName] of Object.entries(config.members.fullNames)) {
       const parts = fullName.toLowerCase().split(/\s+/);
       if (parts.some((part) => part === lower)) {

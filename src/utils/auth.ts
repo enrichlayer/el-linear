@@ -15,8 +15,8 @@ export function getApiToken(options: AuthOptions): string {
     return process.env.LINEAR_API_TOKEN;
   }
 
-  // el-linear config path
-  const elLinearTokenFile = path.join(os.homedir(), ".config", "el-linear", "token");
+  // linctl config path
+  const elLinearTokenFile = path.join(os.homedir(), ".config", "linctl", "token");
   if (fs.existsSync(elLinearTokenFile)) {
     return fs.readFileSync(elLinearTokenFile, "utf8").trim();
   }
@@ -28,6 +28,6 @@ export function getApiToken(options: AuthOptions): string {
   }
 
   throw new Error(
-    "No API token found. Use --api-token, LINEAR_API_TOKEN env var, ~/.config/el-linear/token, or ~/.linear_api_token file",
+    "No API token found. Use --api-token, LINEAR_API_TOKEN env var, ~/.config/linctl/token, or ~/.linear_api_token file",
   );
 }

@@ -53,7 +53,7 @@ describe("normalizeLabel", () => {
 });
 
 // Required fields for all tests (assignee + project enforced by default)
-const required = { assignee: "nico", project: "Infrastructure" };
+const required = { assignee: "carol", project: "Infrastructure" };
 
 describe("validateIssueCreation", () => {
 

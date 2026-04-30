@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { wrapIssueReferencesAsLinks } from "./issue-reference-wrapper.js";
 
 const valid = (...ids: string[]): Set<string> => new Set(ids);
-const W = "verticalint";
+const W = "acme";
 const url = (id: string) => `https://linear.app/${W}/issue/${id}/`;
 
 describe("wrapIssueReferencesAsLinks", () => {

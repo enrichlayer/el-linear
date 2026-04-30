@@ -80,7 +80,7 @@ describe("warning buffer", () => {
 
   it("accumulates multiple warnings", () => {
     outputWarning("w1");
-    outputWarning(["w2", "w3"], "brand_validation");
+    outputWarning(["w2", "w3"], "term_enforcement");
     outputSuccess({ id: "x" });
     const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
     expect(parsed._warnings).toEqual(["w1", "w2", "w3"]);

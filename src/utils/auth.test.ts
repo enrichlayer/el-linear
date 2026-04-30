@@ -41,8 +41,8 @@ describe("getApiToken", () => {
     expect(result).toBe("env-token");
   });
 
-  it("reads from ~/.config/el-linear/token when no flag or env", () => {
-    existsSyncMock.mockImplementation((p) => (p as string).includes(".config/el-linear/token"));
+  it("reads from ~/.config/linctl/token when no flag or env", () => {
+    existsSyncMock.mockImplementation((p) => (p as string).includes(".config/linctl/token"));
     readFileSyncMock.mockReturnValue("config-token\n");
 
     const result = getApiToken({});

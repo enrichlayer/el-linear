@@ -1,5 +1,5 @@
 /**
- * Core entity types returned by el-linear service methods.
+ * Core entity types returned by linctl service methods.
  * These represent the public API surface — GraphQL responses are
  * transformed into these shapes at the service boundary.
  */

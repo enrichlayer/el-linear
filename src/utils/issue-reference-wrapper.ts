@@ -1,11 +1,7 @@
-/**
- * Linear workspace urlKey for the EL workspace. Used to build the canonical
- * markdown-link URL `https://linear.app/<urlKey>/issue/<identifier>/`.
- *
- * If we ever operate against a different workspace, query
- * `{ viewer { organization { urlKey } } }` once per session and cache.
- */
-export const DEFAULT_WORKSPACE_URL_KEY = "verticalint";
+// Workspace URL key resolution lives in `./workspace-url.ts` — call
+// `getWorkspaceUrlKey(graphQLService)` to obtain it before invoking
+// `wrapIssueReferencesAsLinks`. Linear URLs look like
+// `https://linear.app/<urlKey>/issue/<identifier>/`.
 
 const IDENTIFIER_REGEX = /\b([A-Z][A-Z0-9]*-\d+)\b/g;
 const FENCED_CODE_BLOCK_REGEX =

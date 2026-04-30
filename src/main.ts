@@ -25,11 +25,11 @@ import { splitList } from "./utils/validators.js";
 import { outputUsageInfo } from "./utils/usage.js";
 
 program
-  .name("el-linear")
+  .name("linctl")
   .description(
-    "Enrich Layer CLI for Linear.app — deterministic resolution, brand validation, status defaults",
+    "A pragmatic CLI for Linear.app — deterministic resolution, structured validation, GraphQL escape hatch.",
   )
-  .version("1.0.0")
+  .version("1.1.0")
   .option("--api-token <token>", "Linear API token")
   .option("--json", "output as JSON (default, accepted for compatibility)")
   .option("--raw", "strip { data, meta } wrapper from list output — emit the array directly")

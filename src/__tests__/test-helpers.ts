@@ -20,7 +20,7 @@ export function createTestProgram(): Command {
  * Parse args through a test program. Returns the captured outputSuccess calls.
  */
 export async function runCommand(program: Command, args: string[]): Promise<void> {
-  await program.parseAsync(["node", "el-linear", "--api-token", "test-token", ...args]);
+  await program.parseAsync(["node", "linctl", "--api-token", "test-token", ...args]);
 }
 
 /**

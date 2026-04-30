@@ -1,5 +1,5 @@
 /**
- * `el-linear issue-id` — extract the Linear issue ID from the current
+ * `linctl issue-id` — extract the Linear issue ID from the current
  * git branch (or any branch passed as an argument).
  *
  * Replaces the regex that was duplicated across 4 skills: commit-guard,

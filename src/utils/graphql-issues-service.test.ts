@@ -62,7 +62,7 @@ describe("GraphQLIssuesService", () => {
       const result = service.transformIssueData({
         id: "issue-1",
         identifier: "DEV-100",
-        url: "https://linear.app/verticalint/issue/DEV-100/test-issue",
+        url: "https://linear.app/acme/issue/DEV-100/test-issue",
         title: "Test Issue",
         priority: 2,
         labels: { nodes: [] },
@@ -72,7 +72,7 @@ describe("GraphQLIssuesService", () => {
 
       expect(result.id).toBe("issue-1");
       expect(result.identifier).toBe("DEV-100");
-      expect(result.url).toBe("https://linear.app/verticalint/issue/DEV-100/test-issue");
+      expect(result.url).toBe("https://linear.app/acme/issue/DEV-100/test-issue");
       expect(result.title).toBe("Test Issue");
       expect(result.priority).toBe(2);
       expect(result.labels).toEqual([]);

@@ -62,12 +62,14 @@ vi.mock("../config/config.js", () => ({
     teams: {},
     // Validation tested in issue-validation.test.ts — disable here to isolate command wiring
     validation: { enabled: false },
+    // Pin the workspace URL so getWorkspaceUrlKey skips the API roundtrip in tests.
+    workspaceUrlKey: "test",
   }),
 }));
 
-const mockEnforceBrandName = vi.fn();
-vi.mock("../config/brand-validator.js", () => ({
-  enforceBrandName: mockEnforceBrandName,
+const mockEnforceTerms = vi.fn();
+vi.mock("../config/term-enforcer.js", () => ({
+  enforceTerms: mockEnforceTerms,
 }));
 
 vi.mock("../utils/auth.js", () => ({
@@ -182,7 +184,7 @@ describe("issues commands", () => {
 
   describe("issues create", () => {
     // Required fields for all create commands (assignee + project enforced)
-    const requiredArgs = ["--assignee", "dima", "--project", "Infrastructure"];
+    const requiredArgs = ["--assignee", "bob", "--project", "Infrastructure"];
 
     it("creates issue with team resolved from option", async () => {
       mockCreateIssue.mockResolvedValue({ id: "new-issue-id", identifier: "DEV-999" });
@@ -192,7 +194,10 @@ describe("issues commands", () => {
       await runCommand(program, ["issues", "create", "My Title", "--team", "DEV", ...requiredArgs]);
 
       expect(mockResolveTeam).toHaveBeenCalledWith("DEV");
-      expect(mockEnforceBrandName).toHaveBeenCalledWith("My Title", undefined, undefined);
+      expect(mockEnforceTerms).toHaveBeenCalledWith(
+        ["My Title", undefined],
+        { strict: undefined },
+      );
       expect(mockCreateIssue).toHaveBeenCalledWith(
         expect.objectContaining({
           title: "My Title",
@@ -214,15 +219,15 @@ describe("issues commands", () => {
         "--team",
         "DEV",
         "--assignee",
-        "dima",
+        "bob",
         "--project",
         "Infrastructure",
       ]);
 
-      expect(mockResolveAssignee).toHaveBeenCalledWith("dima", expect.any(Object));
+      expect(mockResolveAssignee).toHaveBeenCalledWith("bob", expect.any(Object));
       expect(mockCreateIssue).toHaveBeenCalledWith(
         expect.objectContaining({
-          assigneeId: "member-id-dima",
+          assigneeId: "member-id-bob",
         }),
       );
     });
@@ -506,7 +511,7 @@ describe("issues commands", () => {
   // composed flow end-to-end and assert the relation-create mutation receives the
   // correct {type, issueId↔relatedIssueId} based on prose keywords.
   describe("auto-link composition (handler integration)", () => {
-    const requiredArgs = ["--assignee", "dima", "--project", "Infrastructure"];
+    const requiredArgs = ["--assignee", "bob", "--project", "Infrastructure"];
 
     function setupAutoLinkMocks(resolvedIds: Record<string, string>): void {
       mockLinearService.resolveIssueId.mockImplementation((id: string) => {

@@ -198,7 +198,7 @@ export function validateIssueCreation(input: ValidationInput): ValidationResult 
   if (!input.assignee) {
     result.errors.push(
       "Missing --assignee. Every issue must have an assignee.\n" +
-        "  Use `el-linear users list --active` to find valid assignees.",
+        "  Use `linctl users list --active` to find valid assignees.",
     );
   }
 
@@ -206,7 +206,7 @@ export function validateIssueCreation(input: ValidationInput): ValidationResult 
   if (!input.project) {
     result.errors.push(
       "Missing --project. Every issue must belong to a project.\n" +
-        "  Use `el-linear projects list` to find valid projects.",
+        "  Use `linctl projects list` to find valid projects.",
     );
   }
 
@@ -288,7 +288,7 @@ export function enforceValidation(result: ValidationResult): void {
       "Issue creation blocked by validation:\n\n" +
       result.errors.map((e) => `  ✗ ${e}`).join("\n\n") +
       "\n\nTo skip validation, pass --skip-validation.\n" +
-      "To disable validation permanently, set validation.enabled: false in ~/.config/el-linear/config.json.";
+      "To disable validation permanently, set validation.enabled: false in ~/.config/linctl/config.json.";
     throw new Error(errorMsg);
   }
 }

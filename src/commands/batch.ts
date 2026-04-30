@@ -16,7 +16,7 @@ interface BatchResult {
 
 /**
  * Parse the --filter string into structured search arguments.
- * Format: "status:Backlog team:DEV label:Bug assignee:Yury project:Sprint12"
+ * Format: "status:Backlog team:DEV label:Bug assignee:Alice project:Sprint12"
  */
 function parseFilterString(filter: string): Record<string, string> {
   const result: Record<string, string> = {};

@@ -38,7 +38,7 @@ interface ResolvedMention {
  * When `autoMention` is true (default), bare capitalized-word references that
  * match a known config member (alias or first-name/last-name of a fullName)
  * are also converted to mentions — without requiring the `@` prefix. This
- * catches cases like "Dima owns the design" → "@dima owns the design".
+ * catches cases like "Bob owns the design" → "@bob owns the design".
  *
  * Returns a ProseMirror `bodyData` doc with `suggestion_userMentions` nodes,
  * or `null` if nothing was resolved.
@@ -118,8 +118,8 @@ function resolveMemberLocal(name: string): string | null {
 
 /**
  * Build the list of candidate names for bare-mention detection from config:
- * - alias keys ("dima", "rae", "masha")
- * - uuids keys (short display names like "Dmitrii", "Kamal")
+ * - alias keys ("bob", "erin", "carol")
+ * - uuids keys (short display names like "Bob", "David")
  * - every space-separated token of every fullName (so "Surkov" resolves too)
  *
  * Each candidate is returned capitalized (first letter upper, rest lower) —

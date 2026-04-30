@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import type { Command, OptionValues } from "commander";
-import { enforceBrandName } from "../config/brand-validator.js";
 import { loadConfig } from "../config/config.js";
+import { enforceTerms } from "../config/term-enforcer.js";
 import { enforceValidation, validateIssueCreation } from "../config/issue-validation.js";
 import { resolveAssignee, resolveLabels, resolveMember, resolveTeam } from "../config/resolver.js";
 import { resolveDefaultStatus } from "../config/status-defaults.js";
@@ -29,11 +29,9 @@ import { createGraphQLAttachmentsService } from "../utils/graphql-attachments-se
 import { GraphQLIssuesService } from "../utils/graphql-issues-service.js";
 import { createGraphQLService, type GraphQLService } from "../utils/graphql-service.js";
 import { extractIssueReferences } from "../utils/issue-reference-extractor.js";
-import {
-  DEFAULT_WORKSPACE_URL_KEY,
-  wrapIssueReferencesAsLinks,
-} from "../utils/issue-reference-wrapper.js";
+import { wrapIssueReferencesAsLinks } from "../utils/issue-reference-wrapper.js";
 import { createLinearService, type LinearService } from "../utils/linear-service.js";
+import { getWorkspaceUrlKey } from "../utils/workspace-url.js";
 import { logger } from "../utils/logger.js";
 import { handleAsyncCommand, outputSuccess, outputWarning } from "../utils/output.js";
 import { formatCsv, formatMarkdown, formatTable } from "../utils/table-formatter.js";
@@ -187,6 +185,7 @@ async function prepareAutoLinkedDescription(
   options: OptionValues,
   selfIdentifier: string | undefined,
   linearService: LinearService,
+  graphQLService: GraphQLService,
 ): Promise<PreparedDescription> {
   if (!description || options.autoLink === false) {
     return { description, preResolved: new Map(), rewritten: false };
@@ -203,7 +202,8 @@ async function prepareAutoLinkedDescription(
     return { description, preResolved, rewritten: false };
   }
   const validIds = new Set(preResolved.keys());
-  const wrapped = wrapIssueReferencesAsLinks(description, validIds, DEFAULT_WORKSPACE_URL_KEY);
+  const urlKey = await getWorkspaceUrlKey(graphQLService);
+  const wrapped = wrapIssueReferencesAsLinks(description, validIds, urlKey);
   return {
     description: wrapped,
     preResolved,
@@ -432,7 +432,7 @@ async function resolveCreateInputs(
   subscriberIds: string[] | undefined;
 }> {
   const config = loadConfig();
-  enforceBrandName(title, options.description, options.strict);
+  enforceTerms([title, options.description], { strict: options.strict });
 
   // --- Validation (labels, description, assignee, project, title) ---
   // Controlled by config.validation.enabled (default: true).
@@ -563,6 +563,7 @@ async function handleCreateIssue(
     options,
     undefined,
     linearService,
+    graphQLService,
   );
 
   const result = await issuesService.createIssue({
@@ -866,6 +867,7 @@ async function prepareDescriptionRewrite(
   description: string,
   selfIdentifier: string,
   linearService: LinearService,
+  graphQLService: GraphQLService,
 ): Promise<PreparedRewrite> {
   if (!description) {
     return { preResolved: undefined, wrapped: undefined };
@@ -882,7 +884,8 @@ async function prepareDescriptionRewrite(
     return { preResolved, wrapped: undefined };
   }
   const validIds = new Set(preResolved.keys());
-  const wrapped = wrapIssueReferencesAsLinks(description, validIds, DEFAULT_WORKSPACE_URL_KEY);
+  const urlKey = await getWorkspaceUrlKey(graphQLService);
+  const wrapped = wrapIssueReferencesAsLinks(description, validIds, urlKey);
   return { preResolved, wrapped: wrapped === description ? undefined : wrapped };
 }
 
@@ -927,7 +930,7 @@ async function handleLinkReferencesSingle(
   // If rewriting, validate refs once up front so we can both wrap the description and
   // pass the resolved map down to autoLink — avoids a second resolve round trip.
   const rewrite = rewriteDescription
-    ? await prepareDescriptionRewrite(description, identifier, linearService)
+    ? await prepareDescriptionRewrite(description, identifier, linearService, graphQLService)
     : { preResolved: undefined, wrapped: undefined };
 
   const autoLinked = await linkReferencesForIssue({
@@ -1121,7 +1124,7 @@ async function handleUpdateIssue(
   }
 
   if (options.title || options.description) {
-    enforceBrandName(options.title || "", options.description, options.strict);
+    enforceTerms([options.title, options.description], { strict: options.strict });
   }
   // Save the original (pre-wrap) description so we can pass it to maybeAutoLink later.
   // The wrapped form breaks prose-keyword inference because the inserted `[` defeats the
@@ -1135,6 +1138,7 @@ async function handleUpdateIssue(
         options,
         undefined,
         linearService,
+        graphQLService,
       )
     : { description: undefined, preResolved: new Map<string, string>(), rewritten: false };
   if (prepared.description !== undefined) {
@@ -1349,7 +1353,7 @@ export function setupIssuesCommands(program: Command): void {
     .description("Get issue details. Accepts multiple IDs for batch retrieval.")
     .addHelpText(
       "after",
-      "\nBoth UUID and identifiers like ABC-123 are supported.\nMultiple IDs: el-linear issue get DEV-123 DEV-456 DEV-789",
+      "\nBoth UUID and identifiers like ABC-123 are supported.\nMultiple IDs: linctl issue get DEV-123 DEV-456 DEV-789",
     )
     .action(handleAsyncCommand(handleReadIssue));
 

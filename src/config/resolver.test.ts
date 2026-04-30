@@ -13,21 +13,21 @@ vi.mock("./config.js", () => ({
     },
     members: {
       aliases: {
-        ytspar: "Yury",
-        dima: "Dmitrii",
+        "alice-handle": "Alice",
+        bob: "Bob",
       },
       handles: {
         gitlab: {
-          ytspar: "Yury",
-          dmitriiiii: "Dmitrii",
+          "alice-handle": "Alice",
+          bobbyyy: "Bob",
         },
         github: {
-          "yury-gh": "Yury",
+          "alice-gh": "Alice",
         },
       },
       uuids: {
-        Yury: "yury-uuid-789",
-        Dmitrii: "dmitrii-uuid-012",
+        Alice: "alice-uuid-789",
+        Bob: "bob-uuid-012",
       },
     },
     labels: {
@@ -89,39 +89,39 @@ describe("resolveMember", () => {
   });
 
   it("resolves alias to UUID", () => {
-    expect(resolveMember("ytspar")).toBe("yury-uuid-789");
-    expect(resolveMember("dima")).toBe("dmitrii-uuid-012");
+    expect(resolveMember("alice-handle")).toBe("alice-uuid-789");
+    expect(resolveMember("bob")).toBe("bob-uuid-012");
   });
 
   it("resolves alias case-insensitively", () => {
-    expect(resolveMember("YTSPAR")).toBe("yury-uuid-789");
+    expect(resolveMember("ALICE-HANDLE")).toBe("alice-uuid-789");
   });
 
   it("resolves direct name to UUID", () => {
-    expect(resolveMember("Yury")).toBe("yury-uuid-789");
-    expect(resolveMember("dmitrii")).toBe("dmitrii-uuid-012");
+    expect(resolveMember("Alice")).toBe("alice-uuid-789");
+    expect(resolveMember("Bob")).toBe("bob-uuid-012");
   });
 
   it("resolves GitLab handle to UUID", () => {
-    expect(resolveMember("dmitriiiii")).toBe("dmitrii-uuid-012");
+    expect(resolveMember("bobbyyy")).toBe("bob-uuid-012");
   });
 
   it("resolves GitHub handle to UUID", () => {
-    expect(resolveMember("yury-gh")).toBe("yury-uuid-789");
+    expect(resolveMember("alice-gh")).toBe("alice-uuid-789");
   });
 
   it("resolves handle with @ prefix", () => {
-    expect(resolveMember("@dmitriiiii")).toBe("dmitrii-uuid-012");
-    expect(resolveMember("@yury-gh")).toBe("yury-uuid-789");
+    expect(resolveMember("@bobbyyy")).toBe("bob-uuid-012");
+    expect(resolveMember("@alice-gh")).toBe("alice-uuid-789");
   });
 
   it("resolves handle case-insensitively", () => {
-    expect(resolveMember("DMITRIIIII")).toBe("dmitrii-uuid-012");
+    expect(resolveMember("BOBBYYY")).toBe("bob-uuid-012");
   });
 
   it("prefers alias over handle when both match", () => {
-    // "ytspar" matches both alias and gitlab handle → alias wins
-    expect(resolveMember("ytspar")).toBe("yury-uuid-789");
+    // "alice-handle" matches both alias and gitlab handle → alias wins
+    expect(resolveMember("alice-handle")).toBe("alice-uuid-789");
   });
 
   it("returns input as-is for unknown members", () => {

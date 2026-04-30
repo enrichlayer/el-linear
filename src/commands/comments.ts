@@ -10,14 +10,12 @@ import type { GraphQLResponseData } from "../types/linear.js";
 import { type AutoLinkResult, autoLinkReferences } from "../utils/auto-link-references.js";
 import { createGraphQLService, type GraphQLService } from "../utils/graphql-service.js";
 import { extractIssueReferences } from "../utils/issue-reference-extractor.js";
-import {
-  DEFAULT_WORKSPACE_URL_KEY,
-  wrapIssueReferencesAsLinks,
-} from "../utils/issue-reference-wrapper.js";
+import { wrapIssueReferencesAsLinks } from "../utils/issue-reference-wrapper.js";
 import { createLinearService, type LinearService } from "../utils/linear-service.js";
 import { resolveMentions } from "../utils/mention-resolver.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
 import { validateReferences } from "../utils/validate-references.js";
+import { getWorkspaceUrlKey } from "../utils/workspace-url.js";
 
 // Match Linear's bodyData validation error in multiple phrasings so a wording
 // tweak on their side doesn't silently regress the fallback path.
@@ -79,6 +77,7 @@ async function prepareCommentBodyWithLinks(
   body: string,
   options: OptionValues,
   linearService: LinearService,
+  graphQLService: GraphQLService,
 ): Promise<PreparedCommentBody> {
   if (options.autoLink === false || !body) {
     return { body, preResolved: new Map() };
@@ -95,7 +94,8 @@ async function prepareCommentBodyWithLinks(
     return { body, preResolved };
   }
   const validIds = new Set(preResolved.keys());
-  const wrapped = wrapIssueReferencesAsLinks(body, validIds, DEFAULT_WORKSPACE_URL_KEY);
+  const urlKey = await getWorkspaceUrlKey(graphQLService);
+  const wrapped = wrapIssueReferencesAsLinks(body, validIds, urlKey);
   return { body: wrapped, preResolved };
 }
 
@@ -143,7 +143,7 @@ async function handleCreateComment(
 
   // Wrap valid refs as markdown links before mention resolution. Idempotent against
   // already-wrapped refs.
-  const { body, preResolved } = await prepareCommentBodyWithLinks(rawBody, options, linearService);
+  const { body, preResolved } = await prepareCommentBodyWithLinks(rawBody, options, linearService, graphQLService);
 
   const autoMention = options.autoMention !== false;
   const selfUserId = autoMention ? await fetchSelfUserId(graphQLService) : undefined;
@@ -207,7 +207,7 @@ async function handleUpdateComment(
   const linearService = createLinearService(rootOpts);
   const rawBody = readBody(options);
 
-  const { body, preResolved } = await prepareCommentBodyWithLinks(rawBody, options, linearService);
+  const { body, preResolved } = await prepareCommentBodyWithLinks(rawBody, options, linearService, graphQLService);
 
   const autoMention = options.autoMention !== false;
   const selfUserId = autoMention ? await fetchSelfUserId(graphQLService) : undefined;

@@ -40,7 +40,7 @@ async function executeQuery(
 }
 
 export function setupGraphQLCommands(program: Command): void {
-  // Primary command: el-linear graphql '{ ... }' (backward compatible)
+  // Primary command: linctl graphql '{ ... }' (backward compatible)
   program
     .command("graphql [query]")
     .description("Execute a raw GraphQL query against the Linear API.")

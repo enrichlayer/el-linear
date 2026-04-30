@@ -1,28 +1,40 @@
 {
-  "defaultTeam": "DEV",
+  "defaultTeam": "ENG",
   "defaultLabels": ["claude"],
-  "brand": {
-    "name": "Enrich Layer",
-    "reject": ["EnrichLayer", "Enrichlayer", "enrichLayer", "enrichlayer"]
-  },
   "members": {
     "aliases": {
-      "nick": "Nicholas"
+      "alice": "Alice Anderson",
+      "bob": "Bob Brown"
+    },
+    "fullNames": {
+      "alice": "Alice Anderson"
+    },
+    "handles": {
+      "github": {
+        "alice-gh": "Alice Anderson"
+      },
+      "gitlab": {
+        "alice-gl": "Alice Anderson"
+      }
     },
     "uuids": {
-      "Nicholas": "uuid-from-linear"
+      "Alice Anderson": "uuid-from-linear",
+      "Bob Brown": "uuid-from-linear"
     }
   },
   "teams": {
-    "DEV": "uuid-from-linear",
-    "FE": "uuid-from-linear"
+    "ENG": "uuid-from-linear",
+    "DESIGN": "uuid-from-linear"
+  },
+  "teamAliases": {
+    "engineering": "ENG"
   },
   "labels": {
     "workspace": {
       "claude": "uuid-from-linear"
     },
     "teams": {
-      "DEV": {
+      "ENG": {
         "feature-request": "uuid-from-linear",
         "chore": "uuid-from-linear"
       }
@@ -31,5 +43,19 @@
   "statusDefaults": {
     "noProject": "Triage",
     "withAssigneeAndProject": "Todo"
+  },
+  "terms": [
+    {
+      "canonical": "Enrich Layer",
+      "reject": ["EnrichLayer", "Enrichlayer", "enrichLayer", "enrichlayer"]
+    },
+    {
+      "canonical": "Linear",
+      "reject": ["linear.app", "Linear App"]
+    }
+  ],
+  "validation": {
+    "enabled": true,
+    "typeLabels": ["bug", "feature", "chore", "refactor", "spike"]
   }
 }
