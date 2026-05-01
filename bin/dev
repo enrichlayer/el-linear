@@ -1,0 +1,2 @@
+#!/bin/sh
+exec "$(dirname "$0")/../../shared/run.sh" "$(cd "$(dirname "$0")/.." && pwd)" "$@"

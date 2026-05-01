@@ -1,0 +1,46 @@
+{
+  "skill_name": "linear-operations",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Create a Linear issue for fixing the login bug on the staging environment",
+      "expected_output": "The skill searches for duplicate issues first, selects appropriate labels from the taxonomy, creates an issue with a description containing 'Why we need this' section, and uses linctl create command",
+      "expectations": [
+        "Searches for existing issues to avoid duplicates before creating",
+        "Selects labels from the known label taxonomy (e.g., bug)",
+        "Description includes a 'Why we need this' section",
+        "Uses linctl CLI to create the issue, not raw curl"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Search Linear for auth-related issues",
+      "expected_output": "The skill uses linctl search to find issues matching auth keywords",
+      "expectations": [
+        "Uses linctl search command with appropriate query",
+        "Does not attempt to use curl against api.linear.app",
+        "Returns formatted results with issue IDs and titles"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Update DEV-123 to In Progress",
+      "expected_output": "The skill uses linctl update to change the issue status",
+      "expectations": [
+        "Uses linctl update command with the issue identifier DEV-123",
+        "Sets the status to In Progress",
+        "Does not create a new issue"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Create a git branch for DEV-456",
+      "expected_output": "This should NOT trigger linear-operations. Branch creation from Linear issues is handled by git-branch-from-linear skill.",
+      "expectations": [
+        "Does NOT trigger linear-operations skill",
+        "Routes to git-branch-from-linear instead",
+        "No linctl create or update commands are issued"
+      ]
+    }
+  ]
+}
