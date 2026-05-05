@@ -6,39 +6,34 @@
  */
 
 import { confirm, input } from "@inquirer/prompts";
-import type { WizardConfig } from "./shared.js";
+import { parseCsvList, type WizardConfig } from "./shared.js";
 
 export interface DefaultsStepResult {
 	defaultLabels: string[] | undefined;
+	/**
+	 * Status defaults. Both fields are optional so the wizard preserves
+	 * partial existing configs (`{ noProject: "Backlog" }` only) byte-for-byte
+	 * when the user skips the edit step. The runtime config loader applies
+	 * fallbacks at read time.
+	 */
 	statusDefaults:
-		| { noProject: string; withAssigneeAndProject: string }
+		| { noProject?: string; withAssigneeAndProject?: string }
 		| undefined;
 	terms: Array<{ canonical: string; reject: string[] }> | undefined;
 }
 
 const STATUS_FALLBACK = { noProject: "Triage", withAssigneeAndProject: "Todo" };
 
-function parseCsv(value: string): string[] {
-	return value
-		.split(",")
-		.map((s) => s.trim())
-		.filter(Boolean);
-}
-
 export async function runDefaultsStep(
 	existing: WizardConfig,
 ): Promise<DefaultsStepResult> {
+	// Idempotency rule: when the user skips a sub-section, return the existing
+	// value byte-for-byte. We deliberately do NOT spread or backfill optional
+	// fields (a partial { noProject: "Backlog" } stays partial) so re-running
+	// with no input produces a byte-identical config.
 	const result: DefaultsStepResult = {
 		defaultLabels: existing.defaultLabels,
-		statusDefaults: existing.statusDefaults
-			? {
-					noProject:
-						existing.statusDefaults.noProject ?? STATUS_FALLBACK.noProject,
-					withAssigneeAndProject:
-						existing.statusDefaults.withAssigneeAndProject ??
-						STATUS_FALLBACK.withAssigneeAndProject,
-				}
-			: undefined,
+		statusDefaults: existing.statusDefaults,
 		terms: existing.terms,
 	};
 
@@ -57,7 +52,7 @@ export async function runDefaultsStep(
 			message: "Default labels (comma-separated, blank for none):",
 			default: currentLabels.join(", "),
 		});
-		const parsed = parseCsv(raw);
+		const parsed = parseCsvList(raw);
 		result.defaultLabels = parsed.length > 0 ? parsed : undefined;
 	}
 
@@ -143,7 +138,7 @@ async function collectTermsInteractively(
 		const rejectRaw = await input({
 			message: `Rejected variants of "${canonical}" (comma-separated, e.g. EnrichLayer, enrichlayer):`,
 		});
-		const reject = parseCsv(rejectRaw);
+		const reject = parseCsvList(rejectRaw);
 		if (reject.length === 0) {
 			// biome-ignore lint/suspicious/noConsole: wizard
 			console.log("  No variants given — skipping this rule.");

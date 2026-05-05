@@ -1,10 +1,23 @@
 import { describe, expect, it } from "vitest";
 import {
 	type AliasUpdate,
+	findDisplayNameCollisions,
 	mergeAliasesIntoConfig,
 	parseCsv,
+	type User,
 } from "./aliases.js";
 import type { WizardConfig } from "./shared.js";
+
+const u = (
+	id: string,
+	displayName: string,
+	email: string | null = null,
+): User => ({
+	id,
+	name: displayName,
+	email,
+	displayName,
+});
 
 const baseConfig = (): WizardConfig => ({
 	defaultTeam: "ENG",
@@ -29,8 +42,8 @@ const update = (overrides: Partial<AliasUpdate>): AliasUpdate => ({
 	displayName: "Alice Anderson",
 	mode: "keep",
 	aliases: [],
-	githubHandle: "__keep__",
-	gitlabHandle: "__keep__",
+	github: { kind: "keep" },
+	gitlab: { kind: "keep" },
 	...overrides,
 });
 
@@ -80,8 +93,8 @@ describe("mergeAliasesIntoConfig", () => {
 					"alice-id",
 					update({
 						mode: "clear",
-						githubHandle: "__clear__",
-						gitlabHandle: "__clear__",
+						github: { kind: "clear" },
+						gitlab: { kind: "clear" },
 					}),
 				],
 			]),
@@ -112,7 +125,7 @@ describe("mergeAliasesIntoConfig", () => {
 					update({
 						mode: "edit",
 						aliases: ["alice"],
-						githubHandle: "alice-new-gh",
+						github: { kind: "set", value: "alice-new-gh" },
 					}),
 				],
 			]),
@@ -131,7 +144,7 @@ describe("mergeAliasesIntoConfig", () => {
 					update({
 						mode: "edit",
 						aliases: ["alice"],
-						githubHandle: "alice-gh",
+						github: { kind: "set", value: "alice-gh" },
 					}),
 				],
 			]),
@@ -203,5 +216,94 @@ describe("parseCsv", () => {
 	it("returns empty array for empty input", () => {
 		expect(parseCsv("")).toEqual([]);
 		expect(parseCsv("   \n\n")).toEqual([]);
+	});
+});
+describe("findDisplayNameCollisions", () => {
+	it("returns empty map when all display names are unique", () => {
+		const result = findDisplayNameCollisions([
+			u("id-1", "Alice"),
+			u("id-2", "Bob"),
+			u("id-3", "Carol"),
+		]);
+		expect(result.size).toBe(0);
+	});
+
+	it("groups users sharing a display name", () => {
+		const result = findDisplayNameCollisions([
+			u("id-1", "Alex", "alex@a.com"),
+			u("id-2", "Alex", "alex@b.com"),
+			u("id-3", "Bob"),
+		]);
+		expect(result.size).toBe(1);
+		expect(
+			result
+				.get("Alex")
+				?.map((x) => x.id)
+				.sort(),
+		).toEqual(["id-1", "id-2"]);
+	});
+
+	it("supports more than two colliders for the same name", () => {
+		const result = findDisplayNameCollisions([
+			u("id-1", "Sam"),
+			u("id-2", "Sam"),
+			u("id-3", "Sam"),
+			u("id-4", "Bob"),
+		]);
+		expect(result.get("Sam")?.length).toBe(3);
+		expect(result.has("Bob")).toBe(false);
+	});
+
+	it("treats different display names as non-colliding", () => {
+		// Same person, different platforms — emails distinct, names distinct.
+		const result = findDisplayNameCollisions([
+			u("id-1", "Alice Anderson"),
+			u("id-2", "Alice"),
+		]);
+		expect(result.size).toBe(0);
+	});
+});
+
+describe("parseCsv — RFC 4180 + injection guards", () => {
+	it("handles cells with embedded newlines (RFC 4180)", () => {
+		const csv = `email,aliases,github,gitlab\n"alice@x.com","ali\nalex",,`;
+		const rows = parseCsv(csv);
+		expect(rows).toHaveLength(1);
+		expect(rows[0].email).toBe("alice@x.com");
+		expect(rows[0].aliases).toBe("ali\nalex");
+	});
+
+	it("handles CRLF line endings", () => {
+		const csv = "email,aliases,github,gitlab\r\nalice@x.com,alice,,\r\n";
+		const rows = parseCsv(csv);
+		expect(rows).toHaveLength(1);
+		expect(rows[0].email).toBe("alice@x.com");
+	});
+
+	it("rejects cells starting with =", () => {
+		const csv =
+			'email,aliases,github,gitlab\nalice@x.com,"=HYPERLINK(""evil"")",,';
+		expect(() => parseCsv(csv)).toThrow(/formula injection/);
+	});
+
+	it("rejects cells starting with +, -, @", () => {
+		for (const prefix of ["+", "-", "@"]) {
+			const csv = `email,aliases,github,gitlab\nalice@x.com,${JSON.stringify(`${prefix}injection`)},,`;
+			expect(() => parseCsv(csv), `prefix ${JSON.stringify(prefix)}`).toThrow(
+				/formula injection/,
+			);
+		}
+	});
+
+	it("trim strips leading tabs / CRs before the injection check", () => {
+		// Cells with leading whitespace would trigger Excel formula evaluation
+		// only if the importer preserves the whitespace. Our trim removes it.
+		const csv = 'email,aliases,github,gitlab\nalice@x.com,"\t harmless",,';
+		expect(() => parseCsv(csv)).not.toThrow();
+	});
+
+	it("allows benign cells (alphanumeric, spaces, underscores)", () => {
+		const csv = "email,aliases,github,gitlab\nalice@x.com,alice ali,alice-gh,";
+		expect(() => parseCsv(csv)).not.toThrow();
 	});
 });

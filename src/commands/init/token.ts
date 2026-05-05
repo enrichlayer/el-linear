@@ -43,28 +43,65 @@ export interface TokenStepResult {
 }
 
 /**
+ * Strip anything that looks like a Linear API token from a string. Defense in
+ * depth: today the @linear/sdk error message embeds {query, variables} but not
+ * the Authorization header. A future SDK upgrade that includes headers (which
+ * upstream graphql-request has done historically) would otherwise silently
+ * write `Bearer lin_api_…` into stdout / shell history / CI logs. The regex
+ * also catches token shapes that may show up in custom error wrappers.
+ */
+export function sanitizeForLog(text: string): string {
+	return text.replace(/lin_api_[A-Za-z0-9_-]{16,}/g, "lin_api_***REDACTED***");
+}
+
+/**
+ * Strict shape check on the viewer response. Treats whitespace-only fields as
+ * "validated to nothing" — easy to forge with a malformed but truthy stub
+ * response, so we require a UUID-shaped id and a basic urlKey.
+ */
+function viewerIsValid(viewer: unknown): viewer is ViewerResponse["viewer"] {
+	if (!viewer || typeof viewer !== "object") return false;
+	const v = viewer as Record<string, unknown>;
+	const id = typeof v.id === "string" ? v.id.trim() : "";
+	if (
+		!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+	)
+		return false;
+	const org = v.organization as Record<string, unknown> | null | undefined;
+	if (!org || typeof org !== "object") return false;
+	const urlKey = typeof org.urlKey === "string" ? org.urlKey.trim() : "";
+	if (!/^[a-z0-9-]+$/i.test(urlKey)) return false;
+	return true;
+}
+
+/**
  * Validate a Linear API token by fetching the viewer. Throws with a
- * user-readable message on auth failure.
+ * sanitized user-readable message on auth failure — the error string is
+ * always run through sanitizeForLog so a leaked token in an upstream error
+ * is redacted before it hits stdout.
  */
 export async function validateToken(
 	token: string,
 ): Promise<ViewerResponse["viewer"]> {
 	const service = new GraphQLService(token);
+	let data: ViewerResponse;
 	try {
-		const data = await service.rawRequest<ViewerResponse>(VIEWER_QUERY);
-		if (!data?.viewer?.id) {
-			throw new Error(
-				"Token validated but no viewer was returned. Try a different token.",
-			);
-		}
-		return data.viewer;
+		data = await service.rawRequest<ViewerResponse>(VIEWER_QUERY);
 	} catch (err) {
-		const message = err instanceof Error ? err.message : String(err);
+		const raw = err instanceof Error ? err.message : String(err);
+		const message = sanitizeForLog(raw);
 		if (/AuthenticationFailed|Unauthorized|invalid|expired/i.test(message)) {
 			throw new Error(`Token rejected by Linear: ${message}`);
 		}
 		throw new Error(`Could not validate token: ${message}`);
 	}
+	if (!viewerIsValid(data?.viewer)) {
+		throw new Error(
+			"Token validated but the response is missing a viewer with a valid id and organization. " +
+				"Try a different token.",
+		);
+	}
+	return data.viewer;
 }
 
 /**
@@ -96,7 +133,8 @@ export async function runTokenStep(
 				return { token: existing, viewer };
 			}
 		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
+			const raw = err instanceof Error ? err.message : String(err);
+			const message = sanitizeForLog(raw);
 			// biome-ignore lint/suspicious/noConsole: wizard
 			console.log(
 				`  Existing token failed validation (${message}). You'll need to provide a new one.`,
@@ -136,9 +174,9 @@ export async function runTokenStep(
 			);
 			return { token, viewer };
 		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
+			const raw = err instanceof Error ? err.message : String(err);
 			// biome-ignore lint/suspicious/noConsole: wizard
-			console.log(`  ✗ ${message}`);
+			console.log(`  ✗ ${sanitizeForLog(raw)}`);
 		}
 	}
 	throw new Error(

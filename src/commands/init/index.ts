@@ -18,13 +18,13 @@
 import type { Command } from "commander";
 import {
 	type AliasUpdate,
-	fetchAllUsers,
 	mergeAliasesIntoConfig,
 	runAliasesImport,
 	runAliasesStep,
 } from "./aliases.js";
 import { runDefaultsStep } from "./defaults.js";
 import {
+	assignDefined,
 	printStep,
 	readConfig,
 	type WizardConfig,
@@ -33,46 +33,76 @@ import {
 import { runTokenStep } from "./token.js";
 import { runWorkspaceStep } from "./workspace.js";
 
+/**
+ * Wrap a wizard handler so that pressing Ctrl+C at any inquirer prompt exits
+ * cleanly with code 130 (the standard SIGINT exit code) instead of dumping a
+ * stack trace. inquirer throws an `ExitPromptError` whose `name === "ExitPromptError"`;
+ * we catch by name to avoid a hard import dependency on the internal class.
+ */
+function withCleanExit<TArgs extends unknown[]>(
+	fn: (...args: TArgs) => Promise<void>,
+): (...args: TArgs) => Promise<void> {
+	return async (...args: TArgs) => {
+		try {
+			await fn(...args);
+		} catch (err) {
+			if (err instanceof Error && err.name === "ExitPromptError") {
+				// biome-ignore lint/suspicious/noConsole: wizard
+				console.log("\n  Cancelled.");
+				process.exit(130);
+			}
+			throw err;
+		}
+	};
+}
+
 export function setupInitCommands(program: Command): void {
 	const init = program
 		.command("init")
 		.description("Interactive setup wizard for first-time linctl users")
 		.option("--force", "ignore existing config when prompting")
-		.action(async (options: { force?: boolean }) => {
-			await runFullWizard({ force: options.force ?? false });
-		});
+		.action(
+			withCleanExit(async (options: { force?: boolean }) => {
+				await runFullWizard({ force: options.force ?? false });
+			}),
+		);
 
 	init
 		.command("token")
 		.description("Set or replace the Linear API token")
 		.option("--force", "always replace existing token")
-		.action(async (options: { force?: boolean }) => {
-			printStep("token", "Linear API token");
-			await runTokenStep({ force: options.force ?? false });
-		});
+		.action(
+			withCleanExit(async (options: { force?: boolean }) => {
+				printStep("token", "Linear API token");
+				await runTokenStep({ force: options.force ?? false });
+			}),
+		);
 
 	init
 		.command("workspace")
 		.description("Set the default team and refresh team UUID cache")
-		.action(async () => {
-			const tokenResult = await runTokenStep();
-			const existing = await readConfig();
-			printStep("workspace", "Workspace defaults");
-			const ws = await runWorkspaceStep(
-				tokenResult.token,
-				tokenResult.viewer.organization.urlKey,
-				existing,
-			);
-			const merged: WizardConfig = {
-				...existing,
-				defaultTeam: ws.defaultTeam,
-				teams: { ...(existing.teams ?? {}), ...ws.teams },
-				workspaceUrlKey: ws.workspaceUrlKey,
-			};
-			await writeConfig(merged);
-			// biome-ignore lint/suspicious/noConsole: wizard
-			console.log("  ✓ Workspace defaults saved.");
-		});
+		.action(
+			withCleanExit(async () => {
+				const tokenResult = await runTokenStep();
+				const existing = await readConfig();
+				printStep("workspace", "Workspace defaults");
+				const ws = await runWorkspaceStep(
+					tokenResult.token,
+					tokenResult.viewer.organization.urlKey,
+					existing,
+				);
+				const merged: WizardConfig = assignDefined(existing, {
+					defaultTeam: ws.defaultTeam,
+					teams: { ...(existing.teams ?? {}), ...ws.teams },
+					// Don't clobber a manual urlKey override — same idempotency
+					// rule as the full wizard.
+					workspaceUrlKey: existing.workspaceUrlKey ?? ws.workspaceUrlKey,
+				});
+				await writeConfig(merged);
+				// biome-ignore lint/suspicious/noConsole: wizard
+				console.log("  ✓ Workspace defaults saved.");
+			}),
+		);
 
 	init
 		.command("aliases")
@@ -84,71 +114,62 @@ export function setupInitCommands(program: Command): void {
 			"Batch import from a CSV with columns: email,aliases,github,gitlab",
 		)
 		.option("--force", "skip the 'walk now?' prompt")
-		.action(async (options: { import?: string; force?: boolean }) => {
-			const tokenResult = await runTokenStep();
-			const existing = await readConfig();
-			printStep("aliases", "Member aliases");
+		.action(
+			withCleanExit(async (options: { import?: string; force?: boolean }) => {
+				const tokenResult = await runTokenStep();
+				const existing = await readConfig();
+				printStep("aliases", "Member aliases");
 
-			let updates: Map<string, AliasUpdate>;
-			if (options.import) {
-				// The import path returns email-keyed updates; map to UUID-keyed.
-				const byEmail = await runAliasesImport(options.import);
-				const users = await fetchAllUsers(tokenResult.token);
-				const byEmailLower = new Map<string, (typeof users)[number]>();
-				for (const u of users) {
-					if (u.email) byEmailLower.set(u.email.toLowerCase(), u);
-				}
-				updates = new Map<string, AliasUpdate>();
-				const skipped: string[] = [];
-				for (const [email, update] of byEmail) {
-					const user = byEmailLower.get(email);
-					if (!user) {
-						skipped.push(email);
-						continue;
-					}
-					updates.set(user.id, { ...update, displayName: user.displayName });
-				}
-				if (skipped.length > 0) {
-					// biome-ignore lint/suspicious/noConsole: wizard
-					console.log(
-						`  Skipped ${skipped.length} unmatched email(s): ${skipped.join(", ")}`,
+				let updates: Map<string, AliasUpdate>;
+				if (options.import) {
+					const result = await runAliasesImport(
+						tokenResult.token,
+						options.import,
 					);
+					updates = result.updates;
+					if (result.skipped.length > 0) {
+						// biome-ignore lint/suspicious/noConsole: wizard
+						console.log(
+							`  Skipped ${result.skipped.length} unmatched email(s): ${result.skipped.join(", ")}`,
+						);
+					}
+				} else {
+					updates = await runAliasesStep(tokenResult.token, existing, {
+						force: options.force ?? false,
+					});
 				}
-			} else {
-				updates = await runAliasesStep(tokenResult.token, existing, {
-					force: options.force ?? false,
-				});
-			}
 
-			if (updates.size === 0) {
+				if (updates.size === 0) {
+					// biome-ignore lint/suspicious/noConsole: wizard
+					console.log("  No alias changes — config unchanged.");
+					return;
+				}
+
+				const merged = mergeAliasesIntoConfig(existing, updates);
+				await writeConfig(merged);
 				// biome-ignore lint/suspicious/noConsole: wizard
-				console.log("  No alias changes — config unchanged.");
-				return;
-			}
-
-			const merged = mergeAliasesIntoConfig(existing, updates);
-			await writeConfig(merged);
-			// biome-ignore lint/suspicious/noConsole: wizard
-			console.log(`  ✓ Updated aliases for ${updates.size} user(s).`);
-		});
+				console.log(`  ✓ Updated aliases for ${updates.size} user(s).`);
+			}),
+		);
 
 	init
 		.command("defaults")
 		.description("Default labels, status defaults, term enforcement rules")
-		.action(async () => {
-			const existing = await readConfig();
-			printStep("defaults", "Defaults");
-			const result = await runDefaultsStep(existing);
-			const merged: WizardConfig = {
-				...existing,
-				defaultLabels: result.defaultLabels,
-				statusDefaults: result.statusDefaults,
-				terms: result.terms,
-			};
-			await writeConfig(merged);
-			// biome-ignore lint/suspicious/noConsole: wizard
-			console.log("  ✓ Defaults saved.");
-		});
+		.action(
+			withCleanExit(async () => {
+				const existing = await readConfig();
+				printStep("defaults", "Defaults");
+				const result = await runDefaultsStep(existing);
+				const merged: WizardConfig = assignDefined(existing, {
+					defaultLabels: result.defaultLabels,
+					statusDefaults: result.statusDefaults,
+					terms: result.terms,
+				});
+				await writeConfig(merged);
+				// biome-ignore lint/suspicious/noConsole: wizard
+				console.log("  ✓ Defaults saved.");
+			}),
+		);
 }
 
 /**
@@ -186,15 +207,25 @@ async function runFullWizard(options: { force: boolean }): Promise<void> {
 	const defaults = await runDefaultsStep(existing);
 
 	// Merge everything and write atomically at the end.
-	let merged: WizardConfig = {
-		...existing,
+	// Idempotency rule: only write a key when the user explicitly changed it.
+	// `existing.X ?? new.X` preserves any manual override the user may have
+	// in config.json (self-hosted Linear urlKey, custom default team, etc.).
+	// `assignDefined` skips undefined values so the resulting object's own-
+	// property set matches what JSON.stringify would actually serialize.
+	let merged: WizardConfig = assignDefined(existing, {
+		// defaults step: result is `existing.X` itself when the user skipped
+		// the edit branch, so direct assignment is safe.
 		defaultLabels: defaults.defaultLabels,
-		defaultTeam: ws.defaultTeam,
 		statusDefaults: defaults.statusDefaults,
-		teams: { ...(existing.teams ?? {}), ...ws.teams },
 		terms: defaults.terms,
-		workspaceUrlKey: ws.workspaceUrlKey,
-	};
+		// workspace step: `ws.defaultTeam` may be the existing value (user
+		// skipped) or a new pick.
+		defaultTeam: ws.defaultTeam,
+		// Always merge the team UUID cache (additive, not destructive).
+		teams: { ...(existing.teams ?? {}), ...ws.teams },
+		// workspaceUrlKey: never clobber an existing manual override.
+		workspaceUrlKey: existing.workspaceUrlKey ?? ws.workspaceUrlKey,
+	});
 	if (aliasUpdates.size > 0) {
 		merged = mergeAliasesIntoConfig(merged, aliasUpdates);
 	}

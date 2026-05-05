@@ -57,14 +57,17 @@ export async function runWorkspaceStep(
 	console.log(`  Workspace: ${workspaceUrlKey} (${teams.length} teams)`);
 
 	const currentDefault = existing.defaultTeam || "";
-	const skip = await confirm({
+	// `change` reflects what the user agreed to: `true` means "open the picker
+	// and change the default team", `false` means "leave the existing config
+	// alone". Default false makes pressing enter a no-op (keep-as-is).
+	const change = await confirm({
 		message: currentDefault
 			? `Current default team: ${currentDefault}. Change it?`
 			: "Set a default team for new issues?",
 		default: false,
 	});
 
-	if (!skip) {
+	if (!change) {
 		return {
 			workspaceUrlKey,
 			defaultTeam: currentDefault || undefined,
