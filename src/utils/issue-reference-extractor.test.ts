@@ -237,3 +237,58 @@ describe("extractIssueReferences", () => {
 		).toEqual([related("DEV-50")]);
 	});
 });
+
+describe("composition: wrap → extract pipeline (DEV-3606 regression guard)", () => {
+	// Documents the contract that callers MUST pass the pre-wrap description
+	// to extractIssueReferences/autoLinkReferences. The wrap step inserts `[`
+	// before the identifier, which breaks the prose-keyword regex anchor
+	// (e.g. /\bblocked by\s*$/). If a future refactor accidentally swaps the
+	// order — passing the wrapped form into extract — the inferred relation
+	// type silently degrades from `blocks` to `related`. These tests lock the
+	// existing workaround so that regression is caught immediately.
+
+	const cases = [
+		{
+			label: "blocked by",
+			text: "this is blocked by DEV-100",
+			expectedType: "blocks" as const,
+		},
+		{
+			label: "depends on",
+			text: "depends on DEV-200",
+			expectedType: "blocks" as const,
+		},
+		{
+			label: "duplicates",
+			text: "this duplicates DEV-300",
+			expectedType: "duplicate" as const,
+		},
+		{
+			label: "blocks",
+			text: "this blocks DEV-400",
+			expectedType: "blocks" as const,
+		},
+	];
+
+	it.each(
+		cases,
+	)("$label keyword: pre-wrap text infers $expectedType correctly", ({
+		text,
+		expectedType,
+	}) => {
+		const refs = extractIssueReferences(text);
+		expect(refs).toHaveLength(1);
+		expect(refs[0].type).toBe(expectedType);
+	});
+
+	it("post-wrap text degrades to 'related' (the bug we work around)", () => {
+		// This test exists to document the pitfall: if you wrap first and
+		// extract second, you get the wrong relation type. Callers must call
+		// extract on the raw description and wrap on the way out.
+		const wrapped =
+			"this is blocked by [DEV-100](https://example.com/issue/DEV-100/)";
+		const refs = extractIssueReferences(wrapped);
+		expect(refs).toHaveLength(1);
+		expect(refs[0].type).toBe("related"); // ← this would be `blocks` if we hadn't wrapped first
+	});
+});

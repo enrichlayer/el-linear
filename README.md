@@ -23,20 +23,31 @@ Requires Node.js ≥ 22.
 ## Quickstart
 
 ```bash
-# 1. Set your Linear API token
-export LINEAR_API_TOKEN="lin_api_..."  # from https://linear.app/settings/account/security
+# Run the interactive setup wizard. Only the API token is required;
+# every other step is skippable and revisitable later.
+linctl init
 
-# 2. Sanity-check
+# Sanity-check
 linctl teams list
 
-# 3. Create your first issue
+# Create your first issue
 linctl issues create "Investigate flaky deploy" \
   --team ENG --assignee alice --project "Reliability" \
   --description "..."
 ```
 
-Output is JSON by default. Pipe through `jq` for ad-hoc queries, or use the
-built-in `--jq` / `--fields` / `--raw` flags.
+`linctl init` walks you through the API token, default team, member
+aliases, and other defaults. Each step is also a stand-alone sub-command
+(`linctl init token`, `linctl init aliases --import users.csv`, etc.) so
+you can revisit individual sections later. Skip is the default at every
+prompt — running the wizard twice with no input is a no-op.
+
+If you'd rather skip the wizard entirely, the configuration schema is
+fully documented in [docs/configuration.md](./docs/configuration.md) so
+any LLM or script can write `~/.config/linctl/config.json` directly.
+
+Output is JSON by default. Pipe through `jq` for ad-hoc queries, or use
+the built-in `--jq` / `--fields` / `--raw` flags.
 
 ## Why linctl
 

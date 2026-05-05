@@ -1,10 +1,14 @@
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import { outputWarning } from "../utils/output.js";
+import { CONFIG_PATH } from "./paths.js";
 import type { TermRule } from "./term-enforcer.js";
 
-interface LinctlConfig {
+/**
+ * Canonical shape of `~/.config/linctl/config.json`. This is the single source
+ * of truth for the on-disk config — the wizard reads/writes the same shape
+ * (as `Partial<LinctlConfig>` since wizard runs may only set a subset).
+ */
+export interface LinctlConfig {
 	defaultLabels: string[];
 	defaultTeam: string;
 	labels: {
@@ -40,8 +44,6 @@ interface LinctlConfig {
 	 */
 	workspaceUrlKey?: string;
 }
-
-const CONFIG_PATH = path.join(os.homedir(), ".config", "linctl", "config.json");
 
 const DEFAULT_CONFIG: LinctlConfig = {
 	defaultTeam: "",
