@@ -9,6 +9,7 @@ import { setupDocumentsCommands } from "./commands/documents.js";
 import { setupEmbedsCommands } from "./commands/embeds.js";
 import { setupGdocCommands } from "./commands/gdoc.js";
 import { setupGraphQLCommands } from "./commands/graphql.js";
+import { setupInitCommands } from "./commands/init/index.js";
 import { setupIssueIdCommand } from "./commands/issue-id.js";
 import { setupIssuesCommands } from "./commands/issues.js";
 import { setupLabelsCommands } from "./commands/labels.js";
@@ -29,7 +30,7 @@ program
 	.description(
 		"A pragmatic CLI for Linear.app — deterministic resolution, structured validation, GraphQL escape hatch.",
 	)
-	.version("1.1.0")
+	.version("1.2.0")
 	.option("--api-token <token>", "Linear API token")
 	.option("--json", "output as JSON (default, accepted for compatibility)")
 	.option(
@@ -78,6 +79,7 @@ setupDocumentsCommands(program);
 setupGdocCommands(program);
 setupGraphQLCommands(program);
 setupConfigCommands(program);
+setupInitCommands(program);
 setupReadShortcut(program);
 
 program

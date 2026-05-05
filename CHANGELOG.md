@@ -6,6 +6,39 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-05-05
+
+This release adds the interactive setup wizard, `linctl init`, plus a
+documented configuration schema so any LLM or script can produce an
+equivalent config without running the prompts.
+
+### Added
+- `linctl init` — full setup wizard. Skip is the default at every prompt;
+  only the API token is required.
+- `linctl init token` — set or replace the Linear API token (validates
+  by calling `viewer { ... }` before saving).
+- `linctl init workspace` — pick a default team, refresh the team UUID
+  cache, fetch `workspaceUrlKey` from `viewer.organization.urlKey`.
+- `linctl init aliases` — walk Linear users one-by-one, with a 4-way
+  per-user menu (keep / edit / append / clear) plus quit-and-resume.
+  Progress is persisted to `~/.config/linctl/.init-aliases-progress`.
+- `linctl init aliases --import users.csv` — batch import aliases and
+  GitHub / GitLab handles from a CSV.
+- `linctl init defaults` — default labels, status defaults, term
+  enforcement rules.
+- `docs/configuration.md` — full config reference. Documents what each
+  wizard step writes so the config can be authored programmatically.
+
+### Idempotency
+Every wizard step reads existing config first, shows the current value,
+and defaults the prompt to "keep as-is". Running the wizard twice with no
+input changes produces a byte-identical `config.json` (keys are sorted on
+write).
+
+[Unreleased]: https://github.com/enrichlayer/linctl/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/enrichlayer/linctl/releases/tag/v1.2.0
+[1.1.0]: https://github.com/enrichlayer/linctl/releases/tag/v1.1.0
+
 ## [1.1.0] — 2026-04-30
 
 This release renames the package from `@enrichlayer/el-linear` to
