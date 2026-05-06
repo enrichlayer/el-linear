@@ -6,6 +6,20 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-05-07
+
+This release adds named **profiles** so you can switch between multiple Linear
+workspaces without juggling tokens or config files. It also introduces an
+`AGENTS.md` for OpenAI Codex compatibility (parallel to the existing
+`CLAUDE.md`).
+
+### Added
+- **Profiles** — store multiple `(token, default team, workspaceUrlKey)`
+  triples under `~/.config/el-linear/profiles/<name>/` and switch via
+  `--profile <name>` or the `EL_LINEAR_PROFILE` env var. Useful for clients
+  / contractor work / personal vs corporate accounts.
+- `AGENTS.md` — Codex-format guidance (mirrors `CLAUDE.md`).
+
 ## [1.3.0] — 2026-05-06
 
 This release adds `el-linear refs wrap`, a stdin/stdout filter that turns bare
@@ -121,7 +135,8 @@ sed -i.bak 's/\bel-linear\b/linctl/g' your-scripts.sh
 The legacy `brand` config block is auto-migrated to `terms[]` on first run.
 
 
-[Unreleased]: https://github.com/enrichlayer/el-linear/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/enrichlayer/el-linear/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/enrichlayer/el-linear/releases/tag/v1.4.0
 [1.3.0]: https://github.com/enrichlayer/el-linear/releases/tag/v1.3.0
 [1.2.0]: https://github.com/enrichlayer/el-linear/releases/tag/v1.2.0
 [1.1.0]: https://github.com/enrichlayer/el-linear/releases/tag/v1.1.0

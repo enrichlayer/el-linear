@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-Guidance for Claude Code when working in this repo.
+Guidance for Codex when working in this repo.
 
 ## What this is
 
@@ -39,40 +39,6 @@ src/
 │   └── output.ts, table-formatter.ts, validators.ts, logger.ts
 └── types/                # shared types
 ```
-
-## Profiles
-
-Multiple Linear workspaces (e.g. day-job + side-project) share the same
-binary via named **profiles**. A profile is a directory under
-`~/.config/el-linear/profiles/<name>/` that holds its own `token` +
-`config.json`.
-
-**Resolution order (highest first):**
-
-1. `--profile <name>` flag (per-invocation override)
-2. `EL_LINEAR_PROFILE` env var
-3. `~/.config/el-linear/active-profile` (single-line marker file)
-4. Legacy single-file paths (`~/.config/el-linear/{token,config.json}`)
-
-The legacy fallback means existing single-profile users see no
-behavior change — multi-profile is purely opt-in.
-
-**Touch points** (single source of truth: `src/config/paths.ts`):
-
-- `resolveActiveProfile(env, fsOps) → ProfilePaths` — pure resolution.
-- `setActiveProfileForSession(name)` — `main.ts` calls this from the
-  preAction hook when `--profile` is passed.
-- `loadConfig` (`src/config/config.ts`) and `getApiToken`
-  (`src/utils/auth.ts`) both call `resolveActiveProfile()` and pick
-  the active profile's path, falling back to the legacy path when the
-  per-profile file is missing.
-- The init wizard's `readConfig / writeConfig / readToken / writeToken`
-  in `src/commands/init/shared.ts` operate on the active profile's
-  paths, so `el-linear init` (and every `init <step>`) writes to the
-  right place automatically.
-
-**Subcommands:** `el-linear profile {list,current,use,add,remove}`
-(see `src/commands/profile.ts`).
 
 ## Conventions
 

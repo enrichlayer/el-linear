@@ -8,17 +8,41 @@
 
 import { randomBytes } from "node:crypto";
 import fs from "node:fs/promises";
+import path from "node:path";
 
 import type { ElLinearConfig } from "../../config/config.js";
 import {
 	ALIASES_PROGRESS_PATH,
 	CONFIG_DIR,
 	CONFIG_PATH,
+	resolveActiveProfile,
 	TOKEN_PATH,
 } from "../../config/paths.js";
 
 // Re-export for tests and call sites that already pulled the paths from here.
 export { ALIASES_PROGRESS_PATH, CONFIG_PATH, TOKEN_PATH };
+
+/**
+ * Profile-aware paths for the active wizard run. The wizard always
+ * writes to (and reads from) the active profile — switched via
+ * `EL_LINEAR_PROFILE`, `--profile`, or the on-disk `active-profile`
+ * marker. When no profile is selected, paths fall through to the
+ * legacy single-file layout (CONFIG_PATH / TOKEN_PATH).
+ */
+function activePaths(): {
+	configDir: string;
+	configPath: string;
+	tokenPath: string;
+} {
+	const active = resolveActiveProfile();
+	return {
+		// Profile dir is always the directory of configPath (whether
+		// that's the legacy CONFIG_DIR or a per-profile subdirectory).
+		configDir: path.dirname(active.configPath),
+		configPath: active.configPath,
+		tokenPath: active.tokenPath,
+	};
+}
 
 /**
  * Atomic file write: write to a sibling tmp file then rename. Survives SIGINT,
@@ -77,12 +101,19 @@ type DeepPartial<T> =
 export type WizardConfig = DeepPartial<ElLinearConfig>;
 
 export async function ensureConfigDir(): Promise<void> {
+	// Always make sure the legacy CONFIG_DIR exists (it's where the
+	// `active-profile` marker + `profiles/` tree live), then make the
+	// active profile's directory if it differs.
 	await fs.mkdir(CONFIG_DIR, { recursive: true, mode: 0o700 });
+	const dir = activePaths().configDir;
+	if (dir !== CONFIG_DIR) {
+		await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+	}
 }
 
 export async function readConfig(): Promise<WizardConfig> {
 	try {
-		const raw = await fs.readFile(CONFIG_PATH, "utf8");
+		const raw = await fs.readFile(activePaths().configPath, "utf8");
 		return JSON.parse(raw) as WizardConfig;
 	} catch (err) {
 		if ((err as NodeJS.ErrnoException).code === "ENOENT") {
@@ -96,12 +127,16 @@ export async function writeConfig(config: WizardConfig): Promise<void> {
 	await ensureConfigDir();
 	// Stable key order so byte-identical config produces byte-identical output.
 	const sorted = sortKeys(config);
-	await atomicWrite(CONFIG_PATH, `${JSON.stringify(sorted, null, 2)}\n`, 0o644);
+	await atomicWrite(
+		activePaths().configPath,
+		`${JSON.stringify(sorted, null, 2)}\n`,
+		0o644,
+	);
 }
 
 export async function readToken(): Promise<string | null> {
 	try {
-		const raw = await fs.readFile(TOKEN_PATH, "utf8");
+		const raw = await fs.readFile(activePaths().tokenPath, "utf8");
 		return raw.trim() || null;
 	} catch (err) {
 		if ((err as NodeJS.ErrnoException).code === "ENOENT") {
@@ -123,7 +158,7 @@ export async function readToken(): Promise<string | null> {
  */
 export async function writeToken(token: string): Promise<void> {
 	await ensureConfigDir();
-	await atomicWrite(TOKEN_PATH, `${token.trim()}\n`, 0o600);
+	await atomicWrite(activePaths().tokenPath, `${token.trim()}\n`, 0o600);
 }
 
 /**

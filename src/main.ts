@@ -13,6 +13,7 @@ import { setupInitCommands } from "./commands/init/index.js";
 import { setupIssueIdCommand } from "./commands/issue-id.js";
 import { setupIssuesCommands } from "./commands/issues.js";
 import { setupLabelsCommands } from "./commands/labels.js";
+import { setupProfileCommands } from "./commands/profile.js";
 import { setupProjectMilestonesCommands } from "./commands/project-milestones.js";
 import { setupProjectsCommands } from "./commands/projects.js";
 import { setupReadShortcut } from "./commands/read-shortcut.js";
@@ -22,6 +23,7 @@ import { setupSearchCommands } from "./commands/search.js";
 import { setupTeamsCommands } from "./commands/teams.js";
 import { setupTemplatesCommands } from "./commands/templates.js";
 import { setupUsersCommands } from "./commands/users.js";
+import { setActiveProfileForSession } from "./config/paths.js";
 import { setFieldsFilter, setJqFilter, setRawMode } from "./utils/output.js";
 import { outputUsageInfo } from "./utils/usage.js";
 import { splitList } from "./utils/validators.js";
@@ -33,6 +35,10 @@ program
 	)
 	.version("1.3.0")
 	.option("--api-token <token>", "Linear API token")
+	.option(
+		"--profile <name>",
+		"named profile (under ~/.config/el-linear/profiles/<name>/) for this invocation. Overrides EL_LINEAR_PROFILE env + the on-disk active-profile marker.",
+	)
 	.option("--json", "output as JSON (default, accepted for compatibility)")
 	.option(
 		"--raw",
@@ -54,6 +60,13 @@ program.hook("preAction", (_thisCommand: Command, actionCommand: Command) => {
 	}
 	if (rootOpts.fields) {
 		setFieldsFilter(splitList(rootOpts.fields));
+	}
+	// `--profile <name>` is highest-priority. preAction runs BEFORE the
+	// command body, which is BEFORE getApiToken / loadConfig fire — so
+	// setting the override here means the rest of the run picks up the
+	// right profile's token + config.
+	if (rootOpts.profile) {
+		setActiveProfileForSession(rootOpts.profile);
 	}
 });
 
@@ -81,6 +94,7 @@ setupGdocCommands(program);
 setupGraphQLCommands(program);
 setupConfigCommands(program);
 setupInitCommands(program);
+setupProfileCommands(program);
 setupRefsCommands(program);
 setupReadShortcut(program);
 

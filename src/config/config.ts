@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { outputWarning } from "../utils/output.js";
-import { CONFIG_PATH } from "./paths.js";
+import { CONFIG_PATH, resolveActiveProfile } from "./paths.js";
 import type { TermRule } from "./term-enforcer.js";
 
 /**
@@ -69,15 +69,28 @@ const DEFAULT_CONFIG: ElLinearConfig = {
 
 let cachedConfig: ElLinearConfig | undefined;
 
+/** Test seam — resets the cache between test cases. */
+export function _resetConfigCacheForTests(): void {
+	cachedConfig = undefined;
+}
+
 export function loadConfig(): ElLinearConfig {
 	if (cachedConfig) {
 		return cachedConfig;
 	}
 
-	if (fs.existsSync(CONFIG_PATH)) {
+	// Profile-aware: read from <CONFIG_DIR>/profiles/<name>/config.json
+	// when a profile is active, falling back to the legacy single-file
+	// path so existing setups keep working without migration.
+	const active = resolveActiveProfile();
+	const candidates = [active.configPath];
+	if (active.configPath !== CONFIG_PATH) candidates.push(CONFIG_PATH);
+	const sourcePath = candidates.find((p) => fs.existsSync(p));
+
+	if (sourcePath) {
 		try {
 			const userConfig = JSON.parse(
-				fs.readFileSync(CONFIG_PATH, "utf8"),
+				fs.readFileSync(sourcePath, "utf8"),
 			) as Record<string, unknown>;
 			// Migration: the legacy `brand: { name, reject }` config is auto-promoted to
 			// a single entry in `terms[]`. We warn (not throw) so existing users get a
@@ -107,12 +120,15 @@ export function loadConfig(): ElLinearConfig {
 				userConfig,
 			) as unknown as ElLinearConfig;
 		} catch {
-			outputWarning(`Failed to parse ${CONFIG_PATH}, using empty defaults`);
+			outputWarning(`Failed to parse ${sourcePath}, using empty defaults`);
 			cachedConfig = DEFAULT_CONFIG;
 		}
 	} else {
+		const profileNote = active.name
+			? ` (active profile: \`${active.name}\` — expected at ${active.configPath})`
+			: "";
 		outputWarning(
-			`No config found at ${CONFIG_PATH}. Run with --init to create one.`,
+			`No config found at ${active.configPath}${profileNote}. Run \`el-linear init\` (or \`el-linear profile add ${active.name ?? "<name>"}\`) to create one.`,
 		);
 		cachedConfig = DEFAULT_CONFIG;
 	}

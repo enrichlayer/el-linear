@@ -78,10 +78,49 @@ The API token is resolved in this order:
 
 1. `--api-token <token>` flag.
 2. `LINEAR_API_TOKEN` environment variable.
-3. `~/.config/el-linear/token` file (recommended for human use).
-4. `~/.linear_api_token` file (legacy, still honored).
+3. **Active profile's** `~/.config/el-linear/profiles/<name>/token` file (see *Profiles* below).
+4. `~/.config/el-linear/token` file (legacy single-profile, recommended for human use when only one workspace is needed).
+5. `~/.linear_api_token` file (legacy, still honored).
 
 el-linear never logs the token.
+
+## Profiles
+
+Use **profiles** to switch between multiple Linear workspaces (e.g.
+day-job and side-project) with separate tokens + configs.
+
+```bash
+# Create a profile + run the init wizard scoped to it.
+# After this finishes, <name> becomes the active profile.
+el-linear profile add forage
+
+# Switch the default at any time:
+el-linear profile use day-job
+el-linear profile current        # → day-job
+el-linear profile list           # all profiles + which is active
+
+# One-off override for a single command:
+el-linear --profile forage issues list
+EL_LINEAR_PROFILE=forage el-linear teams list
+
+# Remove a profile (token + config gone; confirms first):
+el-linear profile remove old-profile
+```
+
+Each profile lives at `~/.config/el-linear/profiles/<name>/` and owns:
+
+- `token` — its Linear API token (mode 0600)
+- `config.json` — its full el-linear config (defaultTeam, terms, etc.)
+
+The active profile is selected by, in priority:
+
+1. `--profile <name>` flag (per-invocation)
+2. `EL_LINEAR_PROFILE` env var
+3. `~/.config/el-linear/active-profile` (one-line marker, written by `profile use`)
+4. Legacy single-file layout (`~/.config/el-linear/{token,config.json}`)
+
+The legacy fallback means **existing single-profile users see no
+behavior change** — profiles are purely opt-in.
 
 ## Configuration
 
