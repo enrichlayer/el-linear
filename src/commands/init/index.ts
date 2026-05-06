@@ -176,7 +176,14 @@ export function setupInitCommands(program: Command): void {
  * Full wizard: walk through all four steps in sequence. Each step writes its
  * own slice of the config and is restartable on its own.
  */
-async function runFullWizard(options: { force: boolean }): Promise<void> {
+export async function runFullWizard(
+	options: { force?: boolean } = {},
+): Promise<void> {
+	const opts = { force: options.force ?? false };
+	await runFullWizardImpl(opts);
+}
+
+async function runFullWizardImpl(options: { force: boolean }): Promise<void> {
 	// biome-ignore lint/suspicious/noConsole: wizard
 	console.log("Welcome to el-linear. This wizard will set up your config.");
 	// biome-ignore lint/suspicious/noConsole: wizard

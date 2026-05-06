@@ -76,4 +76,53 @@ describe("getApiToken", () => {
 	it("throws when no token source is available", () => {
 		expect(() => getApiToken({})).toThrow("No API token found");
 	});
+
+	it("reads from <CONFIG_DIR>/profiles/<name>/token when a profile is active", async () => {
+		const { setActiveProfileForSession } = await import(
+			"../config/paths.js"
+		);
+		setActiveProfileForSession("forage");
+		try {
+			existsSyncMock.mockImplementation((p) =>
+				(p as string).includes("profiles/forage/token"),
+			);
+			readFileSyncMock.mockReturnValue("forage-token\n");
+			const result = getApiToken({});
+			expect(result).toBe("forage-token");
+		} finally {
+			setActiveProfileForSession(null);
+		}
+	});
+
+	it("falls back to legacy ~/.config/el-linear/token when the profile token is missing", async () => {
+		const { setActiveProfileForSession } = await import(
+			"../config/paths.js"
+		);
+		setActiveProfileForSession("forage");
+		try {
+			// Profile token absent; legacy token present.
+			existsSyncMock.mockImplementation((p) =>
+				(p as string).endsWith(".config/el-linear/token"),
+			);
+			readFileSyncMock.mockReturnValue("legacy-token\n");
+			const result = getApiToken({});
+			expect(result).toBe("legacy-token");
+		} finally {
+			setActiveProfileForSession(null);
+		}
+	});
+
+	it("error message names the active profile + expected token path when set", async () => {
+		const { setActiveProfileForSession } = await import(
+			"../config/paths.js"
+		);
+		setActiveProfileForSession("forage");
+		try {
+			existsSyncMock.mockReturnValue(false);
+			expect(() => getApiToken({})).toThrow(/active profile.*forage/);
+			expect(() => getApiToken({})).toThrow(/profiles\/forage\/token/);
+		} finally {
+			setActiveProfileForSession(null);
+		}
+	});
 });
