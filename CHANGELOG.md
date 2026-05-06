@@ -6,6 +6,28 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-05-06
+
+This release adds `el-linear refs wrap`, a stdin/stdout filter that turns bare
+Linear issue identifiers in arbitrary text (release notes, Slack drafts,
+meeting notes, etc.) into real links.
+
+### Added
+- `el-linear refs wrap` — read text from stdin (or `--file <path>`) and rewrite
+  every recognized Linear issue identifier as a link, validated against the
+  workspace. Unresolvable IDs (e.g. ISO codes) are left as plain text.
+- `--target markdown` (default) emits `[DEV-123](https://linear.app/...)`.
+- `--target slack` emits Slack mrkdwn `<https://linear.app/...|DEV-123>`.
+- `--no-validate` skips workspace validation and wraps every regex match;
+  prints a stderr advisory so the warning can be redirected separately from
+  the rewritten stdout stream.
+
+### Changed
+- `wrapIssueReferencesAsLinks` now accepts an optional fourth `target`
+  argument (defaulting to `"markdown"`) and protects existing Slack-style
+  `<url|label>` links from re-wrapping. Existing callers (`issues
+  create/update`, `comments create/update`) keep their previous behavior.
+
 ## [1.2.0] — 2026-05-06
 
 This release adds the interactive setup wizard, `el-linear init`, plus a
@@ -99,6 +121,7 @@ sed -i.bak 's/\bel-linear\b/linctl/g' your-scripts.sh
 The legacy `brand` config block is auto-migrated to `terms[]` on first run.
 
 
-[Unreleased]: https://github.com/enrichlayer/el-linear/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/enrichlayer/el-linear/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/enrichlayer/el-linear/releases/tag/v1.3.0
 [1.2.0]: https://github.com/enrichlayer/el-linear/releases/tag/v1.2.0
 [1.1.0]: https://github.com/enrichlayer/el-linear/releases/tag/v1.1.0
