@@ -26,7 +26,7 @@ import { outputUsageInfo } from "./utils/usage.js";
 import { splitList } from "./utils/validators.js";
 
 program
-	.name("linctl")
+	.name("el-linear")
 	.description(
 		"A pragmatic CLI for Linear.app — deterministic resolution, structured validation, GraphQL escape hatch.",
 	)

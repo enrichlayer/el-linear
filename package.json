@@ -1,71 +1,71 @@
 {
-  "name": "@enrichlayer/linctl",
-  "version": "1.2.0",
-  "description": "A pragmatic CLI for Linear.app — deterministic team/label/member resolution, structured issue validation, configurable term enforcement, and a GraphQL escape hatch.",
-  "main": "dist/main.js",
-  "types": "dist/main.d.ts",
-  "type": "module",
-  "exports": {
-    ".": {
-      "types": "./dist/main.d.ts",
-      "import": "./dist/main.js"
-    }
-  },
-  "sideEffects": false,
-  "bin": {
-    "linctl": "dist/main.js"
-  },
-  "files": [
-    "dist/",
-    "claude-skills/",
-    "LICENSE",
-    "README.md"
-  ],
-  "scripts": {
-    "build": "tsc && chmod +x dist/main.js",
-    "clean": "rm -rf dist/",
-    "lint": "biome check .",
-    "lint:fix": "biome check --fix .",
-    "start": "tsx src/main.ts",
-    "test": "vitest run",
-    "test:watch": "vitest"
-  },
-  "engines": {
-    "node": ">=22.0.0"
-  },
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/enrichlayer/linctl.git"
-  },
-  "homepage": "https://enrichlayer.com/tools/linctl",
-  "bugs": {
-    "url": "https://github.com/enrichlayer/linctl/issues"
-  },
-  "keywords": [
-    "linear",
-    "linear.app",
-    "cli",
-    "issue-tracker",
-    "graphql",
-    "claude",
-    "claude-code"
-  ],
-  "publishConfig": {
-    "access": "public"
-  },
-  "dependencies": {
-    "@inquirer/prompts": "^8.4.2",
-    "@linear/sdk": "^83.0.0",
-    "commander": "^14.0.0",
-    "picocolors": "^1.1.1"
-  },
-  "devDependencies": {
-    "@biomejs/biome": "^2.4.0",
-    "@types/node": "^25.0.0",
-    "graphql": "^16.0.0",
-    "tsx": "^4.20.5",
-    "typescript": "^5.0.0",
-    "vitest": "^4.0.18"
-  }
+	"name": "@enrichlayer/el-linear",
+	"version": "1.2.0",
+	"description": "A pragmatic CLI for Linear.app — deterministic team/label/member resolution, structured issue validation, configurable term enforcement, and a GraphQL escape hatch.",
+	"main": "dist/main.js",
+	"types": "dist/main.d.ts",
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./dist/main.d.ts",
+			"import": "./dist/main.js"
+		}
+	},
+	"sideEffects": false,
+	"bin": {
+		"el-linear": "dist/main.js"
+	},
+	"files": [
+		"dist/",
+		"claude-skills/",
+		"LICENSE",
+		"README.md"
+	],
+	"scripts": {
+		"build": "tsc && chmod +x dist/main.js",
+		"clean": "rm -rf dist/",
+		"lint": "biome check .",
+		"lint:fix": "biome check --fix .",
+		"start": "tsx src/main.ts",
+		"test": "vitest run",
+		"test:watch": "vitest"
+	},
+	"engines": {
+		"node": ">=22.0.0"
+	},
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/enrichlayer/el-linear.git"
+	},
+	"homepage": "https://enrichlayer.com/tools/el-linear",
+	"bugs": {
+		"url": "https://github.com/enrichlayer/el-linear/issues"
+	},
+	"keywords": [
+		"linear",
+		"linear.app",
+		"cli",
+		"issue-tracker",
+		"graphql",
+		"claude",
+		"claude-code"
+	],
+	"publishConfig": {
+		"access": "public"
+	},
+	"dependencies": {
+		"@inquirer/prompts": "^8.4.2",
+		"@linear/sdk": "^83.0.0",
+		"commander": "^14.0.0",
+		"picocolors": "^1.1.1"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.4.0",
+		"@types/node": "^25.0.0",
+		"graphql": "^16.0.0",
+		"tsx": "^4.20.5",
+		"typescript": "^5.0.0",
+		"vitest": "^4.0.18"
+	}
 }

@@ -212,7 +212,7 @@ export class GraphQLIssuesService {
 			const msg = error instanceof Error ? error.message : String(error);
 			if (msg.includes("Discrepancy between issue team")) {
 				const hint = updateInput.projectId
-					? `The project may not be associated with this issue's team. Fix with: linctl projects add-team "<project>" <team>`
+					? `The project may not be associated with this issue's team. Fix with: el-linear projects add-team "<project>" <team>`
 					: "The issue's team doesn't match the assigned project, cycle, or status.";
 				throw new Error(`Failed to update issue ${originalId}: ${hint}`);
 			}
@@ -547,7 +547,7 @@ export class GraphQLIssuesService {
 		throw new Error(
 			`Project "${projectName}" is not associated with the specified team.\n` +
 				`Associated teams: ${teamKeys.join(", ")}\n` +
-				`Hint: Use --team ${teamKeys[0]} or run \`linctl projects add-team "${projectName}" TEAM\` to add your team.`,
+				`Hint: Use --team ${teamKeys[0]} or run \`el-linear projects add-team "${projectName}" TEAM\` to add your team.`,
 		);
 	}
 
@@ -613,7 +613,7 @@ export class GraphQLIssuesService {
 						teamInput,
 					);
 					const hint = teamKey
-						? `— check available labels with: linctl labels list --team ${teamKey}`
+						? `— check available labels with: el-linear labels list --team ${teamKey}`
 						: undefined;
 					throw notFoundError("Label", labelIdOrName, undefined, hint);
 				}
@@ -624,7 +624,7 @@ export class GraphQLIssuesService {
 						teamInput,
 					);
 					const hint = teamKey
-						? ` Run: linctl labels list --team ${teamKey}`
+						? ` Run: el-linear labels list --team ${teamKey}`
 						: "";
 					throw new Error(
 						`Label "${labelIdOrName}" is a group label. Use a specific child label instead.${hint}`,

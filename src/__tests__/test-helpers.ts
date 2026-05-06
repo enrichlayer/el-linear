@@ -25,7 +25,7 @@ export async function runCommand(
 ): Promise<void> {
 	await program.parseAsync([
 		"node",
-		"linctl",
+		"el-linear",
 		"--api-token",
 		"test-token",
 		...args,

@@ -1,15 +1,15 @@
 /**
- * Setup wizard for first-time linctl users.
+ * Setup wizard for first-time el-linear users.
  *
  * Top-level command:
- *   linctl init                  — full wizard (token → workspace → aliases → defaults)
+ *   el-linear init                  — full wizard (token → workspace → aliases → defaults)
  *
  * Sub-commands (each idempotent, runnable in isolation):
- *   linctl init token            — set/replace the API token
- *   linctl init workspace        — pick a default team
- *   linctl init aliases          — walk users for aliases / handles (resumable)
- *   linctl init aliases --import users.csv
- *   linctl init defaults         — default labels, status, term enforcement
+ *   el-linear init token            — set/replace the API token
+ *   el-linear init workspace        — pick a default team
+ *   el-linear init aliases          — walk users for aliases / handles (resumable)
+ *   el-linear init aliases --import users.csv
+ *   el-linear init defaults         — default labels, status, term enforcement
  *
  * Skip is the default at every prompt. Only `init token` is required for a
  * first-time setup; everything else can be skipped and revisited later.
@@ -59,7 +59,7 @@ function withCleanExit<TArgs extends unknown[]>(
 export function setupInitCommands(program: Command): void {
 	const init = program
 		.command("init")
-		.description("Interactive setup wizard for first-time linctl users")
+		.description("Interactive setup wizard for first-time el-linear users")
 		.option("--force", "ignore existing config when prompting")
 		.action(
 			withCleanExit(async (options: { force?: boolean }) => {
@@ -178,7 +178,7 @@ export function setupInitCommands(program: Command): void {
  */
 async function runFullWizard(options: { force: boolean }): Promise<void> {
 	// biome-ignore lint/suspicious/noConsole: wizard
-	console.log("Welcome to linctl. This wizard will set up your config.");
+	console.log("Welcome to el-linear. This wizard will set up your config.");
 	// biome-ignore lint/suspicious/noConsole: wizard
 	console.log(
 		"Skip is the default at every prompt; only the API token is required.\n",
@@ -234,9 +234,9 @@ async function runFullWizard(options: { force: boolean }): Promise<void> {
 	// biome-ignore lint/suspicious/noConsole: wizard
 	console.log("\n✓ Setup complete.");
 	// biome-ignore lint/suspicious/noConsole: wizard
-	console.log("  Token:  ~/.config/linctl/token (mode 0600)");
+	console.log("  Token:  ~/.config/el-linear/token (mode 0600)");
 	// biome-ignore lint/suspicious/noConsole: wizard
-	console.log("  Config: ~/.config/linctl/config.json");
+	console.log("  Config: ~/.config/el-linear/config.json");
 	// biome-ignore lint/suspicious/noConsole: wizard
-	console.log("\nTry: linctl teams list");
+	console.log("\nTry: el-linear teams list");
 }

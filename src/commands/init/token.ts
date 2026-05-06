@@ -2,7 +2,7 @@
  * Step 1 of the wizard: Linear API token.
  *
  * The only required step. Validates the token by calling `viewer { ... }`
- * before saving. Token is stored at ~/.config/linctl/token (mode 0600),
+ * before saving. Token is stored at ~/.config/el-linear/token (mode 0600),
  * never embedded in config.json.
  */
 
@@ -146,8 +146,8 @@ export async function runTokenStep(
 	console.log(`  Generate a personal API token: ${TOKEN_GENERATION_URL}`);
 	// biome-ignore lint/suspicious/noConsole: wizard
 	console.log(
-		"  The token stays on your machine. linctl only sends it to Linear's API. " +
-			"It's stored at ~/.config/linctl/token (mode 0600).",
+		"  The token stays on your machine. el-linear only sends it to Linear's API. " +
+			"It's stored at ~/.config/el-linear/token (mode 0600).",
 	);
 
 	// Up to three attempts before giving up.

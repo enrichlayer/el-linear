@@ -1,5 +1,5 @@
 /**
- * Shared helpers for the `linctl init` wizard.
+ * Shared helpers for the `el-linear init` wizard.
  *
  * Every step reads the on-disk config first, shows current state, and defaults
  * to "keep as-is" so re-running the wizard with no input produces a
@@ -9,7 +9,7 @@
 import { randomBytes } from "node:crypto";
 import fs from "node:fs/promises";
 
-import type { LinctlConfig } from "../../config/config.js";
+import type { ElLinearConfig } from "../../config/config.js";
 import {
 	ALIASES_PROGRESS_PATH,
 	CONFIG_DIR,
@@ -60,7 +60,7 @@ type DeepPartial<T> =
 			: T;
 
 /**
- * Shape the wizard reads and writes. `DeepPartial<LinctlConfig>` because a
+ * Shape the wizard reads and writes. `DeepPartial<ElLinearConfig>` because a
  * wizard run may only set a subset of keys at any nesting level (a partial
  * `statusDefaults: { noProject: "Backlog" }` with no `withAssigneeAndProject`
  * is valid on disk; the runtime loader applies fallbacks at read time).
@@ -74,7 +74,7 @@ type DeepPartial<T> =
  * `JSON.parse → sortKeys → JSON.stringify` round-trip in `readConfig` /
  * `writeConfig` even though the type doesn't surface them.
  */
-export type WizardConfig = DeepPartial<LinctlConfig>;
+export type WizardConfig = DeepPartial<ElLinearConfig>;
 
 export async function ensureConfigDir(): Promise<void> {
 	await fs.mkdir(CONFIG_DIR, { recursive: true, mode: 0o700 });

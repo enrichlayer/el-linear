@@ -4,11 +4,11 @@ import { CONFIG_PATH } from "./paths.js";
 import type { TermRule } from "./term-enforcer.js";
 
 /**
- * Canonical shape of `~/.config/linctl/config.json`. This is the single source
+ * Canonical shape of `~/.config/el-linear/config.json`. This is the single source
  * of truth for the on-disk config — the wizard reads/writes the same shape
- * (as `Partial<LinctlConfig>` since wizard runs may only set a subset).
+ * (as `Partial<ElLinearConfig>` since wizard runs may only set a subset).
  */
-export interface LinctlConfig {
+export interface ElLinearConfig {
 	defaultLabels: string[];
 	defaultTeam: string;
 	labels: {
@@ -39,13 +39,13 @@ export interface LinctlConfig {
 	};
 	/**
 	 * Optional override for the Linear workspace URL key (the part after
-	 * `linear.app/` in issue URLs). When omitted, linctl queries the Linear API
+	 * `linear.app/` in issue URLs). When omitted, el-linear queries the Linear API
 	 * once per session and caches the result.
 	 */
 	workspaceUrlKey?: string;
 }
 
-const DEFAULT_CONFIG: LinctlConfig = {
+const DEFAULT_CONFIG: ElLinearConfig = {
 	defaultTeam: "",
 	defaultLabels: [],
 	members: {
@@ -67,9 +67,9 @@ const DEFAULT_CONFIG: LinctlConfig = {
 	terms: [],
 };
 
-let cachedConfig: LinctlConfig | undefined;
+let cachedConfig: ElLinearConfig | undefined;
 
-export function loadConfig(): LinctlConfig {
+export function loadConfig(): ElLinearConfig {
 	if (cachedConfig) {
 		return cachedConfig;
 	}
@@ -105,7 +105,7 @@ export function loadConfig(): LinctlConfig {
 			cachedConfig = deepMerge(
 				DEFAULT_CONFIG as unknown as Record<string, unknown>,
 				userConfig,
-			) as unknown as LinctlConfig;
+			) as unknown as ElLinearConfig;
 		} catch {
 			outputWarning(`Failed to parse ${CONFIG_PATH}, using empty defaults`);
 			cachedConfig = DEFAULT_CONFIG;

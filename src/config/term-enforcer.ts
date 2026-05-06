@@ -62,7 +62,7 @@ function formatViolation(v: TermViolation): string {
  * and an optional description). In strict mode, the first violation throws;
  * otherwise, all violations are buffered as warnings on the JSON output.
  *
- * Configure rules in your linctl config:
+ * Configure rules in your el-linear config:
  *   {
  *     "terms": [
  *       { "canonical": "Enrich Layer", "reject": ["EnrichLayer", "enrichlayer"] }

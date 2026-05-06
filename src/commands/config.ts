@@ -13,7 +13,7 @@ export function setupConfigCommands(program: Command): void {
 		.description("Show resolved configuration")
 		.addHelpText(
 			"after",
-			"\nDumps the merged config from ~/.config/linctl/config.json.\n\nExamples:\n  linctl config show",
+			"\nDumps the merged config from ~/.config/el-linear/config.json.\n\nExamples:\n  el-linear config show",
 		)
 		.action(() => {
 			outputSuccess({ data: loadConfig() });

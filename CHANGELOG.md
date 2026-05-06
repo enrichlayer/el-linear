@@ -1,30 +1,38 @@
 # Changelog
 
-All notable changes to `@enrichlayer/linctl` are documented here. The format
+All notable changes to `@enrichlayer/el-linear` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Renamed back to `el-linear`
+
+The `linctl` name collides with [dorkitude/linctl](https://github.com/dorkitude/linctl)
+on npm. The package is now `@enrichlayer/el-linear` with binary `el-linear`.
+Existing config at `~/.config/linctl/` is read as a legacy fallback for one
+release; new state is written to `~/.config/el-linear/`. The `LINCTL_DEBUG`
+env var still works as a legacy fallback for `EL_LINEAR_DEBUG`.
+
 ## [1.2.0] — 2026-05-05
 
-This release adds the interactive setup wizard, `linctl init`, plus a
+This release adds the interactive setup wizard, `el-linear init`, plus a
 documented configuration schema so any LLM or script can produce an
 equivalent config without running the prompts.
 
 ### Added
-- `linctl init` — full setup wizard. Skip is the default at every prompt;
+- `el-linear init` — full setup wizard. Skip is the default at every prompt;
   only the API token is required.
-- `linctl init token` — set or replace the Linear API token (validates
+- `el-linear init token` — set or replace the Linear API token (validates
   by calling `viewer { ... }` before saving).
-- `linctl init workspace` — pick a default team, refresh the team UUID
+- `el-linear init workspace` — pick a default team, refresh the team UUID
   cache, fetch `workspaceUrlKey` from `viewer.organization.urlKey`.
-- `linctl init aliases` — walk Linear users one-by-one, with a 4-way
+- `el-linear init aliases` — walk Linear users one-by-one, with a 4-way
   per-user menu (keep / edit / append / clear) plus quit-and-resume.
-  Progress is persisted to `~/.config/linctl/.init-aliases-progress`.
-- `linctl init aliases --import users.csv` — batch import aliases and
+  Progress is persisted to `~/.config/el-linear/.init-aliases-progress`.
+- `el-linear init aliases --import users.csv` — batch import aliases and
   GitHub / GitLab handles from a CSV.
-- `linctl init defaults` — default labels, status defaults, term
+- `el-linear init defaults` — default labels, status defaults, term
   enforcement rules.
 - `docs/configuration.md` — full config reference. Documents what each
   wizard step writes so the config can be authored programmatically.
@@ -35,9 +43,9 @@ and defaults the prompt to "keep as-is". Running the wizard twice with no
 input changes produces a byte-identical `config.json` (keys are sorted on
 write).
 
-[Unreleased]: https://github.com/enrichlayer/linctl/compare/v1.2.0...HEAD
-[1.2.0]: https://github.com/enrichlayer/linctl/releases/tag/v1.2.0
-[1.1.0]: https://github.com/enrichlayer/linctl/releases/tag/v1.1.0
+[Unreleased]: https://github.com/enrichlayer/el-linear/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/enrichlayer/el-linear/releases/tag/v1.2.0
+[1.1.0]: https://github.com/enrichlayer/el-linear/releases/tag/v1.1.0
 
 ## [1.1.0] — 2026-04-30
 

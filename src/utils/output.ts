@@ -120,7 +120,7 @@ function outputError(error: Error): void {
 	// Write to stdout (same channel as success) so machine callers always
 	// receive exactly one parseable JSON object regardless of stream capture.
 	logger.info(payload);
-	if (process.env.LINCTL_DEBUG ?? process.env.EL_LINEAR_DEBUG) {
+	if (process.env.EL_LINEAR_DEBUG ?? process.env.LINCTL_DEBUG) {
 		logger.error(error.stack ?? "");
 	}
 	process.exit(1);
