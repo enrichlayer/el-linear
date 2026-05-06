@@ -4,9 +4,9 @@ import { extractDocId, parseGoogleDoc } from "../utils/gdoc-parser.js";
 describe("extractDocId", () => {
 	it("extracts ID from a full Google Docs URL", () => {
 		const url =
-			"https://docs.google.com/document/d/1r-Fvi3GwMLFc1u0i9IZ5gB5Wzhr9F7f1dm9bdV1NFVY/edit";
+			"https://docs.google.com/document/d/1AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVv/edit";
 		expect(extractDocId(url)).toBe(
-			"1r-Fvi3GwMLFc1u0i9IZ5gB5Wzhr9F7f1dm9bdV1NFVY",
+			"1AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVv",
 		);
 	});
 
@@ -17,8 +17,8 @@ describe("extractDocId", () => {
 	});
 
 	it("returns bare ID unchanged", () => {
-		expect(extractDocId("1r-Fvi3GwMLFc1u0i9IZ5gB5Wzhr9F7f1dm9bdV1NFVY")).toBe(
-			"1r-Fvi3GwMLFc1u0i9IZ5gB5Wzhr9F7f1dm9bdV1NFVY",
+		expect(extractDocId("1AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVv")).toBe(
+			"1AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVv",
 		);
 	});
 });
