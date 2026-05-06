@@ -176,11 +176,42 @@ el-linear <command> --help       # detailed help for one command
 | Releases | `releases {list, read, create, pipelines}` |
 | Files | `embeds {upload, download}`, `attachments {list, create, delete}` |
 | Search | `search <query>` (semantic, cross-resource) |
+| Refs | `refs wrap` (rewrite issue identifiers in arbitrary text as links) |
 | Escape hatch | `graphql [query]` (with `--introspect`) |
 | Config | `config show`, `users list`, `teams list`, `templates list` |
 
 All `list` subcommands support `-l, --limit <n>`. All commands accept the
 top-level filters: `--raw`, `--jq <expr>`, `--fields <list>`.
+
+## Wrapping Linear references in arbitrary text
+
+`el-linear refs wrap` takes plain text on stdin (or via `--file`) and rewrites
+every recognized Linear issue identifier (e.g. `DEV-123`, `LIN-1`) as a real
+link. By default it validates each candidate against the workspace — strings
+that match the `[A-Z]+-\d+` shape but aren't real issues (e.g. `ISO-1424`)
+are left untouched.
+
+```bash
+# stdin → stdout, markdown output (default)
+echo "see DEV-100 and ISO-1424" | el-linear refs wrap
+# → see [DEV-100](https://linear.app/acme/issue/DEV-100/) and ISO-1424
+
+# read from a file
+el-linear refs wrap --file notes.md > notes.linked.md
+
+# Slack mrkdwn output: <url|label>
+el-linear refs wrap --target slack < release-notes.md
+
+# offline regex-only fallback — wraps every match, no API calls,
+# may produce broken links for IDs that don't exist in the workspace
+el-linear refs wrap --no-validate < notes.md
+```
+
+Wrapping is **idempotent** — running it again on already-wrapped output is a
+no-op. Refs are also skipped inside fenced code blocks, inline backticks,
+existing markdown or Slack links, angle-bracket autolinks, and bare URLs, so
+it's safe to pipe documents that already contain a mix of formatted links
+and bare identifiers.
 
 ## Use with Claude Code
 
