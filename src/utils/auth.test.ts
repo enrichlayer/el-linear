@@ -78,9 +78,7 @@ describe("getApiToken", () => {
 	});
 
 	it("reads from <CONFIG_DIR>/profiles/<name>/token when a profile is active", async () => {
-		const { setActiveProfileForSession } = await import(
-			"../config/paths.js"
-		);
+		const { setActiveProfileForSession } = await import("../config/paths.js");
 		setActiveProfileForSession("forage");
 		try {
 			existsSyncMock.mockImplementation((p) =>
@@ -95,9 +93,7 @@ describe("getApiToken", () => {
 	});
 
 	it("falls back to legacy ~/.config/el-linear/token when the profile token is missing", async () => {
-		const { setActiveProfileForSession } = await import(
-			"../config/paths.js"
-		);
+		const { setActiveProfileForSession } = await import("../config/paths.js");
 		setActiveProfileForSession("forage");
 		try {
 			// Profile token absent; legacy token present.
@@ -113,9 +109,7 @@ describe("getApiToken", () => {
 	});
 
 	it("error message names the active profile + expected token path when set", async () => {
-		const { setActiveProfileForSession } = await import(
-			"../config/paths.js"
-		);
+		const { setActiveProfileForSession } = await import("../config/paths.js");
 		setActiveProfileForSession("forage");
 		try {
 			existsSyncMock.mockReturnValue(false);

@@ -7,9 +7,9 @@ import {
 	ACTIVE_PROFILE_FILE,
 	CONFIG_PATH,
 	getSessionProfileOverride,
+	PROFILES_DIR,
 	type ProfileFsOps,
 	profilePaths,
-	PROFILES_DIR,
 	resolveActiveProfile,
 	setActiveProfileForSession,
 	TOKEN_PATH,
@@ -17,9 +17,9 @@ import {
 
 function makeFsOps(presence: Record<string, string | null>): ProfileFsOps {
 	return {
-		existsSync: (p: string) => Object.prototype.hasOwnProperty.call(presence, p),
+		existsSync: (p: string) => Object.hasOwn(presence, p),
 		readFileSync: (p: string) => {
-			if (!Object.prototype.hasOwnProperty.call(presence, p)) {
+			if (!Object.hasOwn(presence, p)) {
 				throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
 			}
 			return presence[p] ?? "";
