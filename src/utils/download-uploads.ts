@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { LinearIssue } from "../types/linear.js";
 import { FileService } from "./file-service.js";
 
-const DOWNLOAD_DIR = join(tmpdir(), "linctl-downloads");
+const DOWNLOAD_DIR = join(tmpdir(), "el-linear-downloads");
 const UPLOAD_URL_REGEX = /https:\/\/uploads\.linear\.app\/[^\s)>\]"]+/g;
 
 function collectUploadUrls(text: string): string[] {

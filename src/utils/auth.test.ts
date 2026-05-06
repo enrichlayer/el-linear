@@ -41,14 +41,26 @@ describe("getApiToken", () => {
 		expect(result).toBe("env-token");
 	});
 
-	it("reads from ~/.config/linctl/token when no flag or env", () => {
+	it("reads from ~/.config/el-linear/token when no flag or env", () => {
 		existsSyncMock.mockImplementation((p) =>
-			(p as string).includes(".config/linctl/token"),
+			(p as string).includes(".config/el-linear/token"),
 		);
 		readFileSyncMock.mockReturnValue("config-token\n");
 
 		const result = getApiToken({});
 		expect(result).toBe("config-token");
+	});
+
+	it("falls back to ~/.config/linctl/token (legacy) if the primary path is missing", () => {
+		// The package was briefly published as `@enrichlayer/linctl`; the linctl
+		// path is read-only fallback for one release after the revert.
+		existsSyncMock.mockImplementation((p) =>
+			(p as string).includes(".config/linctl/token"),
+		);
+		readFileSyncMock.mockReturnValue("legacy-linctl-token\n");
+
+		const result = getApiToken({});
+		expect(result).toBe("legacy-linctl-token");
 	});
 
 	it("reads from ~/.linear_api_token as last fallback", () => {

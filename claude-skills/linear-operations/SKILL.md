@@ -1,12 +1,12 @@
 ---
 name: linear-operations
-description: "MUST be invoked before any linctl CLI call. Covers linctl syntax, label taxonomy, duplicate checking, issue creation conventions, and project management. Triggers on: \"create issue\", \"update issue\", \"search issues\", \"Linear\", \"linctl\", \"label\", \"assign\". NOT for branch creation or full development workflows."
-allowed-tools: Bash(linctl:*), Bash(which:*), AskUserQuestion, Read
+description: "MUST be invoked before any el-linear CLI call. Covers el-linear syntax, label taxonomy, duplicate checking, issue creation conventions, and project management. Triggers on: \"create issue\", \"update issue\", \"search issues\", \"Linear\", \"el-linear\", \"label\", \"assign\". NOT for branch creation or full development workflows."
+allowed-tools: Bash(el-linear:*), Bash(which:*), AskUserQuestion, Read
 ---
 
 # Linear Operations Skill
 
-All Linear operations should go through the **`linctl` CLI**. For command syntax, run `linctl usage` (all commands) or `linctl <command> --help`.
+All Linear operations should go through the **`el-linear` CLI**. For command syntax, run `el-linear usage` (all commands) or `el-linear <command> --help`.
 
 This skill covers **mandatory processes and non-obvious rules** — everything the CLI help doesn't tell you.
 
@@ -50,7 +50,7 @@ and outreach tracked in one place.
 **Search before creating. No exceptions.**
 
 ```bash
-linctl issues search "keywords from proposed title" 2>&1
+el-linear issues search "keywords from proposed title" 2>&1
 ```
 
 1. Extract 2–3 key terms from the proposed title (skip generic words).
@@ -63,20 +63,20 @@ linctl issues search "keywords from proposed title" 2>&1
 4. If related issues are found, **always create the relation** when creating the new issue:
 
    ```bash
-   linctl issues create "Title" --team ENG --related-to "ENG-456,ENG-789" ... 2>&1
+   el-linear issues create "Title" --team ENG --related-to "ENG-456,ENG-789" ... 2>&1
    ```
 
 ### Viewing existing relations
 
 ```bash
-linctl issues related ENG-123 2>&1
+el-linear issues related ENG-123 2>&1
 ```
 
 Returns all relations (related, blocks, blockedBy, duplicate) with direction, state, and assignee. Use this before creating follow-up work to understand the context around an issue.
 
 ### Auto-linking issue references on create/update
 
-`linctl issues create`, `linctl issues update`, `linctl comments create`, and `linctl comments update` run the same auto-linking flow on text being written:
+`el-linear issues create`, `el-linear issues update`, `el-linear comments create`, and `el-linear comments update` run the same auto-linking flow on text being written:
 
 1. **Wrap as markdown links.** Bare identifiers (`ENG-100`, `DESIGN-22`) are rewritten to `[ENG-100](https://linear.app/<workspace>/issue/ENG-100/)`. Skipped inside fenced code blocks, inline backticks, existing markdown links, angle-bracket autolinks, and bare URLs.
 2. **Validate first.** Identifiers that don't resolve in the workspace (e.g. ISO codes like `ISO-1424`) are left as plain text — no link, no relation.
@@ -95,19 +95,19 @@ The output includes an `autoLinked` field with `linked`, `skipped`, and `failed`
 To backfill an existing issue:
 
 ```bash
-linctl issues link-references ENG-123                      # description only
-linctl issues link-references ENG-123 --include-comments   # description + comments
-linctl issues link-references ENG-123 --dry-run            # preview
+el-linear issues link-references ENG-123                      # description only
+el-linear issues link-references ENG-123 --include-comments   # description + comments
+el-linear issues link-references ENG-123 --dry-run            # preview
 ```
 
 ---
 
 ## Pre-Work Check (Existing Issues)
 
-When starting work on an existing issue (`linctl issues read ENG-123`):
+When starting work on an existing issue (`el-linear issues read ENG-123`):
 
-- [ ] **Assignee set** — if missing, ask user and update: `linctl issues update ENG-123 --assignee <name>`.
-- [ ] **Project set** — if missing, ask user and update: `linctl issues update ENG-123 --project "<name>"`.
+- [ ] **Assignee set** — if missing, ask user and update: `el-linear issues update ENG-123 --assignee <name>`.
+- [ ] **Project set** — if missing, ask user and update: `el-linear issues update ENG-123 --project "<name>"`.
 - [ ] **Status appropriate** — move to "In Progress" or your team's equivalent.
 
 Don't start implementation work on an unassigned issue. The assignee is the person accountable.
@@ -119,9 +119,9 @@ Don't start implementation work on an unassigned issue. The assignee is the pers
 Complete ALL items before creating any issue:
 
 - [ ] **Duplicate & related check** — searched for existing issues, linked related ones (above).
-- [ ] **Team** — ask user if unclear (`linctl teams list`).
-- [ ] **Assignee** — ask user if unclear (`linctl users list --active`).
-- [ ] **Project** — always ask user, never guess (`linctl projects list`).
+- [ ] **Team** — ask user if unclear (`el-linear teams list`).
+- [ ] **Assignee** — ask user if unclear (`el-linear users list --active`).
+- [ ] **Project** — always ask user, never guess (`el-linear projects list`).
 - [ ] **Labels** — exactly 1 type label + 1–2 domain labels (see Label Taxonomy below).
 - [ ] **Title** — action verb matching the type label (see Title Verb Convention), sentence case, specific scope.
 - [ ] **Description** — 2–4 sentences with context and intent, formatted with **bold** and `inline code`.
@@ -133,10 +133,10 @@ If any field is missing, **STOP and use AskUserQuestion**.
 
 ## The `--claude` Delegation Pattern
 
-`linctl issues create` accepts a `--claude` flag that applies the workspace-level "claude" label (configured at `config.labels.workspace.claude`). This is the canonical signal that an issue is **delegated to Claude Code** for autonomous execution.
+`el-linear issues create` accepts a `--claude` flag that applies the workspace-level "claude" label (configured at `config.labels.workspace.claude`). This is the canonical signal that an issue is **delegated to Claude Code** for autonomous execution.
 
 ```bash
-linctl issues create "Migrate auth middleware to new session store" \
+el-linear issues create "Migrate auth middleware to new session store" \
   --team ENG --assignee alice --project "Auth Refactor" \
   --description "..." --claude 2>&1
 ```
@@ -144,7 +144,7 @@ linctl issues create "Migrate auth middleware to new session store" \
 When you see `--claude` in usage:
 
 - **As a writer**: use it to mark issues you want Claude to pick up. The label is the contract; combine it with a clear "Done when" so Claude knows what success looks like.
-- **As Claude**: if you find an issue with the `claude` label, you should treat it as in-scope work for autonomous progress. Search with `linctl issues search "claude" --status "Todo"`.
+- **As Claude**: if you find an issue with the `claude` label, you should treat it as in-scope work for autonomous progress. Search with `el-linear issues search "claude" --status "Todo"`.
 - **As a reviewer**: an issue's `claude` label tells you to weigh whether the description has enough acceptance criteria, since the assignee can't ask follow-up questions in a back-and-forth.
 
 The label is plain config — set it to anything you want, or skip it entirely. The flag is just sugar for `--labels claude`.
@@ -153,10 +153,10 @@ The label is plain config — set it to anything you want, or skip it entirely. 
 
 ## User @Mentions
 
-Reference team members by name in comments. linctl resolves both explicit `@name` tokens and bare capitalized references to proper Linear mentions.
+Reference team members by name in comments. el-linear resolves both explicit `@name` tokens and bare capitalized references to proper Linear mentions.
 
 ```bash
-linctl comments create ENG-123 --body "cc @alice — Bob can you review?" 2>&1
+el-linear comments create ENG-123 --body "cc @alice — Bob can you review?" 2>&1
 # Both "@alice" and "Bob" become Linear mentions.
 ```
 
@@ -170,7 +170,7 @@ Works in comments only (not descriptions).
 
 ## CLI Syntax Rules
 
-Run `linctl usage` for the full command reference. Non-obvious rules:
+Run `el-linear usage` for the full command reference. Non-obvious rules:
 
 - **Always append `2>&1`** to capture errors.
 - **Labels are comma-separated** — `--labels "feature,backend"` (not repeated flags).
@@ -194,10 +194,10 @@ Run `linctl usage` for the full command reference. Non-obvious rules:
 1. **Check for `"error"` key** before accessing fields like `identifier`.
 2. **Do NOT retry** failed commands — report the error.
 3. Common errors and fixes:
-   - "Label not found" → check `linctl labels list --team X`.
+   - "Label not found" → check `el-linear labels list --team X`.
    - "Label is a group label" → use a child label, not the parent.
-   - "Project may not be associated with this issue's team" → fix with `linctl projects add-team`.
-   - "User not found" → check `linctl users list --active`.
+   - "Project may not be associated with this issue's team" → fix with `el-linear projects add-team`.
+   - "User not found" → check `el-linear users list --active`.
 
 ---
 
@@ -205,7 +205,7 @@ Run `linctl usage` for the full command reference. Non-obvious rules:
 
 ### Type Labels (Required: exactly 1)
 
-The default linctl validation expects one of these:
+The default el-linear validation expects one of these:
 
 | Label | When |
 |-------|------|
@@ -229,7 +229,7 @@ Title must start with a verb that matches the type label:
 
 ### Rules
 
-- **Create missing labels liberally** — `linctl labels create "my-label" --team ENG`.
+- **Create missing labels liberally** — `el-linear labels create "my-label" --team ENG`.
 - **`--claude` flag** adds the workspace-level "claude" label automatically.
 - Ask the user to confirm labels if you're unsure about domain.
 
@@ -237,7 +237,7 @@ Title must start with a verb that matches the type label:
 
 ## Term Enforcement (`config.terms`)
 
-linctl can flag misspellings of brand or project names in titles and descriptions. Configure rules in `~/.config/linctl/config.json`:
+el-linear can flag misspellings of brand or project names in titles and descriptions. Configure rules in `~/.config/el-linear/config.json`:
 
 ```json
 {
@@ -249,7 +249,7 @@ linctl can flag misspellings of brand or project names in titles and description
 }
 ```
 
-When linctl finds a rejected token in an issue title or description, it warns (or in `--strict` mode, throws). The check tolerates URLs and file paths — `enrichlayer.com` is allowed even though `enrichlayer` is rejected.
+When el-linear finds a rejected token in an issue title or description, it warns (or in `--strict` mode, throws). The check tolerates URLs and file paths — `enrichlayer.com` is allowed even though `enrichlayer` is rejected.
 
 If you don't configure any rules, term enforcement is a no-op.
 
@@ -271,14 +271,14 @@ If you only set one, the other shows blank.
 Creating an issue on team X with a project from team Y → "Project not in same team" error. Fix:
 
 ```bash
-linctl projects add-team "Project Name" ENG 2>&1
+el-linear projects add-team "Project Name" ENG 2>&1
 ```
 
 **Never use raw `projectUpdate` with `teamIds`** — it replaces the entire team list. Always use `projects add-team` / `remove-team`.
 
 ### Discovery Before Creation
 
-Always check if a project exists before creating: `linctl projects list --limit 50`.
+Always check if a project exists before creating: `el-linear projects list --limit 50`.
 
 ---
 
@@ -309,7 +309,7 @@ Parent: ENG-100 "Review API design"          ← stays open
 
 When working on an issue with a checklist, check off items as you complete them.
 
-1. Read the issue: `linctl issues read ENG-123`.
-2. Update the description with checked items: `linctl issues update ENG-123 --description "..."`.
+1. Read the issue: `el-linear issues read ENG-123`.
+2. Update the description with checked items: `el-linear issues update ENG-123 --description "..."`.
 3. Preserve the rest of the description — only change `- [ ]` to `- [x]`.
 4. If all items are done, update the status accordingly.

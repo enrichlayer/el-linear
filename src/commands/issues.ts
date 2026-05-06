@@ -1588,7 +1588,7 @@ export function setupIssuesCommands(program: Command): void {
 		.description("Get issue details. Accepts multiple IDs for batch retrieval.")
 		.addHelpText(
 			"after",
-			"\nBoth UUID and identifiers like ABC-123 are supported.\nMultiple IDs: linctl issue get DEV-123 DEV-456 DEV-789",
+			"\nBoth UUID and identifiers like ABC-123 are supported.\nMultiple IDs: el-linear issue get DEV-123 DEV-456 DEV-789",
 		)
 		.action(handleAsyncCommand(handleReadIssue));
 

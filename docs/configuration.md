@@ -1,43 +1,43 @@
 # Configuration reference
 
-linctl reads configuration from two files in `~/.config/linctl/`:
+el-linear reads configuration from two files in `~/.config/el-linear/`:
 
 | File | Mode | Purpose |
 |------|------|---------|
 | `config.json` | `0644` | All non-secret config — team/member/label maps, defaults, term-enforcement rules. |
 | `token` | `0600` | Linear personal API token. Never embedded in `config.json`. |
 
-This document is the canonical reference. **An LLM (or a human, or a script) can construct an equivalent config without ever running `linctl init`** by writing the two files directly to the locations and shapes documented below.
+This document is the canonical reference. **An LLM (or a human, or a script) can construct an equivalent config without ever running `el-linear init`** by writing the two files directly to the locations and shapes documented below.
 
 ---
 
 ## File locations
 
 ```
-~/.config/linctl/
+~/.config/el-linear/
 ├── config.json                        # this file
 ├── token                              # 0600, single line: lin_api_...
-└── .init-aliases-progress             # transient, written by `linctl init aliases` on quit
+└── .init-aliases-progress             # transient, written by `el-linear init aliases` on quit
 ```
 
-The `~/.config/linctl/` directory itself should be `0700`. linctl creates it with the right mode when any wizard step runs; if you create it manually, do `mkdir -p -m 0700 ~/.config/linctl`.
+The `~/.config/el-linear/` directory itself should be `0700`. el-linear creates it with the right mode when any wizard step runs; if you create it manually, do `mkdir -p -m 0700 ~/.config/el-linear`.
 
 `token` should contain only the token text + a trailing newline:
 
 ```bash
-printf '%s\n' "lin_api_yourkeyhere" > ~/.config/linctl/token
-chmod 0600 ~/.config/linctl/token
+printf '%s\n' "lin_api_yourkeyhere" > ~/.config/el-linear/token
+chmod 0600 ~/.config/el-linear/token
 ```
 
 ---
 
 ## Top-level config schema
 
-`config.json` is a flat object. Every key is optional. Unknown keys are preserved on writes (linctl's wizard does shallow merging plus alias-key bookkeeping; it does not remove fields it doesn't recognise).
+`config.json` is a flat object. Every key is optional. Unknown keys are preserved on writes (el-linear's wizard does shallow merging plus alias-key bookkeeping; it does not remove fields it doesn't recognise).
 
 ```jsonc
 {
-  // Default team for `linctl issues create` when --team is omitted.
+  // Default team for `el-linear issues create` when --team is omitted.
   // Must be a key in the `teams` map below, or a Linear team UUID.
   "defaultTeam": "ENG",
 
@@ -46,19 +46,19 @@ chmod 0600 ~/.config/linctl/token
   "defaultLabels": ["claude"],
 
   // Optional override for the workspace URL key (the segment after `linear.app/`).
-  // When omitted, linctl fetches it from `viewer.organization.urlKey` once
+  // When omitted, el-linear fetches it from `viewer.organization.urlKey` once
   // per session and caches in memory.
   "workspaceUrlKey": "enrichlayer",
 
   // Status defaults for issues create. Either string is the human-readable
-  // name of a workflow state in any team; linctl resolves it per-team at runtime.
+  // name of a workflow state in any team; el-linear resolves it per-team at runtime.
   "statusDefaults": {
     "noProject": "Triage",
     "withAssigneeAndProject": "Todo"
   },
 
-  // Team key → team UUID. Populated by `linctl init workspace`. You can
-  // also fetch keys + ids via `linctl teams list --raw`.
+  // Team key → team UUID. Populated by `el-linear init workspace`. You can
+  // also fetch keys + ids via `el-linear teams list --raw`.
   "teams": {
     "ENG": "f0b3d1a8-...",
     "DESIGN": "9d4e7c6f-..."
@@ -89,7 +89,7 @@ chmod 0600 ~/.config/linctl/token
       "8f1c0e6a-...": "Alice Anderson",
       "ad7c2e34-...": "Bob Brown"
     },
-    // Platform handles → display name. linctl supports github + gitlab
+    // Platform handles → display name. el-linear supports github + gitlab
     // out of the box; you can add more (the keys are arbitrary strings).
     "handles": {
       "github": {
@@ -116,7 +116,7 @@ chmod 0600 ~/.config/linctl/token
     }
   },
 
-  // Term-enforcement rules. linctl warns (or in `--strict` mode, throws)
+  // Term-enforcement rules. el-linear warns (or in `--strict` mode, throws)
   // when an issue title or description contains a rejected variant of any
   // canonical name. URLs and file paths are exempt from the check.
   "terms": [
@@ -150,15 +150,15 @@ A complete minimal config (token + defaultTeam only) is enough for most basic us
 
 ---
 
-## What each `linctl init` step writes
+## What each `el-linear init` step writes
 
-The wizard is split into four steps. Each step is also a stand-alone sub-command (`linctl init token`, `linctl init workspace`, `linctl init aliases`, `linctl init defaults`). This section maps each step onto the exact config keys it sets so you can construct an equivalent config without the wizard.
+The wizard is split into four steps. Each step is also a stand-alone sub-command (`el-linear init token`, `el-linear init workspace`, `el-linear init aliases`, `el-linear init defaults`). This section maps each step onto the exact config keys it sets so you can construct an equivalent config without the wizard.
 
 ### Step 1 — `init token`
 
 **Reads from user:** Linear personal API token via hidden input.
 
-**Writes:** `~/.config/linctl/token` (mode `0600`), single line.
+**Writes:** `~/.config/el-linear/token` (mode `0600`), single line.
 
 **Validates:** calls `query { viewer { id name email displayName organization { urlKey name } } }` — refuses to save the token if the call fails.
 
@@ -167,8 +167,8 @@ The wizard is split into four steps. Each step is also a stand-alone sub-command
 Equivalent without the wizard:
 
 ```bash
-printf '%s\n' "lin_api_yourkeyhere" > ~/.config/linctl/token
-chmod 0600 ~/.config/linctl/token
+printf '%s\n' "lin_api_yourkeyhere" > ~/.config/el-linear/token
+chmod 0600 ~/.config/el-linear/token
 ```
 
 ### Step 2 — `init workspace`
@@ -206,7 +206,7 @@ Equivalent JSON for an "ENG" default with three visible teams:
 | `clear` | Remove all aliases / handles for this user. |
 | `quit` | Save progress to `.init-aliases-progress` and exit the walk. |
 
-After `quit`, re-running `linctl init aliases` resumes from where you left off. Progress file is removed once the walk completes.
+After `quit`, re-running `el-linear init aliases` resumes from where you left off. Progress file is removed once the walk completes.
 
 **Writes to `config.json`:** edits the `members` sub-tree. For each user UUID + display name pair:
 - `members.uuids[displayName] = userId`
@@ -299,31 +299,33 @@ If you maintain `config.json` by hand (or via an LLM), the runtime loader does t
 
 For LLM-driven setup (e.g. asking Claude to write a config without running the wizard):
 
-1. Read the token from a 1Password / vault item or user prompt — write to `~/.config/linctl/token` with mode `0600`.
+1. Read the token from a 1Password / vault item or user prompt — write to `~/.config/el-linear/token` with mode `0600`.
 2. Discover team and user UUIDs:
    ```bash
    # Teams
-   linctl teams list --raw | jq '[.[] | {key, id}]'
+   el-linear teams list --raw | jq '[.[] | {key, id}]'
    # Users (paginated automatically)
-   linctl users list --active --raw | jq '[.[] | {id, displayName, email}]'
+   el-linear users list --active --raw | jq '[.[] | {id, displayName, email}]'
    # Workspace urlKey
-   linctl graphql '{ viewer { organization { urlKey } } }' --raw | jq -r '.viewer.organization.urlKey'
+   el-linear graphql '{ viewer { organization { urlKey } } }' --raw | jq -r '.viewer.organization.urlKey'
    ```
 3. Construct `config.json` against the schema above.
-4. Validate by running `linctl config show` — it prints the merged config exactly as the loader sees it.
+4. Validate by running `el-linear config show` — it prints the merged config exactly as the loader sees it.
 
 ---
 
-## Migration from the legacy `el-linear`
+## Migration from the legacy `linctl`
 
-If you have an existing `~/.config/el-linear/config.json` from before the rename:
+If you have an existing `~/.config/linctl/config.json` from the brief period when the package was published as `@enrichlayer/linctl`:
 
 ```bash
-mkdir -p -m 0700 ~/.config/linctl
-mv ~/.config/el-linear/config.json ~/.config/linctl/config.json
-mv ~/.config/el-linear/token ~/.config/linctl/token
-chmod 0600 ~/.config/linctl/token
-rmdir ~/.config/el-linear
+mkdir -p -m 0700 ~/.config/el-linear
+mv ~/.config/linctl/config.json ~/.config/el-linear/config.json
+mv ~/.config/linctl/token ~/.config/el-linear/token
+chmod 0600 ~/.config/el-linear/token
+rmdir ~/.config/linctl
 ```
 
-The runtime loader auto-migrates the legacy `brand: { name, reject }` shape to a single entry in `terms[]` and warns once. To clean up the warning, run `linctl init defaults` and re-confirm the term-enforcement rules.
+The runtime loader auto-migrates the legacy `brand: { name, reject }` shape to a single entry in `terms[]` and warns once. To clean up the warning, run `el-linear init defaults` and re-confirm the term-enforcement rules.
+
+The legacy `~/.config/linctl/` location is also read as a fallback if the new path is empty, so the move is optional for one release.

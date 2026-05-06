@@ -1,6 +1,6 @@
-# Contributing to linctl
+# Contributing to el-linear
 
-Thanks for considering a contribution. linctl is a small, focused CLI — most
+Thanks for considering a contribution. el-linear is a small, focused CLI — most
 work falls into one of three buckets:
 
 1. **Adding a Linear command** that maps onto an existing Linear API resource.
@@ -10,8 +10,8 @@ work falls into one of three buckets:
 ## Setup
 
 ```bash
-git clone https://github.com/enrichlayer/linctl.git
-cd linctl
+git clone https://github.com/enrichlayer/el-linear.git
+cd el-linear
 pnpm install
 pnpm test          # 56 files, 770+ tests
 pnpm exec tsc --noEmit
@@ -25,7 +25,7 @@ You'll need:
 - Node ≥ 22
 - pnpm ≥ 10
 - A Linear personal API token (https://linear.app/settings/account/security)
-  in `LINEAR_API_TOKEN` or `~/.config/linctl/token` for any test that hits the
+  in `LINEAR_API_TOKEN` or `~/.config/el-linear/token` for any test that hits the
   live API. The default test suite mocks Linear and runs offline.
 
 ## Workflow
@@ -67,7 +67,7 @@ will read it.
 
 ## Adding a Linear command
 
-Most Linear resources are reachable via the existing `linctl graphql` escape
+Most Linear resources are reachable via the existing `el-linear graphql` escape
 hatch — that's often enough. If you find yourself running the same query
 repeatedly, that's a candidate for a first-class command.
 
@@ -88,10 +88,10 @@ The structural test in `src/commands/cli-consistency.test.ts` enforces:
 Open an issue with:
 
 1. The exact command you ran.
-2. The output you got (run with `LINCTL_DEBUG=1` for stack traces).
+2. The output you got (run with `EL_LINEAR_DEBUG=1` for stack traces).
 3. The output you expected.
 
-Don't paste your API token. linctl never logs it, but redact it in shell
+Don't paste your API token. el-linear never logs it, but redact it in shell
 output you copy.
 
 ## Security

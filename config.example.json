@@ -1,61 +1,61 @@
 {
-  "defaultTeam": "ENG",
-  "defaultLabels": ["claude"],
-  "members": {
-    "aliases": {
-      "alice": "Alice Anderson",
-      "bob": "Bob Brown"
-    },
-    "fullNames": {
-      "alice": "Alice Anderson"
-    },
-    "handles": {
-      "github": {
-        "alice-gh": "Alice Anderson"
-      },
-      "gitlab": {
-        "alice-gl": "Alice Anderson"
-      }
-    },
-    "uuids": {
-      "Alice Anderson": "uuid-from-linear",
-      "Bob Brown": "uuid-from-linear"
-    }
-  },
-  "teams": {
-    "ENG": "uuid-from-linear",
-    "DESIGN": "uuid-from-linear"
-  },
-  "teamAliases": {
-    "engineering": "ENG"
-  },
-  "labels": {
-    "workspace": {
-      "claude": "uuid-from-linear"
-    },
-    "teams": {
-      "ENG": {
-        "feature-request": "uuid-from-linear",
-        "chore": "uuid-from-linear"
-      }
-    }
-  },
-  "statusDefaults": {
-    "noProject": "Triage",
-    "withAssigneeAndProject": "Todo"
-  },
-  "terms": [
-    {
-      "canonical": "Enrich Layer",
-      "reject": ["EnrichLayer", "Enrichlayer", "enrichLayer", "enrichlayer"]
-    },
-    {
-      "canonical": "Linear",
-      "reject": ["linear.app", "Linear App"]
-    }
-  ],
-  "validation": {
-    "enabled": true,
-    "typeLabels": ["bug", "feature", "chore", "refactor", "spike"]
-  }
+	"defaultTeam": "ENG",
+	"defaultLabels": ["claude"],
+	"members": {
+		"aliases": {
+			"alice": "Alice Anderson",
+			"bob": "Bob Brown"
+		},
+		"fullNames": {
+			"alice": "Alice Anderson"
+		},
+		"handles": {
+			"github": {
+				"alice-gh": "Alice Anderson"
+			},
+			"gitlab": {
+				"alice-gl": "Alice Anderson"
+			}
+		},
+		"uuids": {
+			"Alice Anderson": "uuid-from-linear",
+			"Bob Brown": "uuid-from-linear"
+		}
+	},
+	"teams": {
+		"ENG": "uuid-from-linear",
+		"DESIGN": "uuid-from-linear"
+	},
+	"teamAliases": {
+		"engineering": "ENG"
+	},
+	"labels": {
+		"workspace": {
+			"claude": "uuid-from-linear"
+		},
+		"teams": {
+			"ENG": {
+				"feature-request": "uuid-from-linear",
+				"chore": "uuid-from-linear"
+			}
+		}
+	},
+	"statusDefaults": {
+		"noProject": "Triage",
+		"withAssigneeAndProject": "Todo"
+	},
+	"terms": [
+		{
+			"canonical": "Enrich Layer",
+			"reject": ["EnrichLayer", "Enrichlayer", "enrichLayer", "enrichlayer"]
+		},
+		{
+			"canonical": "Linear",
+			"reject": ["linear.app", "Linear App"]
+		}
+	],
+	"validation": {
+		"enabled": true,
+		"typeLabels": ["bug", "feature", "chore", "refactor", "spike"]
+	}
 }

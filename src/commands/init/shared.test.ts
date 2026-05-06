@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Override the home directory for these tests so we don't touch real config.
 const TEST_HOME = path.join(
 	os.tmpdir(),
-	`linctl-shared-test-${process.pid}-${Date.now()}`,
+	`el-linear-shared-test-${process.pid}-${Date.now()}`,
 );
 
 beforeEach(async () => {

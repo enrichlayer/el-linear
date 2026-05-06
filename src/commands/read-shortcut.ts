@@ -13,7 +13,7 @@ const ISSUE_ID_PATTERN = /^[A-Z]{1,5}-\d+$/;
 
 /**
  * Registers a top-level `read` command and a catch-all that auto-detects
- * issue identifiers so `linctl ADM-652` works without the `issues read` prefix.
+ * issue identifiers so `el-linear ADM-652` works without the `issues read` prefix.
  */
 export function setupReadShortcut(program: Command): void {
 	// Top-level `read` / `get` / `view` / `show` command
@@ -25,11 +25,11 @@ export function setupReadShortcut(program: Command): void {
 		.description("Shortcut for `issues read`. Get issue details by identifier.")
 		.addHelpText(
 			"after",
-			"\nExamples:\n  linctl read ADM-652\n  linctl get DEV-123 DEV-456\n  linctl ADM-652          (auto-detected)",
+			"\nExamples:\n  el-linear read ADM-652\n  el-linear get DEV-123 DEV-456\n  el-linear ADM-652          (auto-detected)",
 		)
 		.action(handleAsyncCommand(readIssues));
 
-	// Catch-all: if argv looks like `linctl ADM-652 [DEV-123 ...]`, run read
+	// Catch-all: if argv looks like `el-linear ADM-652 [DEV-123 ...]`, run read
 	const originalParse = program.parse.bind(program);
 	program.parse = (
 		argv?: readonly string[],

@@ -7,7 +7,7 @@
  *
  * Idempotent: re-running shows the current aliases per user and offers a
  * 4-way menu (keep / edit / append / clear) plus quit. Progress is persisted
- * so an interrupted walk can be resumed via `linctl init aliases`.
+ * so an interrupted walk can be resumed via `el-linear init aliases`.
  */
 
 import fs from "node:fs/promises";
@@ -228,13 +228,13 @@ export async function runAliasesStep(
 		: await confirm({
 				message:
 					"Walk through users now to add aliases? Most teams skip this and add aliases later " +
-					"via `linctl init aliases` for the people they @-mention often.",
+					"via `el-linear init aliases` for the people they @-mention often.",
 				default: false,
 			});
 	if (!proceed) {
 		// biome-ignore lint/suspicious/noConsole: wizard
 		console.log(
-			"  Skipped — run `linctl init aliases` to add or edit aliases later.",
+			"  Skipped — run `el-linear init aliases` to add or edit aliases later.",
 		);
 		return new Map();
 	}
@@ -266,7 +266,7 @@ export async function runAliasesStep(
 		}
 		// biome-ignore lint/suspicious/noConsole: wizard
 		console.log(
-			"    (Add aliases manually in ~/.config/linctl/config.json for now; schema migration in 1.3.0.)",
+			"    (Add aliases manually in ~/.config/el-linear/config.json for now; schema migration in 1.3.0.)",
 		);
 	}
 	const users = allUsers.filter((u) => !collidingIds.has(u.id));
@@ -302,7 +302,7 @@ export async function runAliasesStep(
 				await saveProgress();
 				// biome-ignore lint/suspicious/noConsole: wizard
 				console.log(
-					`  Saved progress at ${lastCompletedIdx + 1}/${users.length}. Resume with \`linctl init aliases\`.`,
+					`  Saved progress at ${lastCompletedIdx + 1}/${users.length}. Resume with \`el-linear init aliases\`.`,
 				);
 				return updates;
 			}
@@ -542,7 +542,7 @@ interface CsvRow {
  *   - Cells with embedded newlines (legal when quoted)
  *   - Escaped quotes (`""` inside a quoted cell)
  *   - CRLF line endings
- *   - `#` comment lines (linctl extension; only at line start)
+ *   - `#` comment lines (el-linear extension; only at line start)
  *
  * Sanitizes against CSV-formula-injection at parse time: any cell starting
  * with `=`, `+`, `-`, `@`, `\t`, or `\r` is rejected. These would activate

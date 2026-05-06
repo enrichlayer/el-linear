@@ -7,7 +7,7 @@ import type { GraphQLService } from "./graphql-service.js";
  * `https://linear.app/<urlKey>/issue/<identifier>/`.
  *
  * Resolution order:
- *   1. `config.workspaceUrlKey` if explicitly set in linctl config
+ *   1. `config.workspaceUrlKey` if explicitly set in el-linear config
  *   2. `viewer.organization.urlKey` from the Linear API (fetched once, cached)
  *
  * Cached in-process for the lifetime of the CLI invocation.
@@ -53,7 +53,7 @@ export async function getWorkspaceUrlKey(
 	if (!fetched) {
 		throw new Error(
 			"Could not resolve Linear workspace URL key from `viewer.organization.urlKey`. " +
-				"Set `workspaceUrlKey` in your linctl config to override.",
+				"Set `workspaceUrlKey` in your el-linear config to override.",
 		);
 	}
 	cachedUrlKey = fetched;
