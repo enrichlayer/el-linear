@@ -17,6 +17,8 @@ first-class command.
 
 ## Install
 
+Published on npm as [`@enrichlayer/el-linear`](https://www.npmjs.com/package/@enrichlayer/el-linear).
+
 ```bash
 pnpm add -g @enrichlayer/el-linear
 # or
