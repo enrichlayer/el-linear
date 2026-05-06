@@ -6,19 +6,25 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Renamed back to `el-linear`
-
-The `linctl` name collides with [dorkitude/linctl](https://github.com/dorkitude/linctl)
-on npm. The package is now `@enrichlayer/el-linear` with binary `el-linear`.
-Existing config at `~/.config/linctl/` is read as a legacy fallback for one
-release; new state is written to `~/.config/el-linear/`. The `LINCTL_DEBUG`
-env var still works as a legacy fallback for `EL_LINEAR_DEBUG`.
-
-## [1.2.0] — 2026-05-05
+## [1.2.0] — 2026-05-06
 
 This release adds the interactive setup wizard, `el-linear init`, plus a
 documented configuration schema so any LLM or script can produce an
-equivalent config without running the prompts.
+equivalent config without running the prompts. It also reverts the
+in-progress rename to `@enrichlayer/linctl` (never published) — the
+package stays at `@enrichlayer/el-linear` because of an npm name
+collision with [dorkitude/linctl](https://github.com/dorkitude/linctl).
+
+### Reverted rename
+
+The `1.1.0` migration recipe (renaming to `@enrichlayer/linctl`) is
+withdrawn. The shipped name and binary remain `el-linear`. For users who
+followed the migration locally during the brief window where the rename
+was on `main`:
+
+- `~/.config/linctl/` is read as a legacy fallback if `~/.config/el-linear/`
+  is empty. Move it back at your leisure.
+- `LINCTL_DEBUG` is honored as a legacy alias for `EL_LINEAR_DEBUG`.
 
 ### Added
 - `el-linear init` — full setup wizard. Skip is the default at every prompt;
@@ -42,10 +48,6 @@ Every wizard step reads existing config first, shows the current value,
 and defaults the prompt to "keep as-is". Running the wizard twice with no
 input changes produces a byte-identical `config.json` (keys are sorted on
 write).
-
-[Unreleased]: https://github.com/enrichlayer/el-linear/compare/v1.2.0...HEAD
-[1.2.0]: https://github.com/enrichlayer/el-linear/releases/tag/v1.2.0
-[1.1.0]: https://github.com/enrichlayer/el-linear/releases/tag/v1.1.0
 
 ## [1.1.0] — 2026-04-30
 
@@ -96,5 +98,7 @@ sed -i.bak 's/\bel-linear\b/linctl/g' your-scripts.sh
 
 The legacy `brand` config block is auto-migrated to `terms[]` on first run.
 
-[Unreleased]: https://github.com/enrichlayer/linctl/compare/v1.1.0...HEAD
-[1.1.0]: https://github.com/enrichlayer/linctl/releases/tag/v1.1.0
+
+[Unreleased]: https://github.com/enrichlayer/el-linear/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/enrichlayer/el-linear/releases/tag/v1.2.0
+[1.1.0]: https://github.com/enrichlayer/el-linear/releases/tag/v1.1.0
