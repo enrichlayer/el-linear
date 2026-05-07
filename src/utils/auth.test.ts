@@ -120,3 +120,75 @@ describe("getApiToken", () => {
 		}
 	});
 });
+
+/**
+ * Integration: the legacy-drift hint emits to stderr at most once per
+ * process before the underlying auth error fires, and is silenced by
+ * EL_LINEAR_SKIP_MIGRATION_HINT=1.
+ *
+ * `node:fs` is module-mocked at the top of this file, so we can drive the
+ * detection branch by toggling existsSync to claim only the legacy
+ * config.json exists. The hint module reads `process.stderr` directly,
+ * so we spy on its `write` method.
+ */
+describe("getApiToken: legacy migration hint integration", () => {
+	let stderrSpy: ReturnType<typeof vi.spyOn>;
+
+	beforeEach(async () => {
+		const { _resetMigrationHintForTests } = await import("./migration-hint.js");
+		_resetMigrationHintForTests();
+		stderrSpy = vi
+			.spyOn(process.stderr, "write")
+			.mockImplementation(() => true);
+		delete process.env.EL_LINEAR_SKIP_MIGRATION_HINT;
+	});
+
+	afterEach(async () => {
+		stderrSpy.mockRestore();
+		const { _resetMigrationHintForTests } = await import("./migration-hint.js");
+		_resetMigrationHintForTests();
+		delete process.env.EL_LINEAR_SKIP_MIGRATION_HINT;
+	});
+
+	it("emits the migration hint once across two simulated command runs in the same process", () => {
+		// Drift state: legacy config.json exists; no token files; no profiles dir.
+		existsSyncMock.mockImplementation((p) =>
+			(p as string).endsWith(".config/el-linear/config.json"),
+		);
+
+		// First simulated command: throws "No API token found", emits hint.
+		expect(() => getApiToken({})).toThrow(/No API token found/);
+		// Second command in the same process: throws again, but no second hint.
+		expect(() => getApiToken({})).toThrow(/No API token found/);
+
+		// stderr.write may be called multiple times under the hood (jest framework
+		// internals etc.) so we filter to just our hint signature.
+		const hintCalls = stderrSpy.mock.calls.filter((args) =>
+			String(args[0]).includes("el-linear profile migrate-legacy"),
+		);
+		expect(hintCalls.length).toBe(1);
+	});
+
+	it("does NOT emit the hint when EL_LINEAR_SKIP_MIGRATION_HINT=1 is set", () => {
+		process.env.EL_LINEAR_SKIP_MIGRATION_HINT = "1";
+		existsSyncMock.mockImplementation((p) =>
+			(p as string).endsWith(".config/el-linear/config.json"),
+		);
+
+		expect(() => getApiToken({})).toThrow(/No API token found/);
+		const hintCalls = stderrSpy.mock.calls.filter((args) =>
+			String(args[0]).includes("el-linear profile migrate-legacy"),
+		);
+		expect(hintCalls.length).toBe(0);
+	});
+
+	it("does NOT emit the hint when there's no legacy drift", () => {
+		// Nothing exists on disk — fresh install. Hint should stay silent.
+		existsSyncMock.mockReturnValue(false);
+		expect(() => getApiToken({})).toThrow(/No API token found/);
+		const hintCalls = stderrSpy.mock.calls.filter((args) =>
+			String(args[0]).includes("el-linear profile migrate-legacy"),
+		);
+		expect(hintCalls.length).toBe(0);
+	});
+});

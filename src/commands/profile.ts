@@ -38,6 +38,7 @@ import {
 } from "../config/paths.js";
 import { outputSuccess, outputWarning } from "../utils/output.js";
 import { runFullWizard } from "./init/index.js";
+import { registerMigrateLegacy } from "./profile/migrate-legacy.js";
 
 export function setupProfileCommands(program: Command): void {
 	const profile = program
@@ -100,6 +101,12 @@ export function setupProfileCommands(program: Command): void {
 		.action(async (name: string, opts: { force?: boolean }) => {
 			await runProfileRemove(name, opts.force === true);
 		});
+
+	// `el-linear profile migrate-legacy` — registered alongside add/list/etc.
+	// Lives in its own module so the multi-step migration logic stays
+	// self-contained and unit-testable without dragging in the full
+	// profile-management surface.
+	registerMigrateLegacy(profile);
 }
 
 // ---- Implementations ----------------------------------------------------

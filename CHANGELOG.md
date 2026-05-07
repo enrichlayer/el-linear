@@ -6,27 +6,68 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Added
-- **OAuth 2.0 (PKCE) authentication** as a parallel to personal API tokens.
-  Run `el-linear init oauth` to register a Linear OAuth app, walk through
-  the PKCE consent flow in your browser, and persist tokens to
-  `~/.config/el-linear/<profile>/oauth.json` (mode 0600). Access tokens are
-  auto-refreshed in the background; refresh-token failure surfaces as a
-  clear "re-run `el-linear init oauth`" error. Personal-token auth is
-  unchanged and remains the default.
-- `el-linear init oauth --revoke` revokes the stored OAuth tokens and
-  removes `oauth.json`.
-- `el-linear init oauth --no-browser` forces the headless paste-the-code
+## [1.5.0] — 2026-05-07
+
+Two unrelated additions this release: OAuth 2.0 authentication, and a
+migration path off the legacy single-file config layout.
+
+### OAuth 2.0 (PKCE) authentication
+
+A parallel to personal API tokens. Run `el-linear init oauth` to register
+a Linear OAuth app, walk through the PKCE consent flow in your browser,
+and persist tokens to `~/.config/el-linear/<profile>/oauth.json` (mode
+0600). Access tokens auto-refresh in the background; refresh-token
+failure surfaces as a clear "re-run `el-linear init oauth`" error.
+Personal-token auth is unchanged and remains the default.
+
+- `el-linear init oauth --revoke` — revoke stored OAuth tokens and remove
+  `oauth.json`.
+- `el-linear init oauth --no-browser` — force the headless paste-the-code
   fallback (for SSH sessions, sandboxed containers, etc.).
-- `el-linear init oauth --port <n>` overrides the localhost callback port
+- `el-linear init oauth --port <n>` — override the localhost callback port
   (default 8765).
-- `init oauth` includes a multi-select scope picker for the eight Linear
-  OAuth scopes; defaults to `read`, `write`, `issues:create`,
-  `comments:create`.
+- Multi-select scope picker for the eight Linear OAuth scopes; defaults to
+  `read`, `write`, `issues:create`, `comments:create`.
 - `GraphQLService` now accepts either a personal API token or
   `{ oauthToken }`, sending the right `Authorization` header shape per
   Linear's docs (no `Bearer` prefix for personal tokens; `Bearer ` for
   OAuth).
+
+### Legacy config migration
+
+This release closes the gap between the legacy single-file config layout
+(v1.0–1.3) and the named-profiles layout introduced in 1.4. Users who
+upgraded with a legacy `config.json` still on disk but no usable token
+were hitting a dead-end "Authentication required" error with no
+documented recovery path. 1.5 detects that state automatically and ships
+a one-shot migration command.
+
+- **`el-linear profile migrate-legacy`** — copy the legacy
+  `~/.config/el-linear/{config.json,token}` into a named profile in one
+  step. Validates the token via `viewer { ... }` before writing anything
+  to disk. Each step (profile dir, config copy, token write,
+  active-profile marker) is independently idempotent. Token sources, in
+  priority: `--token-from <path>`, `EL_LINEAR_TOKEN` env, hidden
+  interactive prompt. Refuses to clobber a differing existing config or
+  token unless `--force` is passed (and confirms interactively unless
+  `--yes` is also passed). Never deletes the legacy files — rollback is
+  always available.
+- **Legacy-config drift detection** — when an auth call would otherwise
+  fail with "No API token found", el-linear now checks for the
+  post-upgrade drift state (legacy `config.json` present, no token, no
+  profiles) and emits a one-shot stderr hint pointing the user at
+  `migrate-legacy`. The hint also catches the related "broken
+  active-profile pointer" case (`active-profile` names a profile whose
+  dir doesn't exist) and points at `el-linear profile use`.
+- `EL_LINEAR_SKIP_MIGRATION_HINT=1` — silences the hint for users who've
+  decided to stay on the legacy single-file layout intentionally. Read at
+  emission time so toggling it between commands works.
+
+### Notes
+- The migration hint is rate-limited to once per process and writes to
+  stderr only, so machine callers parsing JSON on stdout are not affected.
+- The underlying auth error still fires after the hint, so scripts continue
+  to see the same non-zero exit code and parseable error payload.
 
 ## [1.4.0] — 2026-05-07
 
@@ -157,7 +198,8 @@ sed -i.bak 's/\bel-linear\b/linctl/g' your-scripts.sh
 The legacy `brand` config block is auto-migrated to `terms[]` on first run.
 
 
-[Unreleased]: https://github.com/enrichlayer/el-linear/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/enrichlayer/el-linear/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/enrichlayer/el-linear/releases/tag/v1.5.0
 [1.4.0]: https://github.com/enrichlayer/el-linear/releases/tag/v1.4.0
 [1.3.0]: https://github.com/enrichlayer/el-linear/releases/tag/v1.3.0
 [1.2.0]: https://github.com/enrichlayer/el-linear/releases/tag/v1.2.0

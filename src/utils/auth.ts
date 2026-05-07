@@ -5,6 +5,7 @@ import {
 	resolveActiveProfile,
 	TOKEN_PATH,
 } from "../config/paths.js";
+import { maybeEmitMigrationHint } from "./migration-hint.js";
 
 export interface AuthOptions {
 	apiToken?: string;
@@ -45,6 +46,14 @@ export function getApiToken(options: AuthOptions): string {
 	if (fs.existsSync(LEGACY_TOKEN_PATH)) {
 		return fs.readFileSync(LEGACY_TOKEN_PATH, "utf8").trim();
 	}
+
+	// Before falling through to the auth error, check for legacy-config
+	// drift (legacy `config.json` present but no token, or active-profile
+	// pointer broken). If detected, emit a one-shot stderr hint pointing
+	// the user at `el-linear profile migrate-legacy`. The hint is purely
+	// informational — we always still throw below, so scripted callers
+	// continue to see a non-zero exit and a parseable JSON error on stdout.
+	maybeEmitMigrationHint();
 
 	const profileNote = active.name
 		? ` (active profile: \`${active.name}\` — expected token at ${active.tokenPath})`
