@@ -2,7 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { LinearIssue } from "../types/linear.js";
-import { FileService } from "./file-service.js";
+import type { FileService } from "./file-service.js";
 
 const DOWNLOAD_DIR = join(tmpdir(), "el-linear-downloads");
 const UPLOAD_URL_REGEX = /https:\/\/uploads\.linear\.app\/[^\s)>\]"]+/g;
@@ -27,7 +27,7 @@ function replaceUrls(text: string, urlMap: Map<string, string>): string {
  */
 export async function downloadLinearUploads(
 	issue: LinearIssue,
-	apiToken: string,
+	fileService: FileService,
 ): Promise<LinearIssue> {
 	const allUrls = new Set<string>();
 
@@ -49,7 +49,6 @@ export async function downloadLinearUploads(
 	}
 
 	await mkdir(DOWNLOAD_DIR, { recursive: true });
-	const fileService = new FileService(apiToken);
 	const urlMap = new Map<string, string>();
 
 	await Promise.all(

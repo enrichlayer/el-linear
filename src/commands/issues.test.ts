@@ -27,7 +27,7 @@ vi.mock("../utils/graphql-issues-service.js", () => ({
 
 const mockGraphQLService = { rawRequest: vi.fn() };
 vi.mock("../utils/graphql-service.js", () => ({
-	createGraphQLService: vi.fn().mockReturnValue(mockGraphQLService),
+	createGraphQLService: vi.fn().mockResolvedValue(mockGraphQLService),
 }));
 
 const mockLinearService = {
@@ -36,7 +36,7 @@ const mockLinearService = {
 	resolveTeamId: vi.fn(),
 };
 vi.mock("../utils/linear-service.js", () => ({
-	createLinearService: vi.fn().mockReturnValue(mockLinearService),
+	createLinearService: vi.fn().mockResolvedValue(mockLinearService),
 }));
 
 const mockOutputSuccess = vi.fn();
@@ -85,7 +85,9 @@ vi.mock("../utils/auth.js", () => ({
 }));
 
 const mockUploadFile = vi.fn();
+const mockFileServiceInstance = { uploadFile: mockUploadFile };
 vi.mock("../utils/file-service.js", () => ({
+	createFileService: vi.fn().mockResolvedValue(mockFileServiceInstance),
 	FileService: class {
 		uploadFile = mockUploadFile;
 	},
@@ -93,7 +95,7 @@ vi.mock("../utils/file-service.js", () => ({
 
 const mockCreateAttachment = vi.fn();
 vi.mock("../utils/graphql-attachments-service.js", () => ({
-	createGraphQLAttachmentsService: vi.fn().mockReturnValue({
+	createGraphQLAttachmentsService: vi.fn().mockResolvedValue({
 		createAttachment: mockCreateAttachment,
 	}),
 }));
