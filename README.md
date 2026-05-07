@@ -122,6 +122,60 @@ The active profile is selected by, in priority:
 The legacy fallback means **existing single-profile users see no
 behavior change** — profiles are purely opt-in.
 
+## Migrating from v1.0–1.3
+
+Versions 1.0–1.3 stored everything in the single-file layout
+(`~/.config/el-linear/{token,config.json}`). 1.4 introduced **named
+profiles** (`~/.config/el-linear/profiles/<name>/{token,config.json}`) and
+the legacy single-file layout still works as a fallback.
+
+Some upgrade paths leave the legacy `config.json` on disk (with all your
+member aliases and brand rules) but no usable token, in which case every
+command fails with a generic `No API token found` error. 1.5 detects this
+state and prints a one-line stderr hint *before* the auth error fires:
+
+```
+el-linear: legacy config detected at ~/.config/el-linear/config.json
+but no token. Migrate with:
+
+  el-linear profile migrate-legacy [--name <profile>]
+
+Or suppress this hint with EL_LINEAR_SKIP_MIGRATION_HINT=1.
+```
+
+Run the suggested command to copy your legacy config into a named profile
+in one step:
+
+```bash
+# Default target name is "default"; pass --name to choose another.
+el-linear profile migrate-legacy
+
+# CI / scripted: read the token from a file, skip all prompts.
+el-linear profile migrate-legacy \
+  --name work \
+  --token-from /path/to/token.txt \
+  --yes
+
+# Pick the token up from an env var instead.
+EL_LINEAR_TOKEN=lin_api_xxx el-linear profile migrate-legacy --yes
+```
+
+The migration is **idempotent** — re-running with the same inputs is a no-op.
+If the destination profile already has a different `config.json` or token,
+the command refuses unless you pass `--force` (and confirms before
+overwriting unless you also pass `--yes`).
+
+The legacy `~/.config/el-linear/config.json` is **never deleted** — you keep
+a rollback path. Once you've verified the new profile works, you can remove
+the legacy file by hand at your leisure.
+
+If you've decided to stay on the legacy single-file layout intentionally,
+suppress the hint with:
+
+```bash
+export EL_LINEAR_SKIP_MIGRATION_HINT=1
+```
+
 ## Configuration
 
 el-linear reads `~/.config/el-linear/config.json` on startup. All keys are
