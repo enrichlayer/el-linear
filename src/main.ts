@@ -33,7 +33,7 @@ program
 	.description(
 		"A pragmatic CLI for Linear.app — deterministic resolution, structured validation, GraphQL escape hatch.",
 	)
-	.version("1.3.0")
+	.version("1.4.0")
 	.option("--api-token <token>", "Linear API token")
 	.option(
 		"--profile <name>",
