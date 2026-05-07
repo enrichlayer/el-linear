@@ -53,7 +53,6 @@ export async function runWorkspaceStep(
 		teamMap[t.key] = t.id;
 	}
 
-	// biome-ignore lint/suspicious/noConsole: wizard
 	console.log(`  Workspace: ${workspaceUrlKey} (${teams.length} teams)`);
 
 	const currentDefault = existing.defaultTeam || "";
@@ -76,7 +75,6 @@ export async function runWorkspaceStep(
 	}
 
 	if (teams.length === 0) {
-		// biome-ignore lint/suspicious/noConsole: wizard
 		console.log(
 			"  No teams visible to this token. Skipping default-team picker.",
 		);

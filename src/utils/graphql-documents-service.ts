@@ -138,9 +138,9 @@ class GraphQLDocumentsService {
 	}
 }
 
-export function createGraphQLDocumentsService(
+export async function createGraphQLDocumentsService(
 	options: AuthOptions,
-): GraphQLDocumentsService {
-	const graphqlService = createGraphQLService(options);
+): Promise<GraphQLDocumentsService> {
+	const graphqlService = await createGraphQLService(options);
 	return new GraphQLDocumentsService(graphqlService);
 }

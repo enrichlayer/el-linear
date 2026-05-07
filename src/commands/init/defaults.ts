@@ -39,7 +39,6 @@ export async function runDefaultsStep(
 
 	// ── Default labels ────────────────────────────────────────────────
 	const currentLabels = existing.defaultLabels ?? [];
-	// biome-ignore lint/suspicious/noConsole: wizard
 	console.log(
 		`  Current default labels: ${currentLabels.length > 0 ? currentLabels.join(", ") : "(none)"}`,
 	);
@@ -58,7 +57,6 @@ export async function runDefaultsStep(
 
 	// ── Status defaults ────────────────────────────────────────────────
 	const cur = existing.statusDefaults;
-	// biome-ignore lint/suspicious/noConsole: wizard
 	console.log(
 		`  Current status defaults: noProject=${cur?.noProject ?? STATUS_FALLBACK.noProject}, ` +
 			`withAssigneeAndProject=${cur?.withAssigneeAndProject ?? STATUS_FALLBACK.withAssigneeAndProject}`,
@@ -85,10 +83,8 @@ export async function runDefaultsStep(
 
 	// ── Term enforcement ───────────────────────────────────────────────
 	const currentTerms = existing.terms ?? [];
-	// biome-ignore lint/suspicious/noConsole: wizard
 	console.log(`  Current term-enforcement rules: ${currentTerms.length}`);
 	for (const t of currentTerms) {
-		// biome-ignore lint/suspicious/noConsole: wizard
 		console.log(`    "${t.canonical}" rejects: ${t.reject.join(", ")}`);
 	}
 	const editTerms = await confirm({
@@ -110,7 +106,6 @@ async function collectTermsInteractively(
 ): Promise<Array<{ canonical: string; reject: string[] }>> {
 	const terms: Array<{ canonical: string; reject: string[] }> = [...initial];
 
-	// biome-ignore lint/suspicious/noConsole: wizard
 	console.log(
 		"  Term enforcement catches misspellings of brand or product names in issue titles " +
 			"and descriptions. Define the canonical form and a list of rejected variants.",
@@ -140,7 +135,6 @@ async function collectTermsInteractively(
 		});
 		const reject = parseCsvList(rejectRaw);
 		if (reject.length === 0) {
-			// biome-ignore lint/suspicious/noConsole: wizard
 			console.log("  No variants given — skipping this rule.");
 			continue;
 		}

@@ -7,6 +7,7 @@ import {
 import type { GraphQLResponseData } from "../types/linear.js";
 import { createGraphQLService } from "../utils/graphql-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
+import { getRootOpts } from "../utils/root-opts.js";
 
 async function executeQuery(
 	query: string | undefined,
@@ -35,8 +36,8 @@ async function executeQuery(
 		}
 	}
 
-	const rootOpts = command.parent!.opts();
-	const graphQLService = createGraphQLService(rootOpts);
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
 	const result = await graphQLService.rawRequest(finalQuery, variables);
 
 	outputSuccess(result);
@@ -68,8 +69,8 @@ export function setupGraphQLCommands(program: Command): void {
 					options: OptionValues,
 					command: Command,
 				) => {
-					const rootOpts = command.parent!.opts();
-					const graphQLService = createGraphQLService(rootOpts);
+					const rootOpts = getRootOpts(command);
+					const graphQLService = await createGraphQLService(rootOpts);
 
 					if (typeName) {
 						const result = await graphQLService.rawRequest(

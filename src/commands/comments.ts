@@ -23,6 +23,7 @@ import {
 } from "../utils/linear-service.js";
 import { resolveMentions } from "../utils/mention-resolver.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
+import { getRootOpts } from "../utils/root-opts.js";
 import { validateReferences } from "../utils/validate-references.js";
 import { getWorkspaceUrlKey } from "../utils/workspace-url.js";
 
@@ -42,7 +43,7 @@ function readBody(options: OptionValues): string {
 }
 
 async function fetchSelfUserId(
-	graphQLService: ReturnType<typeof createGraphQLService>,
+	graphQLService: GraphQLService,
 ): Promise<string | undefined> {
 	try {
 		const result = await graphQLService.rawRequest("{ viewer { id } }");
@@ -150,9 +151,9 @@ async function handleCreateComment(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	const rootOpts = command.parent!.parent!.opts();
-	const graphQLService = createGraphQLService(rootOpts);
-	const linearService = createLinearService(rootOpts);
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
 	const rawBody = readBody(options);
 	const resolvedIssueId = await linearService.resolveIssueId(issueId);
 
@@ -233,9 +234,9 @@ async function handleUpdateComment(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	const rootOpts = command.parent!.parent!.opts();
-	const graphQLService = createGraphQLService(rootOpts);
-	const linearService = createLinearService(rootOpts);
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
 	const rawBody = readBody(options);
 
 	const { body, preResolved } = await prepareCommentBodyWithLinks(
@@ -292,9 +293,9 @@ async function handleListComments(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	const rootOpts = command.parent!.parent!.opts();
-	const graphQLService = createGraphQLService(rootOpts);
-	const linearService = createLinearService(rootOpts);
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
 	const resolvedId = await linearService.resolveIssueId(issueId);
 	const result = await graphQLService.rawRequest(LIST_COMMENTS_QUERY, {
 		issueId: resolvedId,

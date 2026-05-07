@@ -14,6 +14,7 @@ import {
 	outputSuccess,
 	outputWarning,
 } from "../utils/output.js";
+import { getRootOpts } from "../utils/root-opts.js";
 import { splitList } from "../utils/validators.js";
 
 interface BatchResult {
@@ -52,8 +53,8 @@ async function resolveTargetIssues(
 	options: OptionValues,
 	rootOpts: Record<string, unknown>,
 ): Promise<LinearIssue[]> {
-	const graphQLService = createGraphQLService(rootOpts);
-	const linearService = createLinearService(rootOpts);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
 	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
 
 	if (options.issues) {
@@ -137,7 +138,7 @@ async function handleBatchAssign(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	const rootOpts = command.parent!.parent!.opts();
+	const rootOpts = getRootOpts(command);
 
 	if (!options.assignee) {
 		throw new Error("--assignee is required.");
@@ -165,8 +166,8 @@ async function handleBatchAssign(
 		return;
 	}
 
-	const graphQLService = createGraphQLService(rootOpts);
-	const linearService = createLinearService(rootOpts);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
 	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
 
 	const { results } = await executeBatch(issues, (issue) =>
@@ -189,7 +190,7 @@ async function handleBatchLabel(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	const rootOpts = command.parent!.parent!.opts();
+	const rootOpts = getRootOpts(command);
 
 	if (!(options.add || options.remove)) {
 		throw new Error("Specify --add and/or --remove for labels.");
@@ -225,8 +226,8 @@ async function handleBatchLabel(
 		return;
 	}
 
-	const graphQLService = createGraphQLService(rootOpts);
-	const linearService = createLinearService(rootOpts);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
 	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
 
 	const removeLower = removeLabels.map((l) => l.toLowerCase());
@@ -272,7 +273,7 @@ async function handleBatchMove(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	const rootOpts = command.parent!.parent!.opts();
+	const rootOpts = getRootOpts(command);
 
 	if (!options.project) {
 		throw new Error("--project is required.");
@@ -299,8 +300,8 @@ async function handleBatchMove(
 		return;
 	}
 
-	const graphQLService = createGraphQLService(rootOpts);
-	const linearService = createLinearService(rootOpts);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
 	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
 
 	const { results } = await executeBatch(issues, (issue) =>
@@ -326,7 +327,7 @@ async function handleBatchStatus(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	const rootOpts = command.parent!.parent!.opts();
+	const rootOpts = getRootOpts(command);
 
 	if (!options.status) {
 		throw new Error("--status is required.");
@@ -353,8 +354,8 @@ async function handleBatchStatus(
 		return;
 	}
 
-	const graphQLService = createGraphQLService(rootOpts);
-	const linearService = createLinearService(rootOpts);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
 	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
 
 	const { results } = await executeBatch(issues, (issue) =>

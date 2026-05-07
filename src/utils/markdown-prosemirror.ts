@@ -142,8 +142,11 @@ function parseBulletList(state: ParseState, line: string): boolean {
 		return false;
 	}
 	const items: ProseMirrorNode[] = [];
-	while (state.i < state.lines.length && BULLET_RE.test(state.lines[state.i])) {
-		const m = state.lines[state.i].match(BULLET_RE)!;
+	while (state.i < state.lines.length) {
+		const m = state.lines[state.i].match(BULLET_RE);
+		if (!m) {
+			break;
+		}
 		items.push({
 			type: "listItem",
 			content: [{ type: "paragraph", content: parseInline(m[1]) }],
@@ -159,11 +162,11 @@ function parseOrderedList(state: ParseState, line: string): boolean {
 		return false;
 	}
 	const items: ProseMirrorNode[] = [];
-	while (
-		state.i < state.lines.length &&
-		ORDERED_RE.test(state.lines[state.i])
-	) {
-		const m = state.lines[state.i].match(ORDERED_RE)!;
+	while (state.i < state.lines.length) {
+		const m = state.lines[state.i].match(ORDERED_RE);
+		if (!m) {
+			break;
+		}
 		items.push({
 			type: "listItem",
 			content: [{ type: "paragraph", content: parseInline(m[1]) }],
@@ -179,11 +182,11 @@ function parseBlockquote(state: ParseState): boolean {
 		return false;
 	}
 	const quoteLines: string[] = [];
-	while (
-		state.i < state.lines.length &&
-		BLOCKQUOTE_RE.test(state.lines[state.i])
-	) {
-		const m = state.lines[state.i].match(BLOCKQUOTE_RE)!;
+	while (state.i < state.lines.length) {
+		const m = state.lines[state.i].match(BLOCKQUOTE_RE);
+		if (!m) {
+			break;
+		}
 		quoteLines.push(m[1]);
 		state.i++;
 	}
@@ -356,7 +359,7 @@ function findEarliestInlineMatch(text: string): InlineMatch | null {
 	const codeMatch = text.match(INLINE_CODE_RE);
 	if (codeMatch) {
 		candidates.push({
-			index: codeMatch.index!,
+			index: codeMatch.index ?? 0,
 			length: codeMatch[0].length,
 			innerText: codeMatch[1],
 			marks: [{ type: "code" }],
@@ -366,7 +369,7 @@ function findEarliestInlineMatch(text: string): InlineMatch | null {
 	const linkMatch = text.match(INLINE_LINK_RE);
 	if (linkMatch) {
 		candidates.push({
-			index: linkMatch.index!,
+			index: linkMatch.index ?? 0,
 			length: linkMatch[0].length,
 			innerText: linkMatch[1],
 			marks: [{ type: "link", attrs: { href: linkMatch[2] } }],
@@ -376,7 +379,7 @@ function findEarliestInlineMatch(text: string): InlineMatch | null {
 	const boldMatch = text.match(INLINE_BOLD_RE);
 	if (boldMatch) {
 		candidates.push({
-			index: boldMatch.index!,
+			index: boldMatch.index ?? 0,
 			length: boldMatch[0].length,
 			innerText: boldMatch[1] ?? boldMatch[2],
 			marks: [{ type: "bold" }],
@@ -386,7 +389,7 @@ function findEarliestInlineMatch(text: string): InlineMatch | null {
 	const italicMatch = text.match(INLINE_ITALIC_RE);
 	if (italicMatch) {
 		candidates.push({
-			index: italicMatch.index!,
+			index: italicMatch.index ?? 0,
 			length: italicMatch[0].length,
 			innerText: italicMatch[1] ?? italicMatch[2],
 			marks: [{ type: "italic" }],

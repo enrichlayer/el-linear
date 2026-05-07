@@ -1,4 +1,5 @@
 import { type IssueLabel, LinearClient } from "@linear/sdk";
+import { getActiveAuth } from "../auth/token-resolver.js";
 import { resolveUserDisplayName } from "../config/resolver.js";
 import type {
 	LinearComment,
@@ -10,7 +11,7 @@ import type {
 	LinearTeam,
 	LinearUser,
 } from "../types/linear.js";
-import { type AuthOptions, getApiToken } from "./auth.js";
+import type { AuthOptions } from "./auth.js";
 import { toISOStringOrNow, toISOStringOrUndefined } from "./date-format.js";
 import { multipleMatchesError, notFoundError } from "./error-messages.js";
 import { parseIssueIdentifier } from "./identifier-parser.js";
@@ -39,11 +40,39 @@ function nonEmptyFilter(
 	return Object.keys(filter).length > 0 ? filter : undefined;
 }
 
+/**
+ * Constructor arg shapes for `LinearService`. Three variants:
+ *   - `string` → personal API token (legacy; sent without `Bearer` prefix).
+ *   - `{apiKey: string}` → personal API token (explicit).
+ *   - `{oauthToken: string}` → OAuth access token (sent as
+ *     `Authorization: Bearer <token>` via the SDK's accessToken option).
+ *
+ * The string variant exists because hundreds of call sites and tests pass
+ * a plain string. We continue to support it indefinitely.
+ */
+export type LinearServiceAuth =
+	| string
+	| { apiKey: string }
+	| { oauthToken: string };
+
+function buildLinearClient(auth: LinearServiceAuth): LinearClient {
+	if (typeof auth === "string") {
+		return new LinearClient({ apiKey: auth });
+	}
+	if ("oauthToken" in auth) {
+		// Linear's SDK natively supports OAuth via the `accessToken` option,
+		// which causes the underlying transport to send
+		// `Authorization: Bearer <token>` instead of the personal-token shape.
+		return new LinearClient({ accessToken: auth.oauthToken });
+	}
+	return new LinearClient({ apiKey: auth.apiKey });
+}
+
 export class LinearService {
 	private readonly client: LinearClient;
 
-	constructor(apiToken: string) {
-		this.client = new LinearClient({ apiKey: apiToken });
+	constructor(auth: LinearServiceAuth) {
+		this.client = buildLinearClient(auth);
 	}
 
 	async resolveIssueId(issueId: string): Promise<string> {
@@ -546,7 +575,12 @@ export class LinearService {
 	}
 }
 
-export function createLinearService(options: AuthOptions): LinearService {
-	const apiToken = getApiToken(options);
-	return new LinearService(apiToken);
+export async function createLinearService(
+	options: AuthOptions,
+): Promise<LinearService> {
+	const auth = await getActiveAuth(options);
+	if (auth.kind === "oauth") {
+		return new LinearService({ oauthToken: auth.token });
+	}
+	return new LinearService({ apiKey: auth.token });
 }

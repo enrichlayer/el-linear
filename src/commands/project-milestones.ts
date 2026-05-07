@@ -21,6 +21,7 @@ import {
 	type LinearService,
 } from "../utils/linear-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
+import { getRootOpts } from "../utils/root-opts.js";
 import { isUuid } from "../utils/uuid.js";
 import { validateIsoDate } from "../utils/validators.js";
 
@@ -83,9 +84,9 @@ async function handleListMilestones(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	const rootOpts = command.parent!.parent!.opts();
-	const graphQLService = createGraphQLService(rootOpts);
-	const linearService = createLinearService(rootOpts);
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
 	const projectId = await linearService.resolveProjectId(options.project);
 	const result = await graphQLService.rawRequest(
 		LIST_PROJECT_MILESTONES_QUERY,
@@ -107,9 +108,9 @@ async function handleReadMilestone(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	const rootOpts = command.parent!.parent!.opts();
-	const graphQLService = createGraphQLService(rootOpts);
-	const linearService = createLinearService(rootOpts);
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
 	const milestoneId = await resolveMilestoneId(
 		milestoneIdOrName,
 		graphQLService,
@@ -131,9 +132,9 @@ async function handleCreateMilestone(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	const rootOpts = command.parent!.parent!.opts();
-	const graphQLService = createGraphQLService(rootOpts);
-	const linearService = createLinearService(rootOpts);
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
 	const projectId = await linearService.resolveProjectId(options.project);
 	if (options.targetDate) {
 		validateIsoDate(options.targetDate);
@@ -161,9 +162,9 @@ async function handleUpdateMilestone(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	const rootOpts = command.parent!.parent!.opts();
-	const graphQLService = createGraphQLService(rootOpts);
-	const linearService = createLinearService(rootOpts);
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
 	const milestoneId = await resolveMilestoneId(
 		milestoneIdOrName,
 		graphQLService,

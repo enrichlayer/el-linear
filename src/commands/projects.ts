@@ -14,6 +14,7 @@ import { createGraphQLService } from "../utils/graphql-service.js";
 import { createLinearService } from "../utils/linear-service.js";
 import { logger } from "../utils/logger.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
+import { getRootOpts } from "../utils/root-opts.js";
 import { isUuid } from "../utils/uuid.js";
 import { splitList } from "../utils/validators.js";
 
@@ -178,12 +179,11 @@ async function handleAddTeam(
 	_options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	const rootOpts = command.parent!.parent!.opts();
-	const graphQLService = createGraphQLService(rootOpts);
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
 
-	const finalTeamId = await createLinearService(rootOpts).resolveTeamId(
-		resolveTeam(teamInput),
-	);
+	const linearService = await createLinearService(rootOpts);
+	const finalTeamId = await linearService.resolveTeamId(resolveTeam(teamInput));
 	const { projectId, currentTeams } = await resolveProjectWithTeams(
 		graphQLService,
 		projectNameOrId,
@@ -219,13 +219,12 @@ async function handleAddTeams(
 	_options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	const rootOpts = command.parent!.parent!.opts();
-	const graphQLService = createGraphQLService(rootOpts);
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
 
 	const resolvedTeamIds = await Promise.all(
-		teamInputs.map((t) =>
-			createLinearService(rootOpts).resolveTeamId(resolveTeam(t)),
-		),
+		teamInputs.map((t: string) => linearService.resolveTeamId(resolveTeam(t))),
 	);
 	const { projectId, currentTeams } = await resolveProjectWithTeams(
 		graphQLService,
@@ -277,12 +276,11 @@ async function handleRemoveTeam(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	const rootOpts = command.parent!.parent!.opts();
-	const graphQLService = createGraphQLService(rootOpts);
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
 
-	const finalTeamId = await createLinearService(rootOpts).resolveTeamId(
-		resolveTeam(teamInput),
-	);
+	const finalTeamId = await linearService.resolveTeamId(resolveTeam(teamInput));
 	const { projectId, projectName, currentTeams } =
 		await resolveProjectWithTeams(graphQLService, projectNameOrId);
 	const currentTeamIds = currentTeams.map((t) => t.id);
@@ -340,8 +338,8 @@ async function handleCreateProject(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	const rootOpts = command.parent!.parent!.opts();
-	const graphQLService = createGraphQLService(rootOpts);
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
 
 	// Step 1: Check for duplicate projects (case-insensitive)
 	const searchResult = await graphQLService.rawRequest(
@@ -371,7 +369,7 @@ async function handleCreateProject(
 	}
 
 	// Step 2: Resolve team IDs
-	const service = createLinearService(rootOpts);
+	const service = await createLinearService(rootOpts);
 	const teamKeys = options.team ? splitList(options.team) : [];
 	const teamIds: string[] = [];
 	for (const key of teamKeys) {
@@ -459,8 +457,8 @@ export function setupProjectsCommands(program: Command): void {
 		)
 		.action(
 			handleAsyncCommand(async (options: OptionValues, command: Command) => {
-				const rootOpts = command.parent!.parent!.opts();
-				const service = createLinearService(rootOpts);
+				const rootOpts = getRootOpts(command);
+				const service = await createLinearService(rootOpts);
 				const result = await service.getProjects(
 					Number.parseInt(options.limit, 10),
 				);

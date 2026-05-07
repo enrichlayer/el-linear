@@ -5,6 +5,7 @@ import type { GraphQLResponseData } from "../types/linear.js";
 import type { GraphQLService } from "../utils/graphql-service.js";
 import { createGraphQLService } from "../utils/graphql-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
+import { getRootOpts } from "../utils/root-opts.js";
 
 const TEMPLATES_QUERY = `
   query {
@@ -200,8 +201,8 @@ export function setupSearchCommands(program: Command): void {
 		.action(
 			handleAsyncCommand(
 				async (query: string, options: OptionValues, command: Command) => {
-					const rootOpts = command.parent!.opts();
-					const graphQLService = createGraphQLService(rootOpts);
+					const rootOpts = getRootOpts(command);
+					const graphQLService = await createGraphQLService(rootOpts);
 					const limit = Number.parseInt(options.limit, 10);
 
 					const requestedTypes = options.type

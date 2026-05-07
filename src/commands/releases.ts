@@ -8,6 +8,7 @@ import {
 import type { GraphQLResponseData, LinearRelease } from "../types/linear.js";
 import { createGraphQLService } from "../utils/graphql-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
+import { getRootOpts } from "../utils/root-opts.js";
 
 function transformRelease(release: GraphQLResponseData): LinearRelease {
 	return {
@@ -53,8 +54,8 @@ async function handleCreateRelease(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	const rootOpts = command.parent!.parent!.opts();
-	const graphQLService = createGraphQLService(rootOpts);
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
 
 	const pipelines = await graphQLService.rawRequest(
 		GET_RELEASE_PIPELINES_QUERY,
@@ -120,8 +121,8 @@ export function setupReleasesCommands(program: Command): void {
 		.option("-l, --limit <number>", "limit results", "25")
 		.action(
 			handleAsyncCommand(async (options: OptionValues, command: Command) => {
-				const rootOpts = command.parent!.parent!.opts();
-				const graphQLService = createGraphQLService(rootOpts);
+				const rootOpts = getRootOpts(command);
+				const graphQLService = await createGraphQLService(rootOpts);
 				const filter: Record<string, unknown> = {};
 				if (options.pipeline) {
 					filter.pipeline = { name: { eqIgnoreCase: options.pipeline } };
@@ -144,8 +145,8 @@ export function setupReleasesCommands(program: Command): void {
 		.action(
 			handleAsyncCommand(
 				async (releaseId: string, _options: OptionValues, command: Command) => {
-					const rootOpts = command.parent!.parent!.opts();
-					const graphQLService = createGraphQLService(rootOpts);
+					const rootOpts = getRootOpts(command);
+					const graphQLService = await createGraphQLService(rootOpts);
 					const result = await graphQLService.rawRequest(
 						GET_RELEASE_BY_ID_QUERY,
 						{ id: releaseId },
@@ -174,8 +175,8 @@ export function setupReleasesCommands(program: Command): void {
 		.description("List release pipelines and their stages")
 		.action(
 			handleAsyncCommand(async (_options: OptionValues, command: Command) => {
-				const rootOpts = command.parent!.parent!.opts();
-				const graphQLService = createGraphQLService(rootOpts);
+				const rootOpts = getRootOpts(command);
+				const graphQLService = await createGraphQLService(rootOpts);
 				const result = await graphQLService.rawRequest(
 					GET_RELEASE_PIPELINES_QUERY,
 					{ first: 50 },

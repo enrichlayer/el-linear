@@ -5,6 +5,7 @@ import { GraphQLIssuesService } from "../utils/graphql-issues-service.js";
 import { createGraphQLService } from "../utils/graphql-service.js";
 import { createLinearService } from "../utils/linear-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
+import { getRootOpts } from "../utils/root-opts.js";
 
 /**
  * Issue ID pattern: 1-5 uppercase letters, dash, 1+ digits (e.g. ADM-652, DEV-12).
@@ -73,9 +74,9 @@ async function readIssues(
 	_options: Record<string, unknown>,
 	command: Command,
 ) {
-	const rootOpts = command.parent!.opts();
-	const graphQLService = createGraphQLService(rootOpts);
-	const linearService = createLinearService(rootOpts);
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
 	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
 	const apiToken = getApiToken(rootOpts);
 	if (issueIds.length === 1) {

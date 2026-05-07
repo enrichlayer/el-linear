@@ -4,6 +4,7 @@ import { FileService } from "../utils/file-service.js";
 import { createGraphQLAttachmentsService } from "../utils/graphql-attachments-service.js";
 import { createLinearService } from "../utils/linear-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
+import { getRootOpts } from "../utils/root-opts.js";
 
 export function setupAttachmentsCommands(program: Command): void {
 	const attachments = program
@@ -19,10 +20,10 @@ export function setupAttachmentsCommands(program: Command): void {
 		.action(
 			handleAsyncCommand(
 				async (issueId: string, options: OptionValues, command: Command) => {
-					const rootOpts = command.parent!.parent!.opts();
+					const rootOpts = getRootOpts(command);
 					const apiToken = getApiToken(rootOpts);
 
-					const linearService = createLinearService(rootOpts);
+					const linearService = await createLinearService(rootOpts);
 					const resolvedIssueId = await linearService.resolveIssueId(issueId);
 
 					const fileService = new FileService(apiToken);
@@ -31,7 +32,8 @@ export function setupAttachmentsCommands(program: Command): void {
 						throw new Error(uploadResult.error);
 					}
 
-					const attachmentsService = createGraphQLAttachmentsService(rootOpts);
+					const attachmentsService =
+						await createGraphQLAttachmentsService(rootOpts);
 					const attachment = await attachmentsService.createAttachment({
 						issueId: resolvedIssueId,
 						url: uploadResult.assetUrl,
@@ -50,10 +52,11 @@ export function setupAttachmentsCommands(program: Command): void {
 		.action(
 			handleAsyncCommand(
 				async (issueId: string, options: OptionValues, command: Command) => {
-					const rootOpts = command.parent!.parent!.opts();
-					const linearService = createLinearService(rootOpts);
+					const rootOpts = getRootOpts(command);
+					const linearService = await createLinearService(rootOpts);
 					const resolvedIssueId = await linearService.resolveIssueId(issueId);
-					const attachmentsService = createGraphQLAttachmentsService(rootOpts);
+					const attachmentsService =
+						await createGraphQLAttachmentsService(rootOpts);
 					const allAttachments =
 						await attachmentsService.listAttachments(resolvedIssueId);
 					const limit = Number.parseInt(options.limit, 10);
@@ -73,8 +76,9 @@ export function setupAttachmentsCommands(program: Command): void {
 					_options: OptionValues,
 					command: Command,
 				) => {
-					const rootOpts = command.parent!.parent!.opts();
-					const attachmentsService = createGraphQLAttachmentsService(rootOpts);
+					const rootOpts = getRootOpts(command);
+					const attachmentsService =
+						await createGraphQLAttachmentsService(rootOpts);
 					await attachmentsService.deleteAttachment(attachmentId);
 					outputSuccess({ success: true, message: "Attachment deleted" });
 				},

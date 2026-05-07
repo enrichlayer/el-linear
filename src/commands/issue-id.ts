@@ -100,7 +100,9 @@ export function setupIssueIdCommand(program: Command): void {
 					}
 
 					const rootOpts = command.parent?.opts() ?? {};
-					const service = createGraphQLService({ apiToken: rootOpts.apiToken });
+					const service = await createGraphQLService({
+						apiToken: rootOpts.apiToken,
+					});
 					const result = (await service.rawRequest(ISSUE_QUERY, {
 						id: parsed.issueId,
 					})) as {

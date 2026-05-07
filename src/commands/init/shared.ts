@@ -251,7 +251,6 @@ export async function clearAliasesProgress(): Promise<void> {
  * Print a step header in the wizard. Step strings like "1/4" or "2/4 (skipped)".
  */
 export function printStep(label: string, title: string): void {
-	// biome-ignore lint/suspicious/noConsole: wizard output is meant for stdout
 	console.log(`\n[${label}] ${title}`);
 }
 

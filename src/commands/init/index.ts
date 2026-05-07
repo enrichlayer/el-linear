@@ -48,7 +48,6 @@ function withCleanExit<TArgs extends unknown[]>(
 			await fn(...args);
 		} catch (err) {
 			if (err instanceof Error && err.name === "ExitPromptError") {
-				// biome-ignore lint/suspicious/noConsole: wizard
 				console.log("\n  Cancelled.");
 				process.exit(130);
 			}
@@ -140,7 +139,6 @@ export function setupInitCommands(program: Command): void {
 					workspaceUrlKey: existing.workspaceUrlKey ?? ws.workspaceUrlKey,
 				});
 				await writeConfig(merged);
-				// biome-ignore lint/suspicious/noConsole: wizard
 				console.log("  ✓ Workspace defaults saved.");
 			}),
 		);
@@ -169,7 +167,6 @@ export function setupInitCommands(program: Command): void {
 					);
 					updates = result.updates;
 					if (result.skipped.length > 0) {
-						// biome-ignore lint/suspicious/noConsole: wizard
 						console.log(
 							`  Skipped ${result.skipped.length} unmatched email(s): ${result.skipped.join(", ")}`,
 						);
@@ -181,14 +178,12 @@ export function setupInitCommands(program: Command): void {
 				}
 
 				if (updates.size === 0) {
-					// biome-ignore lint/suspicious/noConsole: wizard
 					console.log("  No alias changes — config unchanged.");
 					return;
 				}
 
 				const merged = mergeAliasesIntoConfig(existing, updates);
 				await writeConfig(merged);
-				// biome-ignore lint/suspicious/noConsole: wizard
 				console.log(`  ✓ Updated aliases for ${updates.size} user(s).`);
 			}),
 		);
@@ -207,7 +202,6 @@ export function setupInitCommands(program: Command): void {
 					terms: result.terms,
 				});
 				await writeConfig(merged);
-				// biome-ignore lint/suspicious/noConsole: wizard
 				console.log("  ✓ Defaults saved.");
 			}),
 		);
@@ -225,9 +219,7 @@ export async function runFullWizard(
 }
 
 async function runFullWizardImpl(options: { force: boolean }): Promise<void> {
-	// biome-ignore lint/suspicious/noConsole: wizard
 	console.log("Welcome to el-linear. This wizard will set up your config.");
-	// biome-ignore lint/suspicious/noConsole: wizard
 	console.log(
 		"Skip is the default at every prompt; only the API token is required.\n",
 	);
@@ -279,12 +271,8 @@ async function runFullWizardImpl(options: { force: boolean }): Promise<void> {
 	}
 	await writeConfig(merged);
 
-	// biome-ignore lint/suspicious/noConsole: wizard
 	console.log("\n✓ Setup complete.");
-	// biome-ignore lint/suspicious/noConsole: wizard
 	console.log("  Token:  ~/.config/el-linear/token (mode 0600)");
-	// biome-ignore lint/suspicious/noConsole: wizard
 	console.log("  Config: ~/.config/el-linear/config.json");
-	// biome-ignore lint/suspicious/noConsole: wizard
 	console.log("\nTry: el-linear teams list");
 }

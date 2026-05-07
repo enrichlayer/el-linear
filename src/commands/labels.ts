@@ -10,6 +10,7 @@ import type { GraphQLResponseData } from "../types/linear.js";
 import { createGraphQLService } from "../utils/graphql-service.js";
 import { createLinearService } from "../utils/linear-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
+import { getRootOpts } from "../utils/root-opts.js";
 import { validateHexColor } from "../utils/validators.js";
 
 async function handleCreateLabel(
@@ -17,9 +18,9 @@ async function handleCreateLabel(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	const rootOpts = command.parent!.parent!.opts();
+	const rootOpts = getRootOpts(command);
 	const teamId = resolveTeam(options.team);
-	const graphQLService = createGraphQLService(rootOpts);
+	const graphQLService = await createGraphQLService(rootOpts);
 
 	const input: Record<string, unknown> = { name, teamId };
 	if (options.color) {
@@ -64,8 +65,8 @@ async function handleRetireLabel(
 	_options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	const rootOpts = command.parent!.parent!.opts();
-	const graphQLService = createGraphQLService(rootOpts);
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
 	const result = await graphQLService.rawRequest(RETIRE_LABEL_MUTATION, {
 		id: labelId,
 	});
@@ -83,8 +84,8 @@ async function handleRestoreLabel(
 	_options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	const rootOpts = command.parent!.parent!.opts();
-	const graphQLService = createGraphQLService(rootOpts);
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
 	const result = await graphQLService.rawRequest(RESTORE_LABEL_MUTATION, {
 		id: labelId,
 	});
@@ -111,9 +112,9 @@ export function setupLabelsCommands(program: Command): void {
 		.option("-l, --limit <number>", "limit results", "100")
 		.action(
 			handleAsyncCommand(async (options: OptionValues, command: Command) => {
-				const rootOpts = command.parent!.parent!.opts();
+				const rootOpts = getRootOpts(command);
 				const teamFilter = options.team ? resolveTeam(options.team) : undefined;
-				const service = createLinearService(rootOpts);
+				const service = await createLinearService(rootOpts);
 				const result = await service.getLabels(
 					teamFilter,
 					Number.parseInt(options.limit, 10),

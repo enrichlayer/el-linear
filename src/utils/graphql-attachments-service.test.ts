@@ -3,15 +3,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mockRawRequest = vi.fn();
 
 vi.mock("./graphql-service.js", () => ({
-	createGraphQLService: vi.fn().mockReturnValue({ rawRequest: mockRawRequest }),
+	createGraphQLService: vi
+		.fn()
+		.mockResolvedValue({ rawRequest: mockRawRequest }),
 }));
 
 const { createGraphQLAttachmentsService } = await import(
 	"./graphql-attachments-service.js"
 );
 
-function createService() {
-	return createGraphQLAttachmentsService({ apiToken: "test-token" });
+async function createService() {
+	return await createGraphQLAttachmentsService({ apiToken: "test-token" });
 }
 
 describe("GraphQLAttachmentsService", () => {
@@ -21,7 +23,7 @@ describe("GraphQLAttachmentsService", () => {
 
 	describe("transformAttachment", () => {
 		it("transforms a minimal attachment", async () => {
-			const service = createService();
+			const service = await createService();
 			mockRawRequest.mockResolvedValue({
 				issue: {
 					attachments: {
@@ -37,7 +39,7 @@ describe("GraphQLAttachmentsService", () => {
 		});
 
 		it("transforms attachment with all optional fields", async () => {
-			const service = createService();
+			const service = await createService();
 			mockRawRequest.mockResolvedValue({
 				issue: {
 					attachments: {
@@ -62,7 +64,7 @@ describe("GraphQLAttachmentsService", () => {
 
 	describe("createAttachment", () => {
 		it("creates an attachment and returns transformed result", async () => {
-			const service = createService();
+			const service = await createService();
 			mockRawRequest.mockResolvedValue({
 				attachmentCreate: {
 					success: true,
@@ -78,7 +80,7 @@ describe("GraphQLAttachmentsService", () => {
 		});
 
 		it("throws on create failure", async () => {
-			const service = createService();
+			const service = await createService();
 			mockRawRequest.mockResolvedValue({
 				attachmentCreate: { success: false },
 			});
@@ -93,7 +95,7 @@ describe("GraphQLAttachmentsService", () => {
 
 	describe("deleteAttachment", () => {
 		it("returns true on successful delete", async () => {
-			const service = createService();
+			const service = await createService();
 			mockRawRequest.mockResolvedValue({
 				attachmentDelete: { success: true },
 			});
@@ -102,7 +104,7 @@ describe("GraphQLAttachmentsService", () => {
 		});
 
 		it("throws on delete failure", async () => {
-			const service = createService();
+			const service = await createService();
 			mockRawRequest.mockResolvedValue({
 				attachmentDelete: { success: false },
 			});
@@ -114,7 +116,7 @@ describe("GraphQLAttachmentsService", () => {
 
 	describe("listAttachments", () => {
 		it("throws when issue not found", async () => {
-			const service = createService();
+			const service = await createService();
 			mockRawRequest.mockResolvedValue({ issue: null });
 			await expect(service.listAttachments("nonexistent")).rejects.toThrow(
 				"Issue not found: nonexistent",
@@ -122,7 +124,7 @@ describe("GraphQLAttachmentsService", () => {
 		});
 
 		it("returns multiple attachments", async () => {
-			const service = createService();
+			const service = await createService();
 			mockRawRequest.mockResolvedValue({
 				issue: {
 					attachments: {

@@ -260,7 +260,6 @@ async function resolveAndValidateToken(
 			return candidate;
 		} catch (err) {
 			const raw = err instanceof Error ? err.message : String(err);
-			// biome-ignore lint/suspicious/noConsole: interactive prompt feedback
 			console.log(`  ✗ ${sanitizeForLog(raw)}`);
 		}
 	}

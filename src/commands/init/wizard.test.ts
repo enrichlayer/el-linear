@@ -62,7 +62,6 @@ vi.mock("@inquirer/prompts", () => ({
 // works without triggering "is not a constructor".
 vi.mock("../../utils/graphql-service.js", () => ({
 	GraphQLService: class {
-		// biome-ignore lint/suspicious/noExplicitAny: test-only stub
 		rawRequest: (...args: unknown[]) => Promise<any> = (...args) =>
 			mockRawRequest(...args);
 	},

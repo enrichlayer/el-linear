@@ -108,7 +108,7 @@ export async function resolveAssignee(
 	rootOpts: Record<string, unknown>,
 ): Promise<string> {
 	if (input.toLowerCase() === "me") {
-		const graphQLService = createGraphQLService(rootOpts);
+		const graphQLService = await createGraphQLService(rootOpts);
 		const result = await graphQLService.rawRequest("{ viewer { id } }");
 		const viewer = result.viewer as Record<string, unknown> | undefined;
 		if (!viewer?.id) {

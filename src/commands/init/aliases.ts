@@ -232,7 +232,6 @@ export async function runAliasesStep(
 				default: false,
 			});
 	if (!proceed) {
-		// biome-ignore lint/suspicious/noConsole: wizard
 		console.log(
 			"  Skipped — run `el-linear init aliases` to add or edit aliases later.",
 		);
@@ -241,7 +240,6 @@ export async function runAliasesStep(
 
 	const allUsers = await fetchAllUsers(token);
 	if (allUsers.length === 0) {
-		// biome-ignore lint/suspicious/noConsole: wizard
 		console.log("  No active users visible to this token.");
 		return new Map();
 	}
@@ -253,31 +251,26 @@ export async function runAliasesStep(
 	const collisions = findDisplayNameCollisions(allUsers);
 	const collidingIds = new Set<string>();
 	if (collisions.size > 0) {
-		// biome-ignore lint/suspicious/noConsole: wizard
 		console.log(
 			`  ⚠ ${collisions.size} display name(s) are shared by multiple active users — skipping those to avoid alias corruption:`,
 		);
 		for (const [name, group] of collisions) {
-			// biome-ignore lint/suspicious/noConsole: wizard
 			console.log(
 				`    "${name}" — ${group.map((u) => u.email ?? u.id).join(", ")}`,
 			);
 			for (const u of group) collidingIds.add(u.id);
 		}
-		// biome-ignore lint/suspicious/noConsole: wizard
 		console.log(
 			"    (Add aliases manually in ~/.config/el-linear/config.json for now; schema migration in 1.3.0.)",
 		);
 	}
 	const users = allUsers.filter((u) => !collidingIds.has(u.id));
 	if (users.length === 0) {
-		// biome-ignore lint/suspicious/noConsole: wizard
 		console.log("  No safe-to-alias users remain after collision filter.");
 		return new Map();
 	}
 
 	const startIdx = await resolveResumePoint(users);
-	// biome-ignore lint/suspicious/noConsole: wizard
 	console.log(
 		`  Walking ${users.length - startIdx}/${users.length} users. Type 'q' at any prompt to stop and save progress.`,
 	);
@@ -300,7 +293,6 @@ export async function runAliasesStep(
 			const update = await promptForUser(i + 1, users.length, u, existing);
 			if (update === "quit") {
 				await saveProgress();
-				// biome-ignore lint/suspicious/noConsole: wizard
 				console.log(
 					`  Saved progress at ${lastCompletedIdx + 1}/${users.length}. Resume with \`el-linear init aliases\`.`,
 				);
@@ -316,7 +308,6 @@ export async function runAliasesStep(
 			lastCompletedIdx = i;
 		}
 		await clearAliasesProgress();
-		// biome-ignore lint/suspicious/noConsole: wizard
 		console.log(`  ✓ Walked all ${users.length} users.`);
 		return updates;
 	} catch (err) {
@@ -342,7 +333,6 @@ async function resolveResumePoint(users: User[]): Promise<number> {
 	if (!progress?.lastCompletedUserId) return 0;
 	const idx = users.findIndex((u) => u.id === progress.lastCompletedUserId);
 	if (idx < 0) {
-		// biome-ignore lint/suspicious/noConsole: wizard
 		console.log(
 			"  Saved progress points at a user no longer in the workspace. Starting over.",
 		);
@@ -369,20 +359,16 @@ async function promptForUser(
 	const currentGithub = currentHandleFor(existing, "github", fullName);
 	const currentGitlab = currentHandleFor(existing, "gitlab", fullName);
 
-	// biome-ignore lint/suspicious/noConsole: wizard
 	console.log(
 		`\n  [${index}/${total}] ${fullName}${user.email ? ` <${user.email}>` : ""}`,
 	);
 	if (currentAliases.length > 0) {
-		// biome-ignore lint/suspicious/noConsole: wizard
 		console.log(`    Current aliases: ${currentAliases.join(", ")}`);
 	}
 	if (currentGithub) {
-		// biome-ignore lint/suspicious/noConsole: wizard
 		console.log(`    Current GitHub:  ${currentGithub}`);
 	}
 	if (currentGitlab) {
-		// biome-ignore lint/suspicious/noConsole: wizard
 		console.log(`    Current GitLab:  ${currentGitlab}`);
 	}
 

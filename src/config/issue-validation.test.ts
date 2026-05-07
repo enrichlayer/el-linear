@@ -177,7 +177,7 @@ describe("validateIssueCreation", () => {
 				// Pad short descriptions
 				const paddedDesc =
 					desc.length < 50
-						? desc + " ".repeat(50 - desc.length) + "padding"
+						? `${desc + " ".repeat(50 - desc.length)}padding`
 						: desc;
 				const result = validateIssueCreation({
 					...required,

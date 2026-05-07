@@ -5,6 +5,7 @@ import {
 } from "../queries/templates.js";
 import { createGraphQLService } from "../utils/graphql-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
+import { getRootOpts } from "../utils/root-opts.js";
 import { parsePositiveInt } from "../utils/validators.js";
 
 interface TemplateResult {
@@ -50,8 +51,8 @@ export function setupTemplatesCommands(program: Command): void {
 		.option("-l, --limit <number>", "limit results", "50")
 		.action(
 			handleAsyncCommand(async (options: OptionValues, command: Command) => {
-				const rootOpts = command.parent!.parent!.opts();
-				const graphQLService = createGraphQLService(rootOpts);
+				const rootOpts = getRootOpts(command);
+				const graphQLService = await createGraphQLService(rootOpts);
 				const limit = parsePositiveInt(options.limit, "--limit");
 				const result = await graphQLService.rawRequest(TEMPLATES_LIST_QUERY);
 				let items = (result.templates as unknown as TemplateResult[]) ?? [];
@@ -80,8 +81,8 @@ export function setupTemplatesCommands(program: Command): void {
 					_options: OptionValues,
 					command: Command,
 				) => {
-					const rootOpts = command.parent!.parent!.opts();
-					const graphQLService = createGraphQLService(rootOpts);
+					const rootOpts = getRootOpts(command);
+					const graphQLService = await createGraphQLService(rootOpts);
 					const result = await graphQLService.rawRequest(TEMPLATE_BY_ID_QUERY, {
 						id: templateId,
 					});
