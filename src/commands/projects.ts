@@ -1,4 +1,5 @@
 import type { Command, OptionValues } from "commander";
+import { loadConfig } from "../config/config.js";
 import { resolveTeam } from "../config/resolver.js";
 import {
 	CREATE_PROJECT_MUTATION,
@@ -9,6 +10,7 @@ import {
 	UPDATE_PROJECT_MUTATION,
 } from "../queries/projects.js";
 import type { GraphQLResponseData, LinearProject } from "../types/linear.js";
+import { cached, resolveCacheTTL } from "../utils/disk-cache.js";
 import type { GraphQLService } from "../utils/graphql-service.js";
 import { createGraphQLService } from "../utils/graphql-service.js";
 import { createLinearService } from "../utils/linear-service.js";
@@ -458,9 +460,18 @@ export function setupProjectsCommands(program: Command): void {
 		.action(
 			handleAsyncCommand(async (options: OptionValues, command: Command) => {
 				const rootOpts = getRootOpts(command);
-				const service = await createLinearService(rootOpts);
-				const result = await service.getProjects(
-					Number.parseInt(options.limit, 10),
+				const limit = Number.parseInt(options.limit, 10);
+				const ttl = resolveCacheTTL({
+					configTTL: loadConfig().cacheTTLSeconds,
+					noCacheFlag: rootOpts.cache === false,
+				});
+				const result = await cached(
+					`projects-list-limit:${limit}`,
+					ttl,
+					async () => {
+						const service = await createLinearService(rootOpts);
+						return service.getProjects(limit);
+					},
 				);
 				const format = options.format as string;
 				if (

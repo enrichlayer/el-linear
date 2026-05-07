@@ -384,12 +384,22 @@ function buildUpdateArgs(
 		labelIds = splitList(options.labels);
 	}
 
+	// On update, fall back to config.defaultPriority only when --priority
+	// wasn't passed. This keeps every update setting a priority for users who
+	// want a workspace-wide baseline (e.g. all unassigned triage tickets bump
+	// to "medium"). To leave priority untouched, omit defaultPriority from
+	// config — the field is opt-in.
+	const priorityInput =
+		typeof options.priority === "string"
+			? options.priority
+			: loadConfig().defaultPriority;
+
 	return {
 		id: issueId,
 		title: options.title,
 		description: options.description,
 		statusId: options.status,
-		priority: options.priority ? validatePriority(options.priority) : undefined,
+		priority: priorityInput ? validatePriority(priorityInput) : undefined,
 		assigneeId,
 		projectId: options.project,
 		labelIds,
@@ -553,9 +563,31 @@ async function resolveCreateInputs(
 	labelIds: string[];
 	status: string | undefined;
 	subscriberIds: string[] | undefined;
+	/** Resolved priority number (0-4) or undefined when no priority was set
+	 * by --priority or config.defaultPriority. */
+	priority: number | undefined;
 }> {
 	const config = loadConfig();
 	enforceTerms([title, options.description], { strict: options.strict });
+
+	// Effective assignee: explicit --assignee wins; --no-assignee (commander
+	// parses as `assignee === false`) skips both flag and config; otherwise
+	// fall back to config.defaultAssignee. Computed BEFORE validation so the
+	// "assignee required" rule sees the resolved value, not undefined.
+	const noAssignee = options.assignee === false;
+	const explicitAssignee =
+		typeof options.assignee === "string" ? options.assignee : undefined;
+	const effectiveAssignee = noAssignee
+		? undefined
+		: (explicitAssignee ?? config.defaultAssignee);
+
+	// Effective priority: explicit --priority wins; otherwise fall back to
+	// config.defaultPriority. Both go through validatePriority so a bad config
+	// value fails fast with a useful error.
+	const effectivePriorityInput =
+		typeof options.priority === "string"
+			? options.priority
+			: config.defaultPriority;
 
 	// --- Validation (labels, description, assignee, project, title) ---
 	// Controlled by config.validation.enabled (default: true).
@@ -567,7 +599,7 @@ async function resolveCreateInputs(
 			labels: rawLabels,
 			description: description || undefined,
 			title,
-			assignee: options.assignee,
+			assignee: effectiveAssignee,
 			project: options.project,
 		});
 
@@ -578,7 +610,7 @@ async function resolveCreateInputs(
 
 		enforceValidation(validationResult);
 	}
-	if (!options.priority) {
+	if (!effectivePriorityInput) {
 		outputWarning(
 			"Creating issue without --priority. Consider specifying it for better triage.",
 			"missing_fields",
@@ -587,8 +619,8 @@ async function resolveCreateInputs(
 
 	const teamInput = options.team || config.defaultTeam;
 	const teamId = resolveTeam(teamInput);
-	const assigneeId = options.assignee
-		? await resolveAssignee(options.assignee, rootOpts)
+	const assigneeId = effectiveAssignee
+		? await resolveAssignee(effectiveAssignee, rootOpts)
 		: undefined;
 
 	let labelIds: string[] = [];
@@ -615,7 +647,19 @@ async function resolveCreateInputs(
 		);
 	}
 
-	return { teamInput, teamId, assigneeId, labelIds, status, subscriberIds };
+	const priority = effectivePriorityInput
+		? validatePriority(effectivePriorityInput)
+		: undefined;
+
+	return {
+		teamInput,
+		teamId,
+		assigneeId,
+		labelIds,
+		status,
+		subscriberIds,
+		priority,
+	};
 }
 
 interface UploadResult {
@@ -670,8 +714,15 @@ async function handleCreateIssue(
 	command: Command,
 ): Promise<void> {
 	const rootOpts = getRootOpts(command);
-	const { teamInput, teamId, assigneeId, labelIds, status, subscriberIds } =
-		await resolveCreateInputs(title, options, rootOpts);
+	const {
+		teamInput,
+		teamId,
+		assigneeId,
+		labelIds,
+		status,
+		subscriberIds,
+		priority,
+	} = await resolveCreateInputs(title, options, rootOpts);
 
 	const uploadResults = await uploadAttachmentsIfNeeded(options, rootOpts);
 	const descriptionWithAttachments = buildDescriptionWithAttachments(
@@ -711,7 +762,7 @@ async function handleCreateIssue(
 		teamInput,
 		description: prepared.description,
 		assigneeId,
-		priority: options.priority ? validatePriority(options.priority) : undefined,
+		priority,
 		projectId: options.project,
 		statusId: status,
 		labelIds: labelIds.length > 0 ? labelIds : undefined,
@@ -1554,6 +1605,10 @@ export function setupIssuesCommands(program: Command): void {
 		.option(
 			"-a, --assignee <assignee>",
 			"assign to user (name, alias, or UUID)",
+		)
+		.option(
+			"--no-assignee",
+			"create unassigned even when config.defaultAssignee is set",
 		)
 		.option(
 			"-p, --priority <priority>",

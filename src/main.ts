@@ -48,6 +48,10 @@ program
 	.option(
 		"--fields <fields>",
 		"filter output to specific fields (comma-separated)",
+	)
+	.option(
+		"--no-cache",
+		"bypass the on-disk cache for `teams list` / `labels list` / `projects list`",
 	);
 
 program.hook("preAction", (_thisCommand: Command, actionCommand: Command) => {

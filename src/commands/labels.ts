@@ -1,4 +1,5 @@
 import type { Command, OptionValues } from "commander";
+import { loadConfig } from "../config/config.js";
 import { resolveTeam } from "../config/resolver.js";
 import {
 	CREATE_LABEL_MUTATION,
@@ -7,6 +8,7 @@ import {
 	RETIRE_LABEL_MUTATION,
 } from "../queries/labels.js";
 import type { GraphQLResponseData } from "../types/linear.js";
+import { cached, resolveCacheTTL } from "../utils/disk-cache.js";
 import { createGraphQLService } from "../utils/graphql-service.js";
 import { createLinearService } from "../utils/linear-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
@@ -114,11 +116,19 @@ export function setupLabelsCommands(program: Command): void {
 			handleAsyncCommand(async (options: OptionValues, command: Command) => {
 				const rootOpts = getRootOpts(command);
 				const teamFilter = options.team ? resolveTeam(options.team) : undefined;
-				const service = await createLinearService(rootOpts);
-				const result = await service.getLabels(
-					teamFilter,
-					Number.parseInt(options.limit, 10),
-				);
+				const limit = Number.parseInt(options.limit, 10);
+				const ttl = resolveCacheTTL({
+					configTTL: loadConfig().cacheTTLSeconds,
+					noCacheFlag: rootOpts.cache === false,
+				});
+				// Cache key includes the team filter so list-with-team and list-
+				// without-team don't collide. Same `limit` participates because
+				// a smaller list isn't a valid cached answer for a larger ask.
+				const cacheKey = `labels-list-team:${teamFilter ?? "_all"}-limit:${limit}`;
+				const result = await cached(cacheKey, ttl, async () => {
+					const service = await createLinearService(rootOpts);
+					return service.getLabels(teamFilter, limit);
+				});
 				outputSuccess({
 					data: result.labels,
 					meta: { count: result.labels.length },

@@ -61,6 +61,25 @@ export interface ElLinearConfig {
 	 *   }
 	 */
 	descriptionTemplates?: Record<string, string>;
+	/**
+	 * Default assignee identifier (alias / display name / email / UUID — same
+	 * shapes resolveAssignee accepts) for `issues create`. Applied when
+	 * `--assignee` is not passed. Pass `--no-assignee` to override at one site.
+	 */
+	defaultAssignee?: string;
+	/**
+	 * Default priority for `issues create` / `issues update`. Accepts the same
+	 * keywords as the --priority flag: `none|urgent|high|medium|normal|low`
+	 * or `0`–`4`. Applied when `--priority` is not passed.
+	 */
+	defaultPriority?: string;
+	/**
+	 * TTL (seconds) for the on-disk cache used by `teams list`, `labels list`,
+	 * and `projects list`. Defaults to 3600 (1 hour) when omitted. A value of
+	 * `0` disables the cache entirely. Override per-invocation with
+	 * `--no-cache`.
+	 */
+	cacheTTLSeconds?: number;
 }
 
 const DEFAULT_CONFIG: ElLinearConfig = {

@@ -22,6 +22,19 @@ vi.mock("../utils/output.js", async (importOriginal) => {
 	};
 });
 
+// Disable the disk cache for unit tests by passing through the fetcher.
+// Each test exercises the fetch path, not cache hits — those are covered in
+// the disk-cache tests directly.
+vi.mock("../utils/disk-cache.js", () => ({
+	cached: <T>(_key: string, _ttl: number, fetcher: () => Promise<T>) =>
+		fetcher(),
+	resolveCacheTTL: () => 0,
+}));
+
+vi.mock("../config/config.js", () => ({
+	loadConfig: () => ({}),
+}));
+
 const { setupTeamsCommands } = await import("./teams.js");
 
 describe("teams commands", () => {
