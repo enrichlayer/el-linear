@@ -6,6 +6,28 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **OAuth 2.0 (PKCE) authentication** as a parallel to personal API tokens.
+  Run `el-linear init oauth` to register a Linear OAuth app, walk through
+  the PKCE consent flow in your browser, and persist tokens to
+  `~/.config/el-linear/<profile>/oauth.json` (mode 0600). Access tokens are
+  auto-refreshed in the background; refresh-token failure surfaces as a
+  clear "re-run `el-linear init oauth`" error. Personal-token auth is
+  unchanged and remains the default.
+- `el-linear init oauth --revoke` revokes the stored OAuth tokens and
+  removes `oauth.json`.
+- `el-linear init oauth --no-browser` forces the headless paste-the-code
+  fallback (for SSH sessions, sandboxed containers, etc.).
+- `el-linear init oauth --port <n>` overrides the localhost callback port
+  (default 8765).
+- `init oauth` includes a multi-select scope picker for the eight Linear
+  OAuth scopes; defaults to `read`, `write`, `issues:create`,
+  `comments:create`.
+- `GraphQLService` now accepts either a personal API token or
+  `{ oauthToken }`, sending the right `Authorization` header shape per
+  Linear's docs (no `Bearer` prefix for personal tokens; `Bearer ` for
+  OAuth).
+
 ## [1.4.0] — 2026-05-07
 
 This release adds named **profiles** so you can switch between multiple Linear

@@ -1,11 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 
 const mockRawRequest = vi.fn();
+const linearClientCtorSpy = vi.fn();
 
-// Mock @linear/sdk with a proper class constructor
+// Mock @linear/sdk with a proper class constructor that records its options.
 vi.mock("@linear/sdk", () => ({
 	LinearClient: class MockLinearClient {
 		client = { rawRequest: mockRawRequest };
+		constructor(opts: unknown) {
+			linearClientCtorSpy(opts);
+		}
 	},
 }));
 
@@ -66,5 +70,39 @@ describe("GraphQLService", () => {
 		await expect(service.rawRequest("{ foo }")).rejects.toThrow(
 			"GraphQL request failed: Network timeout",
 		);
+	});
+
+	it("string constructor passes apiKey to LinearClient (personal-token path)", () => {
+		linearClientCtorSpy.mockReset();
+		new GraphQLService("personal-token");
+		expect(linearClientCtorSpy).toHaveBeenCalledWith(
+			expect.objectContaining({ apiKey: "personal-token" }),
+		);
+		const opts = linearClientCtorSpy.mock.calls[0][0] as Record<
+			string,
+			unknown
+		>;
+		expect(opts.accessToken).toBeUndefined();
+	});
+
+	it("`{apiKey}` constructor passes apiKey to LinearClient", () => {
+		linearClientCtorSpy.mockReset();
+		new GraphQLService({ apiKey: "explicit-key" });
+		expect(linearClientCtorSpy).toHaveBeenCalledWith(
+			expect.objectContaining({ apiKey: "explicit-key" }),
+		);
+	});
+
+	it("`{oauthToken}` constructor passes accessToken — SDK adds Bearer prefix", () => {
+		linearClientCtorSpy.mockReset();
+		new GraphQLService({ oauthToken: "lin_oauth_xyz" });
+		expect(linearClientCtorSpy).toHaveBeenCalledWith(
+			expect.objectContaining({ accessToken: "lin_oauth_xyz" }),
+		);
+		const opts = linearClientCtorSpy.mock.calls[0][0] as Record<
+			string,
+			unknown
+		>;
+		expect(opts.apiKey).toBeUndefined();
 	});
 });
