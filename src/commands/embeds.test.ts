@@ -14,6 +14,10 @@ vi.mock("../utils/file-service.js", () => ({
 		this.downloadFile = mockDownloadFile;
 		this.uploadFile = mockUploadFile;
 	}),
+	createFileService: vi.fn().mockResolvedValue({
+		downloadFile: mockDownloadFile,
+		uploadFile: mockUploadFile,
+	}),
 }));
 
 vi.mock("../utils/auth.js", () => ({

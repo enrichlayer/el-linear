@@ -44,11 +44,32 @@ function getMimeType(filePath: string): string {
 	return MIME_TYPES[ext] || "application/octet-stream";
 }
 
-export class FileService {
-	private readonly apiToken: string;
+/**
+ * Constructor arg shapes for `FileService`:
+ *   - `string` → personal API token (legacy; sent as `Authorization: <token>`).
+ *   - `{apiKey: string}` → personal API token (explicit).
+ *   - `{oauthToken: string}` → OAuth access token (sent as
+ *     `Authorization: Bearer <token>`).
+ *
+ * The string variant exists because dozens of tests construct `FileService`
+ * with a plain string. We continue to support it indefinitely.
+ */
+export type FileServiceAuth =
+	| string
+	| { apiKey: string }
+	| { oauthToken: string };
 
-	constructor(apiToken: string) {
-		this.apiToken = apiToken;
+function buildAuthHeader(auth: FileServiceAuth): string {
+	if (typeof auth === "string") return auth;
+	if ("oauthToken" in auth) return `Bearer ${auth.oauthToken}`;
+	return auth.apiKey;
+}
+
+export class FileService {
+	private readonly authHeader: string;
+
+	constructor(auth: FileServiceAuth) {
+		this.authHeader = buildAuthHeader(auth);
 	}
 
 	async downloadFile(
@@ -80,7 +101,7 @@ export class FileService {
 			const isSignedUrl = urlObj.searchParams.has("signature");
 			const headers: Record<string, string> = {};
 			if (!isSignedUrl) {
-				headers.Authorization = this.apiToken;
+				headers.Authorization = this.authHeader;
 			}
 
 			const response = await fetch(url, { method: "GET", headers });
@@ -202,7 +223,7 @@ export class FileService {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
-				Authorization: this.apiToken,
+				Authorization: this.authHeader,
 			},
 			body: JSON.stringify({
 				query,
@@ -298,4 +319,24 @@ export class FileService {
 		}
 		return { success: true, assetUrl: meta.assetUrl, filename };
 	}
+}
+
+import { getActiveAuth } from "../auth/token-resolver.js";
+import type { AuthOptions } from "./auth.js";
+
+/**
+ * OAuth-aware factory: resolves the active credential (with auto-refresh
+ * for OAuth tokens) and returns a `FileService` configured with the right
+ * `Authorization` header shape. Personal tokens use `Authorization:
+ * <token>` (no Bearer prefix); OAuth tokens use `Authorization: Bearer
+ * <token>`.
+ */
+export async function createFileService(
+	options: AuthOptions,
+): Promise<FileService> {
+	const auth = await getActiveAuth(options);
+	if (auth.kind === "oauth") {
+		return new FileService({ oauthToken: auth.token });
+	}
+	return new FileService({ apiKey: auth.token });
 }

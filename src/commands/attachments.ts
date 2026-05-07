@@ -1,6 +1,5 @@
 import type { Command, OptionValues } from "commander";
-import { getApiToken } from "../utils/auth.js";
-import { FileService } from "../utils/file-service.js";
+import { createFileService } from "../utils/file-service.js";
 import { createGraphQLAttachmentsService } from "../utils/graphql-attachments-service.js";
 import { createLinearService } from "../utils/linear-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
@@ -21,12 +20,10 @@ export function setupAttachmentsCommands(program: Command): void {
 			handleAsyncCommand(
 				async (issueId: string, options: OptionValues, command: Command) => {
 					const rootOpts = getRootOpts(command);
-					const apiToken = getApiToken(rootOpts);
-
 					const linearService = await createLinearService(rootOpts);
 					const resolvedIssueId = await linearService.resolveIssueId(issueId);
 
-					const fileService = new FileService(apiToken);
+					const fileService = await createFileService(rootOpts);
 					const uploadResult = await fileService.uploadFile(options.file);
 					if (!uploadResult.success) {
 						throw new Error(uploadResult.error);

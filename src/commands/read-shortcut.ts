@@ -1,6 +1,6 @@
 import type { Command } from "commander";
-import { getApiToken } from "../utils/auth.js";
 import { downloadLinearUploads } from "../utils/download-uploads.js";
+import { createFileService } from "../utils/file-service.js";
 import { GraphQLIssuesService } from "../utils/graphql-issues-service.js";
 import { createGraphQLService } from "../utils/graphql-service.js";
 import { createLinearService } from "../utils/linear-service.js";
@@ -78,16 +78,16 @@ async function readIssues(
 	const graphQLService = await createGraphQLService(rootOpts);
 	const linearService = await createLinearService(rootOpts);
 	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
-	const apiToken = getApiToken(rootOpts);
+	const fileService = await createFileService(rootOpts);
 	if (issueIds.length === 1) {
 		const issue = await issuesService.getIssueById(issueIds[0]);
-		const resolved = await downloadLinearUploads(issue, apiToken);
+		const resolved = await downloadLinearUploads(issue, fileService);
 		outputSuccess(resolved);
 	} else {
 		const results = await Promise.all(
 			issueIds.map(async (id) => {
 				const issue = await issuesService.getIssueById(id);
-				return downloadLinearUploads(issue, apiToken);
+				return downloadLinearUploads(issue, fileService);
 			}),
 		);
 		outputSuccess(results);

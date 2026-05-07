@@ -13,7 +13,7 @@ const mockLinearService = {
 };
 
 vi.mock("../utils/linear-service.js", () => ({
-	createLinearService: vi.fn().mockReturnValue(mockLinearService),
+	createLinearService: vi.fn().mockResolvedValue(mockLinearService),
 }));
 
 const mockListAttachments = vi.fn();
@@ -28,17 +28,17 @@ const mockAttachmentsService = {
 vi.mock("../utils/graphql-attachments-service.js", () => ({
 	createGraphQLAttachmentsService: vi
 		.fn()
-		.mockReturnValue(mockAttachmentsService),
+		.mockResolvedValue(mockAttachmentsService),
 }));
 
 const mockUploadFile = vi.fn();
-
-class MockFileService {
-	uploadFile = mockUploadFile;
-}
+const mockFileServiceInstance = { uploadFile: mockUploadFile };
 
 vi.mock("../utils/file-service.js", () => ({
-	FileService: MockFileService,
+	createFileService: vi.fn().mockResolvedValue(mockFileServiceInstance),
+	FileService: class {
+		uploadFile = mockUploadFile;
+	},
 }));
 
 vi.mock("../utils/auth.js", () => ({
