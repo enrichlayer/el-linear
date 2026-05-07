@@ -1,13 +1,16 @@
 # Configuration reference
 
-el-linear reads configuration from two files in `~/.config/el-linear/`:
+el-linear reads its main configuration from `~/.config/el-linear/`, with
+separate files for credentials and optional local OAuth app defaults:
 
 | File | Mode | Purpose |
 |------|------|---------|
 | `config.json` | `0644` | All non-secret config — team/member/label maps, defaults, term-enforcement rules. |
 | `token` | `0600` | Linear personal API token. Never embedded in `config.json`. |
+| `oauth.json` | `0600` | OAuth access/refresh token state written by `el-linear init oauth`. |
+| `team-oauth.json` | `0600` or `0644` | Optional local OAuth app defaults. Not packaged, not required. |
 
-This document is the canonical reference. **An LLM (or a human, or a script) can construct an equivalent config without ever running `el-linear init`** by writing the two files directly to the locations and shapes documented below.
+This document is the canonical reference. **An LLM (or a human, or a script) can construct an equivalent config without ever running `el-linear init`** by writing the relevant files directly to the locations and shapes documented below.
 
 ---
 
@@ -17,6 +20,8 @@ This document is the canonical reference. **An LLM (or a human, or a script) can
 ~/.config/el-linear/
 ├── config.json                        # this file
 ├── token                              # 0600, single line: lin_api_...
+├── oauth.json                         # 0600, OAuth state if `init oauth` was used
+├── team-oauth.json                    # optional OAuth app defaults
 └── .init-aliases-progress             # transient, written by `el-linear init aliases` on quit
 ```
 
@@ -28,6 +33,44 @@ The `~/.config/el-linear/` directory itself should be `0700`. el-linear creates 
 printf '%s\n' "lin_api_yourkeyhere" > ~/.config/el-linear/token
 chmod 0600 ~/.config/el-linear/token
 ```
+
+---
+
+## Optional team OAuth app defaults
+
+`el-linear init oauth` uses OAuth 2.0 with PKCE. Without a local defaults file,
+the wizard asks the user to register their own Linear OAuth app and paste the
+`client_id`.
+
+Teams that maintain a shared Linear OAuth app can materialize this file from a
+password manager:
+
+```json
+{
+  "linearOAuth": {
+    "clientId": "your-linear-oauth-client-id",
+    "redirectPort": 8765,
+    "scopes": ["read", "write", "issues:create", "comments:create"],
+    "passwordManagerPath": "op://vault/item/client_id"
+  }
+}
+```
+
+Fields:
+
+- `clientId` — required Linear OAuth client ID. This is not a secret.
+- `redirectPort` — optional localhost callback port. Defaults to `8765`.
+- `scopes` — optional scope list. Defaults to `read`, `write`,
+  `issues:create`, `comments:create`.
+- `passwordManagerPath` — optional human/script metadata showing where the
+  config came from. el-linear does not execute password-manager commands from
+  this value.
+
+The default path is `~/.config/el-linear/team-oauth.json`. Set
+`EL_LINEAR_OAUTH_CONFIG=/path/to/team-oauth.json` to use another file.
+
+Do not include `client_secret` in this shared file. Public/native PKCE is the
+intended flow for the CLI.
 
 ---
 

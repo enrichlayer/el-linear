@@ -62,6 +62,7 @@ function jsonResponse(body: unknown, ok = true, status = 200) {
 
 beforeEach(async () => {
 	await fs.rm(TEST_HOME, { recursive: true, force: true });
+	delete process.env.EL_LINEAR_OAUTH_CONFIG;
 	mockRawRequest.mockReset();
 	vi.mocked(checkbox).mockReset();
 	vi.mocked(input).mockReset();
@@ -147,6 +148,105 @@ describe("runOAuthStep — first-time happy path", () => {
 		expect(openBrowser).toHaveBeenCalledTimes(1);
 		expect(openBrowser.mock.calls[0][0]).toMatch(
 			/^https:\/\/linear\.app\/oauth\/authorize\?/,
+		);
+	});
+
+	it("uses local team OAuth defaults when team-oauth.json exists", async () => {
+		await fs.mkdir(`${TEST_HOME}/.config/el-linear`, {
+			recursive: true,
+			mode: 0o700,
+		});
+		await fs.writeFile(
+			`${TEST_HOME}/.config/el-linear/team-oauth.json`,
+			JSON.stringify({
+				linearOAuth: {
+					clientId: "team-client",
+					redirectPort: 9876,
+					scopes: ["read", "issues:create"],
+					passwordManagerPath: "op://vault/el-linear/client_id",
+				},
+			}),
+		);
+		mockRawRequest.mockResolvedValueOnce({ viewer: VALID_VIEWER });
+
+		const fetchImpl = vi.fn<FetchLike>(async () =>
+			jsonResponse({
+				access_token: "team-access",
+				token_type: "Bearer",
+				expires_in: 86400,
+				scope: "read,issues:create",
+				refresh_token: "rt-team",
+			}),
+		);
+		const openBrowser = vi.fn(async (_url: string) => undefined);
+
+		const result = await runOAuthStep({
+			fetchImpl,
+			openBrowser,
+			runLocalhostCallbackImpl: async ({ expectedState }) => ({
+				code: "AUTH-TEAM",
+				state: expectedState,
+			}),
+		});
+
+		expect(result.state.clientId).toBe("team-client");
+		expect(result.state.scopes).toEqual(["read", "issues:create"]);
+		expect(vi.mocked(input)).not.toHaveBeenCalled();
+		expect(vi.mocked(password)).not.toHaveBeenCalled();
+		expect(vi.mocked(checkbox)).not.toHaveBeenCalled();
+
+		const authorizeUrl = new URL(openBrowser.mock.calls[0][0]);
+		expect(authorizeUrl.searchParams.get("client_id")).toBe("team-client");
+		expect(authorizeUrl.searchParams.get("redirect_uri")).toBe(
+			"http://localhost:9876/oauth/callback",
+		);
+
+		const body = new URLSearchParams(fetchImpl.mock.calls[0][1].body);
+		expect(body.get("client_id")).toBe("team-client");
+		expect(body.get("redirect_uri")).toBe(
+			"http://localhost:9876/oauth/callback",
+		);
+		expect(body.has("client_secret")).toBe(false);
+	});
+
+	it("lets --port override the team OAuth redirect port", async () => {
+		await fs.mkdir(`${TEST_HOME}/.config/el-linear`, {
+			recursive: true,
+			mode: 0o700,
+		});
+		await fs.writeFile(
+			`${TEST_HOME}/.config/el-linear/team-oauth.json`,
+			JSON.stringify({
+				linearOAuth: {
+					clientId: "team-client",
+					redirectPort: 9876,
+				},
+			}),
+		);
+		mockRawRequest.mockResolvedValueOnce({ viewer: VALID_VIEWER });
+
+		const fetchImpl = vi.fn<FetchLike>(async () =>
+			jsonResponse({
+				access_token: "team-access",
+				token_type: "Bearer",
+				expires_in: 86400,
+				scope: "read,write,issues:create,comments:create",
+			}),
+		);
+
+		await runOAuthStep({
+			port: 12345,
+			fetchImpl,
+			openBrowser: async () => undefined,
+			runLocalhostCallbackImpl: async ({ expectedState }) => ({
+				code: "AUTH-TEAM",
+				state: expectedState,
+			}),
+		});
+
+		const body = new URLSearchParams(fetchImpl.mock.calls[0][1].body);
+		expect(body.get("redirect_uri")).toBe(
+			"http://localhost:12345/oauth/callback",
 		);
 	});
 

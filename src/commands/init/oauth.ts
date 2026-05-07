@@ -2,10 +2,10 @@
  * Wizard step for OAuth 2.0 (PKCE flow) authorization.
  *
  * Flow:
- *   1. Present a "what is this?" intro pointing the user at Linear's OAuth
- *      app registration page. (Until we ship a shared OAuth client_id,
- *      every user registers their own app.)
- *   2. Prompt for `client_id`, optional `client_secret`, port, scopes.
+ *   1. Read optional local/team OAuth app defaults, if present.
+ *   2. Otherwise present a "what is this?" intro pointing the user at
+ *      Linear's OAuth app registration page, then prompt for `client_id`,
+ *      optional `client_secret`, port, scopes.
  *   3. Generate PKCE verifier + state, build the authorize URL.
  *   4. Try to open the system browser; fall back to printing the URL.
  *   5. Spin a localhost listener (or fall back to pasted-code prompt) to
@@ -20,6 +20,7 @@
 
 import { spawn } from "node:child_process";
 import { checkbox, input, password, select } from "@inquirer/prompts";
+import { readTeamOAuthConfig } from "../../auth/oauth-app-config.js";
 import {
 	DEFAULT_CALLBACK_PATH,
 	runLocalhostCallback,
@@ -273,6 +274,28 @@ async function promptRegistration(defaults: {
 	};
 }
 
+async function resolveRegistration(defaults: {
+	manualPort: number;
+	requestedPort?: number;
+}): Promise<RegistrationAnswers> {
+	const teamConfig = await readTeamOAuthConfig();
+	if (!teamConfig) {
+		return promptRegistration({ port: defaults.manualPort });
+	}
+
+	const port = defaults.requestedPort ?? teamConfig.redirectPort;
+	logLine("");
+	logLine(TS(`Using Linear OAuth app defaults from ${teamConfig.sourcePath}.`));
+	logLine(TS(`Callback URL: http://localhost:${port}${DEFAULT_CALLBACK_PATH}`));
+	logLine("");
+
+	return {
+		clientId: teamConfig.clientId,
+		port,
+		scopes: teamConfig.scopes,
+	};
+}
+
 /**
  * Default viewer-validation routine. Calls `viewer { ... }` with the new
  * bearer token to confirm Linear accepted it. Reused for both the wizard
@@ -338,8 +361,10 @@ export async function runOAuthStep(
 		// Both `reauth` and `revoked` fall through to the re-auth flow.
 	}
 
-	const reg = await promptRegistration({
-		port: options.port ?? extractPortFromRedirect(existing) ?? DEFAULT_PORT,
+	const reg = await resolveRegistration({
+		manualPort:
+			options.port ?? extractPortFromRedirect(existing) ?? DEFAULT_PORT,
+		requestedPort: options.port,
 	});
 
 	const redirectUri = `http://localhost:${reg.port}${DEFAULT_CALLBACK_PATH}`;
