@@ -23,3 +23,6 @@ Thumbs.db
 tmp/
 .tmp/
 .product-finalizer-skip.json
+
+# Playwright MCP traces — local artifacts only
+.playwright-mcp/
