@@ -11,6 +11,7 @@ import {
 	type AutoLinkResult,
 	autoLinkReferences,
 } from "../utils/auto-link-references.js";
+import { applyFooter } from "../utils/footer.js";
 import {
 	createGraphQLService,
 	type GraphQLService,
@@ -154,7 +155,17 @@ async function handleCreateComment(
 	const rootOpts = getRootOpts(command);
 	const graphQLService = await createGraphQLService(rootOpts);
 	const linearService = await createLinearService(rootOpts);
-	const rawBody = readBody(options);
+	// Apply messageFooter (config or --footer flag) before any further
+	// processing, so auto-link / mention-resolution see it as part of the body.
+	// Commander parses --no-footer as `options.footer === false`.
+	const noFooter = options.footer === false;
+	const explicitFooter =
+		typeof options.footer === "string" ? options.footer : undefined;
+	const rawBody =
+		applyFooter(readBody(options), {
+			footer: explicitFooter,
+			noFooter,
+		}) ?? "";
 	const resolvedIssueId = await linearService.resolveIssueId(issueId);
 
 	// Wrap valid refs as markdown links before mention resolution. Idempotent against
@@ -342,6 +353,11 @@ export function setupCommentsCommands(program: Command): void {
 			"--no-auto-link",
 			"skip wrapping issue refs as markdown links and creating sidebar relations",
 		)
+		.option(
+			"--footer <text>",
+			"text appended to the comment body (overrides config.messageFooter)",
+		)
+		.option("--no-footer", "skip the configured messageFooter for this comment")
 		.action(handleAsyncCommand(handleCreateComment));
 
 	comments

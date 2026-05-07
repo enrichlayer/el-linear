@@ -58,12 +58,16 @@ describe("validatePriority", () => {
 		expect(validatePriority("4")).toBe(4);
 	});
 
-	it("rejects 0", () => {
-		expect(() => validatePriority("0")).toThrow("not valid");
+	it("accepts 0 as 'No priority'", () => {
+		expect(validatePriority("0")).toBe(0);
 	});
 
 	it("rejects 5", () => {
 		expect(() => validatePriority("5")).toThrow("not valid");
+	});
+
+	it("rejects -1", () => {
+		expect(() => validatePriority("-1")).toThrow("not valid");
 	});
 
 	it("accepts priority names (case-insensitive)", () => {
@@ -75,8 +79,10 @@ describe("validatePriority", () => {
 		expect(validatePriority("Low")).toBe(4);
 	});
 
-	it("rejects 'none' (priority 0 not valid for create/update)", () => {
-		expect(() => validatePriority("none")).toThrow("not valid");
+	it("accepts 'none' as priority 0 (No priority is a real Linear state)", () => {
+		expect(validatePriority("none")).toBe(0);
+		expect(validatePriority("None")).toBe(0);
+		expect(validatePriority("NONE")).toBe(0);
 	});
 
 	it("rejects invalid strings", () => {

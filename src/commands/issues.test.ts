@@ -62,17 +62,19 @@ vi.mock("../config/resolver.js", () => ({
 	resolveLabels: mockResolveLabels,
 }));
 
+const baseConfig = {
+	defaultTeam: "DEV",
+	labels: { workspace: {} },
+	members: {},
+	teams: {},
+	// Validation tested in issue-validation.test.ts — disable here to isolate command wiring
+	validation: { enabled: false },
+	// Pin the workspace URL so getWorkspaceUrlKey skips the API roundtrip in tests.
+	workspaceUrlKey: "test",
+};
+const mockLoadConfig = vi.fn().mockReturnValue(baseConfig);
 vi.mock("../config/config.js", () => ({
-	loadConfig: vi.fn().mockReturnValue({
-		defaultTeam: "DEV",
-		labels: { workspace: {} },
-		members: {},
-		teams: {},
-		// Validation tested in issue-validation.test.ts — disable here to isolate command wiring
-		validation: { enabled: false },
-		// Pin the workspace URL so getWorkspaceUrlKey skips the API roundtrip in tests.
-		workspaceUrlKey: "test",
-	}),
+	loadConfig: mockLoadConfig,
 }));
 
 const mockEnforceTerms = vi.fn();
@@ -123,6 +125,10 @@ describe("issues commands", () => {
 		mockResolveMember.mockImplementation((v: string) => `member-id-${v}`);
 		mockResolveLabels.mockReturnValue([]);
 		mockResolveDefaultStatus.mockReturnValue(undefined);
+		// vi.clearAllMocks resets call counts but not implementations set via
+		// mockReturnValue — re-pin the default loadConfig to the bare baseline
+		// so individual tests start with a clean slate.
+		mockLoadConfig.mockReturnValue(baseConfig);
 	});
 
 	describe("issues list", () => {
@@ -455,6 +461,205 @@ describe("issues commands", () => {
 			expect(mockCreateIssue).toHaveBeenCalledWith(
 				expect.objectContaining({
 					statusId: "status-uuid",
+				}),
+			);
+		});
+	});
+
+	describe("issues create — --template + --footer", () => {
+		const requiredArgs = ["--assignee", "bob", "--project", "Infrastructure"];
+
+		beforeEach(() => {
+			mockLoadConfig.mockReturnValue(baseConfig);
+		});
+
+		it("--template uses the body from config.descriptionTemplates", async () => {
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				descriptionTemplates: {
+					bug: "## Steps to reproduce\n\n1. ...\n\n## Expected\n\n...",
+				},
+			});
+			mockCreateIssue.mockResolvedValue({ id: "uuid", identifier: "DEV-1" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"My bug",
+				"--team",
+				"DEV",
+				"--template",
+				"bug",
+				...requiredArgs,
+			]);
+
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({
+					description: expect.stringContaining("Steps to reproduce"),
+				}),
+			);
+		});
+
+		it("--template errors with a clear message when the name is unknown", async () => {
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				descriptionTemplates: { bug: "..." },
+			});
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Something",
+				"--team",
+				"DEV",
+				"--template",
+				"feature",
+				...requiredArgs,
+			]);
+
+			// The error goes through outputError → JSON.stringify, so the
+			// embedded double quotes around the template name are backslash-
+			// escaped in the captured stdout output.
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Template"),
+			);
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("not found"),
+			);
+		});
+
+		it("--template errors when used alongside --description", async () => {
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				descriptionTemplates: { bug: "..." },
+			});
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Something",
+				"--team",
+				"DEV",
+				"--template",
+				"bug",
+				"--description",
+				"explicit body",
+				...requiredArgs,
+			]);
+
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("--template is mutually exclusive"),
+			);
+		});
+
+		it("--template + --description-file is also rejected", async () => {
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				descriptionTemplates: { bug: "..." },
+			});
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Something",
+				"--team",
+				"DEV",
+				"--template",
+				"bug",
+				"--description-file",
+				"/tmp/desc.md",
+				...requiredArgs,
+			]);
+
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("--template is mutually exclusive"),
+			);
+		});
+
+		it("--footer is appended to the description", async () => {
+			mockCreateIssue.mockResolvedValue({ id: "uuid", identifier: "DEV-1" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Title",
+				"--team",
+				"DEV",
+				"--description",
+				"the body",
+				"--footer",
+				"\n\n— Kamal",
+				...requiredArgs,
+			]);
+
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({
+					description: "the body\n\n— Kamal",
+				}),
+			);
+		});
+
+		it("config.messageFooter is appended automatically", async () => {
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				messageFooter: "\n— Filed via el-linear",
+			});
+			mockCreateIssue.mockResolvedValue({ id: "uuid", identifier: "DEV-1" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Title",
+				"--team",
+				"DEV",
+				"--description",
+				"body",
+				...requiredArgs,
+			]);
+
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({
+					description: "body\n— Filed via el-linear",
+				}),
+			);
+		});
+
+		it("--no-footer skips a configured messageFooter", async () => {
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				messageFooter: "\n— always here",
+			});
+			mockCreateIssue.mockResolvedValue({ id: "uuid", identifier: "DEV-1" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Title",
+				"--team",
+				"DEV",
+				"--description",
+				"body",
+				"--no-footer",
+				...requiredArgs,
+			]);
+
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({
+					description: "body",
 				}),
 			);
 		});
