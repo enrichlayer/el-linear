@@ -22,6 +22,18 @@ vi.mock("../utils/output.js", async (importOriginal) => {
 	};
 });
 
+// Pass-through cache so tests still hit the LinearService fetcher; cache
+// behaviour is covered in disk-cache.test.ts.
+vi.mock("../utils/disk-cache.js", () => ({
+	cached: <T>(_key: string, _ttl: number, fetcher: () => Promise<T>) =>
+		fetcher(),
+	resolveCacheTTL: () => 0,
+}));
+
+vi.mock("../config/config.js", () => ({
+	loadConfig: () => ({}),
+}));
+
 const { setupProjectsCommands } = await import("./projects.js");
 
 describe("projects commands", () => {

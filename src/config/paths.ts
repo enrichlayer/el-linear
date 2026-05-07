@@ -11,6 +11,7 @@ import path from "node:path";
 export const CONFIG_DIR = path.join(os.homedir(), ".config", "el-linear");
 export const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
 export const TOKEN_PATH = path.join(CONFIG_DIR, "token");
+export const TEAM_OAUTH_CONFIG_PATH = path.join(CONFIG_DIR, "team-oauth.json");
 export const ALIASES_PROGRESS_PATH = path.join(
 	CONFIG_DIR,
 	".init-aliases-progress",

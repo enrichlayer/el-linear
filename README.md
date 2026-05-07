@@ -74,13 +74,41 @@ every team ends up writing themselves:
 
 ## Authentication
 
-The API token is resolved in this order:
+el-linear supports either OAuth or a personal Linear API token. OAuth is
+configured with:
+
+```bash
+el-linear init oauth
+```
+
+By default, that command walks you through registering your own Linear OAuth
+app. Teams can make the flow a single browser authorization step by writing a
+local, untracked app-defaults file at `~/.config/el-linear/team-oauth.json`
+or pointing `EL_LINEAR_OAUTH_CONFIG` at one:
+
+```json
+{
+  "linearOAuth": {
+    "clientId": "your-linear-oauth-client-id",
+    "redirectPort": 8765,
+    "scopes": ["read", "write", "issues:create", "comments:create"],
+    "passwordManagerPath": "op://vault/item/client_id"
+  }
+}
+```
+
+`passwordManagerPath` is optional metadata for humans/scripts; el-linear does
+not execute password-manager commands from it. Do not put a `client_secret` in
+this shared file. The OAuth flow uses PKCE.
+
+At runtime, credentials are resolved in this order:
 
 1. `--api-token <token>` flag.
 2. `LINEAR_API_TOKEN` environment variable.
-3. **Active profile's** `~/.config/el-linear/profiles/<name>/token` file (see *Profiles* below).
-4. `~/.config/el-linear/token` file (legacy single-profile, recommended for human use when only one workspace is needed).
-5. `~/.linear_api_token` file (legacy, still honored).
+3. **Active profile's** OAuth state (`oauth.json`) from `el-linear init oauth`.
+4. **Active profile's** `~/.config/el-linear/profiles/<name>/token` file (see *Profiles* below).
+5. `~/.config/el-linear/token` file (legacy single-profile, recommended for human use when only one workspace is needed).
+6. `~/.linear_api_token` file (legacy, still honored).
 
 el-linear never logs the token.
 

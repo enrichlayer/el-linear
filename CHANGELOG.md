@@ -6,6 +6,41 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **`config.defaultAssignee` + `--no-assignee` flag.** Optional default
+  assignee for `el-linear issues create`, applied when `--assignee` is not
+  passed. Accepts the same shapes as the `--assignee` flag (alias, display
+  name, email, or UUID). Pass `--no-assignee` to skip both flag and config
+  for one invocation. Surfaced in the `init defaults` wizard with a
+  prompt that accepts `none` as an explicit clear.
+- **`config.defaultPriority`.** Optional default priority for both
+  `el-linear issues create` and `el-linear issues update`. Accepts the
+  same keywords/numbers as `--priority`
+  (`none|urgent|high|medium|normal|low` / `0`–`4`). Surfaced in the
+  `init defaults` wizard via a select prompt. The runtime path runs the
+  stored value through `validatePriority` so a bad config value fails fast.
+- **`config.cacheTTLSeconds` + `--no-cache` flag.** Configures the TTL
+  (in seconds) of the new on-disk cache for `teams list`, `labels list`,
+  and `projects list`. Defaults to `3600` (1 hour) when omitted. A value
+  of `0` disables the cache. The `--no-cache` root flag bypasses the
+  cache for one invocation. Surfaced in the `init defaults` wizard with
+  numeric validation.
+- **Disk cache for `teams list` / `labels list` / `projects list`.** Lives
+  at `<profile-dir>/cache/<key>.json`, profile-aware so caches don't bleed
+  between profiles. Keys include filter parameters (e.g.
+  `labels-list-team:ENG-limit:100`) so different filter combos don't
+  collide. Atomic writes (tmp + rename, mode 0644). Corrupt or
+  unknown-version envelopes are silently treated as a miss and refetched.
+  Write errors log to stderr but never fail the user's command.
+
+### Changed
+
+- **`init defaults` wizard now covers the new fields.** Three new
+  sub-prompts (default assignee, default priority, cache TTL) sit between
+  the existing prompts. Each defaults to "skip" so re-running the wizard
+  with no input still produces a byte-identical config.
+
 ## [1.6.0] — 2026-05-08
 
 This release completes OAuth 2.0 coverage across every CLI command and adds

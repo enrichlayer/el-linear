@@ -552,28 +552,55 @@ describe("runAliasesImport", () => {
 //  Defaults step
 // ─────────────────────────────────────────────────────────────────────────
 
+// Defaults wizard prompt order:
+//   1. defaultLabels
+//   2. defaultAssignee
+//   3. defaultPriority
+//   4. statusDefaults
+//   5. cacheTTLSeconds
+//   6. terms
+// Each "Change X?" confirm slot is in that order. Tests below pass `false`
+// for the slots they want to skip and `true` only for the ones they edit.
+
+/** Six skip-confirms — one per defaults sub-prompt (in prompt order). */
+function mockAllSkip() {
+	vi.mocked(confirm)
+		.mockResolvedValueOnce(false) // labels
+		.mockResolvedValueOnce(false) // assignee
+		.mockResolvedValueOnce(false) // priority
+		.mockResolvedValueOnce(false) // status
+		.mockResolvedValueOnce(false) // cache TTL
+		.mockResolvedValueOnce(false); // terms
+}
+
 describe("runDefaultsStep — every config key", () => {
 	it("skip everything: returns existing values byte-for-byte", async () => {
 		const existing = {
 			defaultLabels: ["claude"],
+			defaultAssignee: "alice",
+			defaultPriority: "medium",
 			statusDefaults: { noProject: "Backlog" },
 			terms: [{ canonical: "Acme", reject: ["acme"] }],
+			cacheTTLSeconds: 1800,
 		};
-		vi.mocked(confirm)
-			.mockResolvedValueOnce(false)
-			.mockResolvedValueOnce(false)
-			.mockResolvedValueOnce(false);
+		mockAllSkip();
 
 		const result = await runDefaultsStep(existing);
 		expect(result.defaultLabels).toEqual(["claude"]);
+		expect(result.defaultAssignee).toBe("alice");
+		expect(result.defaultPriority).toBe("medium");
 		expect(result.statusDefaults).toEqual({ noProject: "Backlog" });
 		expect(result.terms).toEqual([{ canonical: "Acme", reject: ["acme"] }]);
+		expect(result.cacheTTLSeconds).toBe(1800);
 	});
 
 	it("default labels: change to a new csv list", async () => {
 		vi.mocked(confirm)
 			.mockResolvedValueOnce(true) // edit labels
+			.mockResolvedValueOnce(false) // skip assignee
+			.mockResolvedValueOnce(false) // skip priority
 			.mockResolvedValueOnce(false) // skip status
+			.mockResolvedValueOnce(false) // skip cache TTL
 			.mockResolvedValueOnce(false); // skip terms
 		vi.mocked(input).mockResolvedValueOnce("claude, automation, bot");
 
@@ -583,9 +610,12 @@ describe("runDefaultsStep — every config key", () => {
 
 	it("default labels: blank input clears them (undefined)", async () => {
 		vi.mocked(confirm)
-			.mockResolvedValueOnce(true)
-			.mockResolvedValueOnce(false)
-			.mockResolvedValueOnce(false);
+			.mockResolvedValueOnce(true) // edit labels
+			.mockResolvedValueOnce(false) // skip assignee
+			.mockResolvedValueOnce(false) // skip priority
+			.mockResolvedValueOnce(false) // skip status
+			.mockResolvedValueOnce(false) // skip cache TTL
+			.mockResolvedValueOnce(false); // skip terms
 		vi.mocked(input).mockResolvedValueOnce("");
 
 		const result = await runDefaultsStep({ defaultLabels: ["old"] });
@@ -594,9 +624,12 @@ describe("runDefaultsStep — every config key", () => {
 
 	it("status defaults: writes both noProject and withAssigneeAndProject", async () => {
 		vi.mocked(confirm)
-			.mockResolvedValueOnce(false)
+			.mockResolvedValueOnce(false) // labels
+			.mockResolvedValueOnce(false) // assignee
+			.mockResolvedValueOnce(false) // priority
 			.mockResolvedValueOnce(true) // edit status
-			.mockResolvedValueOnce(false);
+			.mockResolvedValueOnce(false) // cache TTL
+			.mockResolvedValueOnce(false); // terms
 		vi.mocked(input)
 			.mockResolvedValueOnce("Backlog")
 			.mockResolvedValueOnce("In Progress");
@@ -610,8 +643,11 @@ describe("runDefaultsStep — every config key", () => {
 
 	it("term enforcement: adds a single rule (initial setup)", async () => {
 		vi.mocked(confirm)
-			.mockResolvedValueOnce(false)
-			.mockResolvedValueOnce(false)
+			.mockResolvedValueOnce(false) // labels
+			.mockResolvedValueOnce(false) // assignee
+			.mockResolvedValueOnce(false) // priority
+			.mockResolvedValueOnce(false) // status
+			.mockResolvedValueOnce(false) // cache TTL
 			.mockResolvedValueOnce(true); // edit terms
 		vi.mocked(input)
 			.mockResolvedValueOnce("Enrich Layer")
@@ -629,8 +665,11 @@ describe("runDefaultsStep — every config key", () => {
 			terms: [{ canonical: "Acme", reject: ["acme"] }],
 		};
 		vi.mocked(confirm)
-			.mockResolvedValueOnce(false)
-			.mockResolvedValueOnce(false)
+			.mockResolvedValueOnce(false) // labels
+			.mockResolvedValueOnce(false) // assignee
+			.mockResolvedValueOnce(false) // priority
+			.mockResolvedValueOnce(false) // status
+			.mockResolvedValueOnce(false) // cache TTL
 			.mockResolvedValueOnce(true) // edit terms
 			.mockResolvedValueOnce(false); // append (don't replace)
 		vi.mocked(input)
@@ -653,9 +692,12 @@ describe("runDefaultsStep — every config key", () => {
 			],
 		};
 		vi.mocked(confirm)
-			.mockResolvedValueOnce(false)
-			.mockResolvedValueOnce(false)
-			.mockResolvedValueOnce(true)
+			.mockResolvedValueOnce(false) // labels
+			.mockResolvedValueOnce(false) // assignee
+			.mockResolvedValueOnce(false) // priority
+			.mockResolvedValueOnce(false) // status
+			.mockResolvedValueOnce(false) // cache TTL
+			.mockResolvedValueOnce(true) // edit terms
 			.mockResolvedValueOnce(true); // replace
 		vi.mocked(input)
 			.mockResolvedValueOnce("New")
@@ -670,9 +712,12 @@ describe("runDefaultsStep — every config key", () => {
 
 	it("term enforcement: skips a rule when no variants are provided", async () => {
 		vi.mocked(confirm)
-			.mockResolvedValueOnce(false)
-			.mockResolvedValueOnce(false)
-			.mockResolvedValueOnce(true);
+			.mockResolvedValueOnce(false) // labels
+			.mockResolvedValueOnce(false) // assignee
+			.mockResolvedValueOnce(false) // priority
+			.mockResolvedValueOnce(false) // status
+			.mockResolvedValueOnce(false) // cache TTL
+			.mockResolvedValueOnce(true); // edit terms
 		vi.mocked(input)
 			.mockResolvedValueOnce("Foo")
 			.mockResolvedValueOnce("") // no rejects → skip
@@ -684,9 +729,12 @@ describe("runDefaultsStep — every config key", () => {
 
 	it("status defaults trim whitespace from inputs", async () => {
 		vi.mocked(confirm)
-			.mockResolvedValueOnce(false)
-			.mockResolvedValueOnce(true)
-			.mockResolvedValueOnce(false);
+			.mockResolvedValueOnce(false) // labels
+			.mockResolvedValueOnce(false) // assignee
+			.mockResolvedValueOnce(false) // priority
+			.mockResolvedValueOnce(true) // edit status
+			.mockResolvedValueOnce(false) // cache TTL
+			.mockResolvedValueOnce(false); // terms
 		vi.mocked(input)
 			.mockResolvedValueOnce("  Backlog  ")
 			.mockResolvedValueOnce(" In Progress ");
@@ -694,6 +742,122 @@ describe("runDefaultsStep — every config key", () => {
 		const result = await runDefaultsStep({});
 		expect(result.statusDefaults?.noProject).toBe("Backlog");
 		expect(result.statusDefaults?.withAssigneeAndProject).toBe("In Progress");
+	});
+
+	it("default assignee: set to a new value", async () => {
+		vi.mocked(confirm)
+			.mockResolvedValueOnce(false) // labels
+			.mockResolvedValueOnce(true) // edit assignee
+			.mockResolvedValueOnce(false) // priority
+			.mockResolvedValueOnce(false) // status
+			.mockResolvedValueOnce(false) // cache TTL
+			.mockResolvedValueOnce(false); // terms
+		vi.mocked(input).mockResolvedValueOnce("alice");
+
+		const result = await runDefaultsStep({});
+		expect(result.defaultAssignee).toBe("alice");
+	});
+
+	it("default assignee: typing 'none' clears the field", async () => {
+		vi.mocked(confirm)
+			.mockResolvedValueOnce(false) // labels
+			.mockResolvedValueOnce(true) // edit assignee
+			.mockResolvedValueOnce(false) // priority
+			.mockResolvedValueOnce(false) // status
+			.mockResolvedValueOnce(false) // cache TTL
+			.mockResolvedValueOnce(false); // terms
+		vi.mocked(input).mockResolvedValueOnce("none");
+
+		const result = await runDefaultsStep({ defaultAssignee: "alice" });
+		expect(result.defaultAssignee).toBeUndefined();
+	});
+
+	it("default assignee: blank input also clears the field", async () => {
+		vi.mocked(confirm)
+			.mockResolvedValueOnce(false)
+			.mockResolvedValueOnce(true)
+			.mockResolvedValueOnce(false)
+			.mockResolvedValueOnce(false)
+			.mockResolvedValueOnce(false)
+			.mockResolvedValueOnce(false);
+		vi.mocked(input).mockResolvedValueOnce("");
+
+		const result = await runDefaultsStep({ defaultAssignee: "alice" });
+		expect(result.defaultAssignee).toBeUndefined();
+	});
+
+	it("default priority: pick 'high' from the select prompt", async () => {
+		vi.mocked(confirm)
+			.mockResolvedValueOnce(false) // labels
+			.mockResolvedValueOnce(false) // assignee
+			.mockResolvedValueOnce(true) // edit priority
+			.mockResolvedValueOnce(false) // status
+			.mockResolvedValueOnce(false) // cache TTL
+			.mockResolvedValueOnce(false); // terms
+		vi.mocked(select).mockResolvedValueOnce("high");
+
+		const result = await runDefaultsStep({});
+		expect(result.defaultPriority).toBe("high");
+	});
+
+	it("cache TTL: change to 7200 seconds", async () => {
+		vi.mocked(confirm)
+			.mockResolvedValueOnce(false) // labels
+			.mockResolvedValueOnce(false) // assignee
+			.mockResolvedValueOnce(false) // priority
+			.mockResolvedValueOnce(false) // status
+			.mockResolvedValueOnce(true) // edit cache TTL
+			.mockResolvedValueOnce(false); // terms
+		vi.mocked(input).mockResolvedValueOnce("7200");
+
+		const result = await runDefaultsStep({});
+		expect(result.cacheTTLSeconds).toBe(7200);
+	});
+
+	it("cache TTL: 0 explicitly disables the cache", async () => {
+		vi.mocked(confirm)
+			.mockResolvedValueOnce(false)
+			.mockResolvedValueOnce(false)
+			.mockResolvedValueOnce(false)
+			.mockResolvedValueOnce(false)
+			.mockResolvedValueOnce(true)
+			.mockResolvedValueOnce(false);
+		vi.mocked(input).mockResolvedValueOnce("0");
+
+		const result = await runDefaultsStep({});
+		expect(result.cacheTTLSeconds).toBe(0);
+	});
+
+	it("cache TTL: validator rejects non-integer / negative input", async () => {
+		// Capture the `validate` callback inquirer received so we can exercise
+		// it directly. Each call to `input()` is given an options bag that
+		// includes the validate function (or undefined when none is wired).
+		let validate: ((value: string) => string | true) | undefined;
+		vi.mocked(input).mockImplementationOnce(
+			async (opts: { validate?: (value: string) => string | true }) => {
+				validate = opts.validate;
+				return "3600";
+			},
+		);
+		vi.mocked(confirm)
+			.mockResolvedValueOnce(false) // labels
+			.mockResolvedValueOnce(false) // assignee
+			.mockResolvedValueOnce(false) // priority
+			.mockResolvedValueOnce(false) // status
+			.mockResolvedValueOnce(true) // edit cache TTL
+			.mockResolvedValueOnce(false); // terms
+
+		await runDefaultsStep({});
+
+		expect(validate).toBeDefined();
+		// Good inputs.
+		expect(validate?.("0")).toBe(true);
+		expect(validate?.("3600")).toBe(true);
+		// Bad inputs all return a non-empty error string.
+		expect(typeof validate?.("abc")).toBe("string");
+		expect(typeof validate?.("-1")).toBe("string");
+		expect(typeof validate?.("1.5")).toBe("string");
+		expect(typeof validate?.("")).toBe("string");
 	});
 });
 
@@ -729,26 +893,36 @@ describe("full wizard round-trip", () => {
 		vi.mocked(select).mockResolvedValueOnce("keep"); // Bob
 		const aliasUpdates = await runAliasesStep(tokenRes.token, {});
 
-		// 4. Defaults.
+		// 4. Defaults — exercise every new sub-prompt in addition to the
+		//    pre-existing ones.
 		vi.mocked(confirm)
 			.mockResolvedValueOnce(true) // labels
+			.mockResolvedValueOnce(true) // assignee
+			.mockResolvedValueOnce(true) // priority
 			.mockResolvedValueOnce(true) // status
+			.mockResolvedValueOnce(true) // cache TTL
 			.mockResolvedValueOnce(true); // terms (add)
 		vi.mocked(input)
 			.mockResolvedValueOnce("claude, automation")
+			.mockResolvedValueOnce("alice")
 			.mockResolvedValueOnce("Backlog")
 			.mockResolvedValueOnce("Todo")
+			.mockResolvedValueOnce("7200")
 			.mockResolvedValueOnce("Acme")
 			.mockResolvedValueOnce("acme")
 			.mockResolvedValueOnce("");
+		vi.mocked(select).mockResolvedValueOnce("medium"); // priority pick
 		const defaults = await runDefaultsStep({});
 
 		// Compose & write.
 		const existing = await readConfig();
 		let merged = assignDefined(existing, {
 			defaultLabels: defaults.defaultLabels,
+			defaultAssignee: defaults.defaultAssignee,
+			defaultPriority: defaults.defaultPriority,
 			statusDefaults: defaults.statusDefaults,
 			terms: defaults.terms,
+			cacheTTLSeconds: defaults.cacheTTLSeconds,
 			defaultTeam: ws.defaultTeam,
 			teams: { ...(existing.teams ?? {}), ...ws.teams },
 			workspaceUrlKey: existing.workspaceUrlKey ?? ws.workspaceUrlKey,
@@ -764,10 +938,13 @@ describe("full wizard round-trip", () => {
 		});
 		expect(onDisk.workspaceUrlKey).toBe("acme");
 		expect(onDisk.defaultLabels).toEqual(["claude", "automation"]);
+		expect(onDisk.defaultAssignee).toBe("alice");
+		expect(onDisk.defaultPriority).toBe("medium");
 		expect(onDisk.statusDefaults).toEqual({
 			noProject: "Backlog",
 			withAssigneeAndProject: "Todo",
 		});
+		expect(onDisk.cacheTTLSeconds).toBe(7200);
 		expect(onDisk.terms).toEqual([{ canonical: "Acme", reject: ["acme"] }]);
 		expect(onDisk.members?.aliases).toEqual({ ali: "Alice Anderson" });
 		expect(onDisk.members?.handles?.github).toEqual({
@@ -795,7 +972,10 @@ describe("full wizard round-trip", () => {
 		vi.mocked(confirm)
 			.mockResolvedValueOnce(false) // workspace
 			.mockResolvedValueOnce(false) // labels
+			.mockResolvedValueOnce(false) // assignee
+			.mockResolvedValueOnce(false) // priority
 			.mockResolvedValueOnce(false) // status
+			.mockResolvedValueOnce(false) // cache TTL
 			.mockResolvedValueOnce(false); // terms
 
 		const existing = await readConfig();
@@ -804,8 +984,11 @@ describe("full wizard round-trip", () => {
 
 		const merged = assignDefined(existing, {
 			defaultLabels: defaults.defaultLabels,
+			defaultAssignee: defaults.defaultAssignee,
+			defaultPriority: defaults.defaultPriority,
 			statusDefaults: defaults.statusDefaults,
 			terms: defaults.terms,
+			cacheTTLSeconds: defaults.cacheTTLSeconds,
 			defaultTeam: ws.defaultTeam,
 			teams: { ...(existing.teams ?? {}), ...ws.teams },
 			workspaceUrlKey: existing.workspaceUrlKey ?? ws.workspaceUrlKey,

@@ -190,7 +190,9 @@ export function setupInitCommands(program: Command): void {
 
 	init
 		.command("defaults")
-		.description("Default labels, status defaults, term enforcement rules")
+		.description(
+			"Default labels, default assignee, default priority, status defaults, cache TTL, term enforcement",
+		)
 		.action(
 			withCleanExit(async () => {
 				const existing = await readConfig();
@@ -198,8 +200,11 @@ export function setupInitCommands(program: Command): void {
 				const result = await runDefaultsStep(existing);
 				const merged: WizardConfig = assignDefined(existing, {
 					defaultLabels: result.defaultLabels,
+					defaultAssignee: result.defaultAssignee,
+					defaultPriority: result.defaultPriority,
 					statusDefaults: result.statusDefaults,
 					terms: result.terms,
+					cacheTTLSeconds: result.cacheTTLSeconds,
 				});
 				await writeConfig(merged);
 				console.log("  ✓ Defaults saved.");
@@ -256,8 +261,11 @@ async function runFullWizardImpl(options: { force: boolean }): Promise<void> {
 		// defaults step: result is `existing.X` itself when the user skipped
 		// the edit branch, so direct assignment is safe.
 		defaultLabels: defaults.defaultLabels,
+		defaultAssignee: defaults.defaultAssignee,
+		defaultPriority: defaults.defaultPriority,
 		statusDefaults: defaults.statusDefaults,
 		terms: defaults.terms,
+		cacheTTLSeconds: defaults.cacheTTLSeconds,
 		// workspace step: `ws.defaultTeam` may be the existing value (user
 		// skipped) or a new pick.
 		defaultTeam: ws.defaultTeam,

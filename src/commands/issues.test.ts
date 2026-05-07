@@ -466,6 +466,281 @@ describe("issues commands", () => {
 		});
 	});
 
+	describe("issues create — defaultAssignee fallback", () => {
+		// Required project for validation; assignee is what we're testing.
+		const projectArg = ["--project", "Infrastructure"];
+
+		it("uses --assignee when explicitly passed (config default ignored)", async () => {
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				defaultAssignee: "carol",
+			});
+			mockCreateIssue.mockResolvedValue({ id: "id", identifier: "DEV-1" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Task",
+				"--team",
+				"DEV",
+				"--assignee",
+				"alice",
+				...projectArg,
+			]);
+
+			expect(mockResolveAssignee).toHaveBeenCalledWith(
+				"alice",
+				expect.any(Object),
+			);
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ assigneeId: "member-id-alice" }),
+			);
+		});
+
+		it("falls back to config.defaultAssignee when --assignee is omitted", async () => {
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				defaultAssignee: "carol",
+			});
+			mockCreateIssue.mockResolvedValue({ id: "id", identifier: "DEV-1" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Task",
+				"--team",
+				"DEV",
+				...projectArg,
+			]);
+
+			expect(mockResolveAssignee).toHaveBeenCalledWith(
+				"carol",
+				expect.any(Object),
+			);
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ assigneeId: "member-id-carol" }),
+			);
+		});
+
+		it("--no-assignee skips both flag and config default", async () => {
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				defaultAssignee: "carol",
+			});
+			mockCreateIssue.mockResolvedValue({ id: "id", identifier: "DEV-1" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Task",
+				"--team",
+				"DEV",
+				"--no-assignee",
+				...projectArg,
+			]);
+
+			expect(mockResolveAssignee).not.toHaveBeenCalled();
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ assigneeId: undefined }),
+			);
+		});
+
+		it("no flag and no config default → unassigned", async () => {
+			// Validation off in baseConfig, so no assignee is allowed.
+			mockCreateIssue.mockResolvedValue({ id: "id", identifier: "DEV-1" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Task",
+				"--team",
+				"DEV",
+				...projectArg,
+			]);
+
+			expect(mockResolveAssignee).not.toHaveBeenCalled();
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ assigneeId: undefined }),
+			);
+		});
+	});
+
+	describe("issues create — defaultPriority fallback", () => {
+		const requiredArgs = ["--assignee", "bob", "--project", "Infrastructure"];
+
+		it("uses --priority when passed (config default ignored)", async () => {
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				defaultPriority: "low",
+			});
+			mockCreateIssue.mockResolvedValue({ id: "id", identifier: "DEV-1" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Task",
+				"--team",
+				"DEV",
+				"--priority",
+				"urgent",
+				...requiredArgs,
+			]);
+
+			// urgent → 1
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ priority: 1 }),
+			);
+		});
+
+		it("falls back to config.defaultPriority when --priority is omitted", async () => {
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				defaultPriority: "high",
+			});
+			mockCreateIssue.mockResolvedValue({ id: "id", identifier: "DEV-1" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Task",
+				"--team",
+				"DEV",
+				...requiredArgs,
+			]);
+
+			// high → 2
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ priority: 2 }),
+			);
+		});
+
+		it("no flag and no config default → priority undefined", async () => {
+			mockCreateIssue.mockResolvedValue({ id: "id", identifier: "DEV-1" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Task",
+				"--team",
+				"DEV",
+				...requiredArgs,
+			]);
+
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ priority: undefined }),
+			);
+		});
+
+		it("config.defaultPriority='none' resolves to 0", async () => {
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				defaultPriority: "none",
+			});
+			mockCreateIssue.mockResolvedValue({ id: "id", identifier: "DEV-1" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Task",
+				"--team",
+				"DEV",
+				...requiredArgs,
+			]);
+
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ priority: 0 }),
+			);
+		});
+	});
+
+	describe("issues update — defaultPriority fallback", () => {
+		it("uses --priority when passed", async () => {
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				defaultPriority: "low",
+			});
+			mockLinearService.resolveIssueId.mockResolvedValue("uuid-1");
+			mockUpdateIssue.mockResolvedValue({ id: "uuid-1", identifier: "DEV-1" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"update",
+				"DEV-1",
+				"--priority",
+				"urgent",
+			]);
+
+			// urgent → 1
+			expect(mockUpdateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ priority: 1 }),
+				"adding",
+			);
+		});
+
+		it("falls back to config.defaultPriority when --priority is omitted", async () => {
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				defaultPriority: "medium",
+			});
+			mockLinearService.resolveIssueId.mockResolvedValue("uuid-1");
+			mockUpdateIssue.mockResolvedValue({ id: "uuid-1", identifier: "DEV-1" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"update",
+				"DEV-1",
+				"--title",
+				"new title",
+			]);
+
+			// medium → 3
+			expect(mockUpdateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ priority: 3 }),
+				"adding",
+			);
+		});
+
+		it("no flag, no config default → priority undefined", async () => {
+			mockLinearService.resolveIssueId.mockResolvedValue("uuid-1");
+			mockUpdateIssue.mockResolvedValue({ id: "uuid-1", identifier: "DEV-1" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"update",
+				"DEV-1",
+				"--title",
+				"new title",
+			]);
+
+			expect(mockUpdateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ priority: undefined }),
+				"adding",
+			);
+		});
+	});
+
 	describe("issues create — --template + --footer", () => {
 		const requiredArgs = ["--assignee", "bob", "--project", "Infrastructure"];
 

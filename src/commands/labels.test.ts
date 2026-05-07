@@ -35,6 +35,17 @@ vi.mock("../config/resolver.js", () => ({
 	resolveTeam: mockResolveTeam,
 }));
 
+// Pass-through cache; cache semantics covered in disk-cache.test.ts.
+vi.mock("../utils/disk-cache.js", () => ({
+	cached: <T>(_key: string, _ttl: number, fetcher: () => Promise<T>) =>
+		fetcher(),
+	resolveCacheTTL: () => 0,
+}));
+
+vi.mock("../config/config.js", () => ({
+	loadConfig: () => ({}),
+}));
+
 const { setupLabelsCommands } = await import("./labels.js");
 
 describe("labels", () => {
