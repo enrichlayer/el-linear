@@ -6,6 +6,54 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.6.0] — 2026-05-08
+
+This release completes OAuth 2.0 coverage across every CLI command and adds
+two issue-authoring conveniences.
+
+### OAuth completion
+
+In 1.5.0 OAuth was wired into `init oauth` + storage + the `GraphQLService` /
+`LinearService` constructors, but command call sites still resolved through
+the personal-token-only `getApiToken()`. Two follow-ups landed:
+
+- **Every command now uses the OAuth-aware resolver.** `createGraphQLService`
+  and `createLinearService` are now async and dispatch through
+  `getActiveAuth()`, which auto-refreshes near-expiry OAuth tokens. ~85 call
+  sites migrated; the `--api-token` / `LINEAR_API_TOKEN` overrides keep
+  working at the same precedence as before.
+- **`FileService` now supports OAuth too.** `attachments create`,
+  `embeds upload/download`, `issues create --attachment`, and the image-inlining
+  in `issues read` / `read-shortcut` all worked under personal tokens but
+  silently 401'd for OAuth users because `FileService` sent
+  `Authorization: <token>` (no Bearer prefix). Now it accepts the same
+  discriminated-union as the other services and sends the right header
+  shape per credential kind.
+
+### Added
+
+- **`config.messageFooter` + `--footer` / `--no-footer` flags.** Text appended
+  to issue descriptions on `el-linear issues create` and to comment bodies on
+  `el-linear comments create`. Treat the value as a literal string — include
+  any `\n\n---\n` separator yourself if you want a horizontal rule. The
+  `--footer "..."` flag overrides the configured value for one invocation;
+  `--no-footer` skips both flag and config.
+- **`config.descriptionTemplates` + `--template <name>` flag.** Named
+  description boilerplates for `el-linear issues create`. When `--template
+  bug` is passed and neither `--description` nor `--description-file` is
+  set, the template body is used as the description. Combining `--template`
+  with an explicit description is a usage error (we throw rather than
+  silently dropping one).
+
+### Changed
+
+- **`--priority none` now works** on `issues create` / `issues update`.
+  Previously the keyword was rejected for create/update even though `0`
+  ("No priority") is a real Linear state. `validatePriority` now accepts
+  the full keyword set the filter parser already supported:
+  `none`/`urgent`/`high`/`medium`/`normal`/`low` and numbers `0`–`4`. The
+  `--priority` help text on every subcommand was updated to match.
+
 ## [1.5.0] — 2026-05-07
 
 Two unrelated additions this release: OAuth 2.0 authentication, and a
@@ -198,7 +246,8 @@ sed -i.bak 's/\bel-linear\b/linctl/g' your-scripts.sh
 The legacy `brand` config block is auto-migrated to `terms[]` on first run.
 
 
-[Unreleased]: https://github.com/enrichlayer/el-linear/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/enrichlayer/el-linear/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/enrichlayer/el-linear/releases/tag/v1.6.0
 [1.5.0]: https://github.com/enrichlayer/el-linear/releases/tag/v1.5.0
 [1.4.0]: https://github.com/enrichlayer/el-linear/releases/tag/v1.4.0
 [1.3.0]: https://github.com/enrichlayer/el-linear/releases/tag/v1.3.0

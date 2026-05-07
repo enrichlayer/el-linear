@@ -35,6 +35,7 @@ import {
 } from "../utils/auto-link-references.js";
 import { downloadLinearUploads } from "../utils/download-uploads.js";
 import { createFileService } from "../utils/file-service.js";
+import { applyFooter } from "../utils/footer.js";
 import { createGraphQLAttachmentsService } from "../utils/graphql-attachments-service.js";
 import { GraphQLIssuesService } from "../utils/graphql-issues-service.js";
 import {
@@ -126,14 +127,48 @@ function readDescriptionFile(filePath: string): string {
 }
 
 /**
- * Resolve the description from --description, --description-file, or both.
- * --description-file takes precedence when both are provided.
+ * Resolve the description from --description, --description-file, or
+ * --template (looked up in `config.descriptionTemplates`).
+ *
+ * Precedence:
+ *   --description-file > --description > --template
+ *
+ * Passing --template alongside --description or --description-file is a
+ * usage error — the explicit body and a template both producing content
+ * would be silently dropping one. We throw so the user picks one.
  */
 function resolveDescription(options: OptionValues): string | undefined {
-	if (options.descriptionFile) {
-		return readDescriptionFile(options.descriptionFile);
+	const hasInline =
+		typeof options.description === "string" && options.description.length > 0;
+	const hasFile = Boolean(options.descriptionFile);
+	const hasTemplate = typeof options.template === "string" && options.template;
+
+	if (hasTemplate && (hasInline || hasFile)) {
+		throw new Error(
+			"--template is mutually exclusive with --description / --description-file. " +
+				"Pick one.",
+		);
 	}
-	return options.description;
+
+	if (hasFile) {
+		return readDescriptionFile(options.descriptionFile as string);
+	}
+	if (hasInline) {
+		return options.description as string;
+	}
+	if (hasTemplate) {
+		const templates = loadConfig().descriptionTemplates ?? {};
+		const body = templates[options.template as string];
+		if (!body) {
+			const available = Object.keys(templates).sort();
+			const hint = available.length
+				? `Available templates: ${available.join(", ")}`
+				: "No templates configured. Add one under `descriptionTemplates` in your config.";
+			throw new Error(`Template "${options.template}" not found. ${hint}`);
+		}
+		return body;
+	}
+	return undefined;
 }
 
 function isImageFile(filename: string): boolean {
@@ -639,10 +674,21 @@ async function handleCreateIssue(
 		await resolveCreateInputs(title, options, rootOpts);
 
 	const uploadResults = await uploadAttachmentsIfNeeded(options, rootOpts);
-	const description = buildDescriptionWithAttachments(
+	const descriptionWithAttachments = buildDescriptionWithAttachments(
 		resolveDescription(options) || "",
 		uploadResults,
 	);
+	// Append messageFooter (config or --footer flag) so auto-link picks up any
+	// issue refs in the footer too. --no-footer skips both flag and config.
+	// Commander parses --no-footer as `options.footer === false`.
+	const noFooter = options.footer === false;
+	const explicitFooter =
+		typeof options.footer === "string" ? options.footer : undefined;
+	const description =
+		applyFooter(descriptionWithAttachments, {
+			footer: explicitFooter,
+			noFooter,
+		}) ?? "";
 
 	const graphQLService = await createGraphQLService(rootOpts);
 	const linearService = await createLinearService(rootOpts);
@@ -1502,12 +1548,16 @@ export function setupIssuesCommands(program: Command): void {
 			"read description from file (use - for stdin)",
 		)
 		.option(
+			"--template <name>",
+			"use a named description template from config.descriptionTemplates",
+		)
+		.option(
 			"-a, --assignee <assignee>",
 			"assign to user (name, alias, or UUID)",
 		)
 		.option(
 			"-p, --priority <priority>",
-			"priority: name (urgent/high/medium/low) or number (1-4)",
+			"priority: name (none/urgent/high/medium/normal/low) or number (0-4)",
 		)
 		.option("--project <project>", "add to project (name or ID)")
 		.option("--team <team>", "team key or name (default: from config)")
@@ -1557,6 +1607,11 @@ export function setupIssuesCommands(program: Command): void {
 			"--no-auto-link",
 			"skip auto-linking issue references found in the description",
 		)
+		.option(
+			"--footer <text>",
+			"text appended to the description (overrides config.messageFooter)",
+		)
+		.option("--no-footer", "skip the configured messageFooter for this issue")
 		.action(
 			handleAsyncCommand(
 				(
@@ -1614,7 +1669,7 @@ export function setupIssuesCommands(program: Command): void {
 		.option("--state <status>", "alias for --status (new status name or ID)")
 		.option(
 			"-p, --priority <priority>",
-			"new priority: name (urgent/high/medium/low) or number (1-4)",
+			"new priority: name (none/urgent/high/medium/normal/low) or number (0-4)",
 		)
 		.option("--assignee <assignee>", "new assignee (name, alias, or UUID)")
 		.option("--project <project>", "new project (name or ID)")

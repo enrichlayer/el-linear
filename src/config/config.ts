@@ -43,6 +43,24 @@ export interface ElLinearConfig {
 	 * once per session and caches the result.
 	 */
 	workspaceUrlKey?: string;
+	/**
+	 * Text appended to issue descriptions and comment bodies on the `create`
+	 * paths. Treated as a literal string — include any `\n\n---\n` separator
+	 * yourself if you want a horizontal rule. CLI flags `--footer <text>` and
+	 * `--no-footer` override this per-invocation.
+	 */
+	messageFooter?: string;
+	/**
+	 * Named description boilerplates for `el-linear issues create --template <name>`.
+	 * The template's value is used as the description body when `--template` is
+	 * provided and neither `--description` nor `--description-file` is set.
+	 *
+	 * Example:
+	 *   "descriptionTemplates": {
+	 *     "bug": "## Steps to reproduce\n\n1. ...\n\n## Expected\n\n...\n\n## Actual\n\n..."
+	 *   }
+	 */
+	descriptionTemplates?: Record<string, string>;
 }
 
 const DEFAULT_CONFIG: ElLinearConfig = {

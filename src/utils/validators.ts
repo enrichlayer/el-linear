@@ -14,16 +14,23 @@ export function parsePositiveInt(value: string, flagName: string): number {
 	return n;
 }
 
+/**
+ * Parse a single priority value (for `issues create --priority`, `issues update --priority`).
+ *
+ * Accepts:
+ *   - keywords:  none | urgent | high | medium | normal | low
+ *   - numbers:   0 (no priority), 1 (urgent), 2 (high), 3 (medium), 4 (low)
+ */
 export function validatePriority(value: string): number {
 	const asName = PRIORITY_NAMES[value.toLowerCase()];
-	if (asName !== undefined && asName >= 1) {
+	if (asName !== undefined) {
 		return asName;
 	}
 	const n = Number.parseInt(value, 10);
-	if (Number.isNaN(n) || n < 1 || n > 4) {
+	if (Number.isNaN(n) || n < 0 || n > 4) {
 		throw invalidParameterError(
 			"--priority",
-			`"${value}" is not valid. Use names (urgent, high, medium/normal, low) or numbers (1-4).`,
+			`"${value}" is not valid. Use names (none, urgent, high, medium/normal, low) or numbers (0-4).`,
 		);
 	}
 	return n;
@@ -63,6 +70,9 @@ export function splitList(value: string): string[] {
 		.filter((s) => s.length > 0);
 }
 
+// Shared keyword → Linear priority number map. `none` and `0` mean "No priority"
+// (Linear stores it as a real state, not absence). `1..4` are the rated priorities,
+// `urgent` (1) being the highest.
 const PRIORITY_NAMES: Record<string, number> = {
 	none: 0,
 	urgent: 1,
@@ -73,20 +83,7 @@ const PRIORITY_NAMES: Record<string, number> = {
 };
 
 export function parsePriorityFilter(value: string): number[] {
-	return splitList(value).map((item) => {
-		const asName = PRIORITY_NAMES[item.toLowerCase()];
-		if (asName !== undefined) {
-			return asName;
-		}
-		const n = Number.parseInt(item, 10);
-		if (Number.isNaN(n) || n < 0 || n > 4) {
-			throw invalidParameterError(
-				"--priority",
-				`"${item}" is not valid. Use names (urgent, high, medium, low, none) or numbers (0-4).`,
-			);
-		}
-		return n;
-	});
+	return splitList(value).map((item) => validatePriority(item));
 }
 
 export const PRIORITY_LABELS: Record<number, string> = {
