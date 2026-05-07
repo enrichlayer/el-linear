@@ -3,6 +3,7 @@ import { createGraphQLAttachmentsService } from "../utils/graphql-attachments-se
 import { createGraphQLDocumentsService } from "../utils/graphql-documents-service.js";
 import { createLinearService } from "../utils/linear-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
+import { getRootOpts } from "../utils/root-opts.js";
 
 function extractDocumentIdFromUrl(url: string): string | null {
 	try {
@@ -30,9 +31,9 @@ async function handleCreateDocument(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	const rootOpts = command.parent!.parent!.opts();
-	const documentsService = createGraphQLDocumentsService(rootOpts);
-	const linearService = createLinearService(rootOpts);
+	const rootOpts = getRootOpts(command);
+	const documentsService = await createGraphQLDocumentsService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
 
 	const document = await documentsService.createDocument({
 		title: options.title,
@@ -51,7 +52,7 @@ async function handleCreateDocument(
 	});
 
 	if (options.attachTo) {
-		const attachmentsService = createGraphQLAttachmentsService(rootOpts);
+		const attachmentsService = await createGraphQLAttachmentsService(rootOpts);
 		const issueId = await linearService.resolveIssueId(options.attachTo);
 		try {
 			await attachmentsService.createAttachment({
@@ -83,9 +84,9 @@ async function handleListDocuments(
 		);
 	}
 
-	const rootOpts = command.parent!.parent!.opts();
-	const documentsService = createGraphQLDocumentsService(rootOpts);
-	const linearService = createLinearService(rootOpts);
+	const rootOpts = getRootOpts(command);
+	const documentsService = await createGraphQLDocumentsService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
 	const limit = Number.parseInt(options.limit || "50", 10);
 	if (Number.isNaN(limit) || limit < 1) {
 		throw new Error(
@@ -94,7 +95,7 @@ async function handleListDocuments(
 	}
 
 	if (options.issue) {
-		const attachmentsService = createGraphQLAttachmentsService(rootOpts);
+		const attachmentsService = await createGraphQLAttachmentsService(rootOpts);
 		const issueId = await linearService.resolveIssueId(options.issue);
 		const attachments = await attachmentsService.listAttachments(issueId);
 		const documentSlugIds = [
@@ -163,9 +164,10 @@ export function setupDocumentsCommands(program: Command): void {
 		.action(
 			handleAsyncCommand(
 				async (documentId: string, options: OptionValues, command: Command) => {
-					const rootOpts = command.parent!.parent!.opts();
-					const documentsService = createGraphQLDocumentsService(rootOpts);
-					const linearService = createLinearService(rootOpts);
+					const rootOpts = getRootOpts(command);
+					const documentsService =
+						await createGraphQLDocumentsService(rootOpts);
+					const linearService = await createLinearService(rootOpts);
 					const input: Record<string, unknown> = {};
 					if (options.title) {
 						input.title = options.title;
@@ -201,12 +203,10 @@ export function setupDocumentsCommands(program: Command): void {
 					_options: OptionValues,
 					command: Command,
 				) => {
-					const rootOpts = command.parent!.parent!.opts();
-					outputSuccess(
-						await createGraphQLDocumentsService(rootOpts).getDocument(
-							documentId,
-						),
-					);
+					const rootOpts = getRootOpts(command);
+					const documentsService =
+						await createGraphQLDocumentsService(rootOpts);
+					outputSuccess(await documentsService.getDocument(documentId));
 				},
 			),
 		);
@@ -232,10 +232,10 @@ export function setupDocumentsCommands(program: Command): void {
 					_options: OptionValues,
 					command: Command,
 				) => {
-					const rootOpts = command.parent!.parent!.opts();
-					await createGraphQLDocumentsService(rootOpts).deleteDocument(
-						documentId,
-					);
+					const rootOpts = getRootOpts(command);
+					const documentsService =
+						await createGraphQLDocumentsService(rootOpts);
+					await documentsService.deleteDocument(documentId);
 					outputSuccess({ success: true, message: "Document moved to trash" });
 				},
 			),

@@ -34,7 +34,6 @@ vi.mock("@inquirer/prompts", () => ({
 
 vi.mock("../../utils/graphql-service.js", () => ({
 	GraphQLService: class {
-		// biome-ignore lint/suspicious/noExplicitAny: test stub
 		rawRequest: (...args: unknown[]) => Promise<any> = (...args) =>
 			mockRawRequest(...args);
 	},

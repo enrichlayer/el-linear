@@ -54,6 +54,7 @@ import {
 	outputSuccess,
 	outputWarning,
 } from "../utils/output.js";
+import { getRootOpts } from "../utils/root-opts.js";
 import {
 	formatCsv,
 	formatMarkdown,
@@ -427,9 +428,9 @@ async function handleListIssues(
 	if (options.label && !options.labels) {
 		options.labels = options.label;
 	}
-	const rootOpts = command.parent!.parent!.opts();
-	const graphQLService = createGraphQLService(rootOpts);
-	const linearService = createLinearService(rootOpts);
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
 	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
 
 	const hasFilters =
@@ -480,9 +481,9 @@ async function handleSearchIssues(
 	if (options.label && !options.labels) {
 		options.labels = options.label;
 	}
-	const rootOpts = command.parent!.parent!.opts();
-	const graphQLService = createGraphQLService(rootOpts);
-	const linearService = createLinearService(rootOpts);
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
 	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
 
 	const searchArgs: Record<string, unknown> = {
@@ -635,7 +636,7 @@ async function handleCreateIssue(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	const rootOpts = command.parent!.parent!.opts();
+	const rootOpts = getRootOpts(command);
 	const { teamInput, teamId, assigneeId, labelIds, status, subscriberIds } =
 		await resolveCreateInputs(title, options, rootOpts);
 
@@ -645,8 +646,8 @@ async function handleCreateIssue(
 		uploadResults,
 	);
 
-	const graphQLService = createGraphQLService(rootOpts);
-	const linearService = createLinearService(rootOpts);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
 	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
 
 	// Wrap valid issue identifiers as markdown links before creating, so the description
@@ -699,7 +700,7 @@ async function handleCreateIssue(
 	// so only create separate attachment records for non-image files.
 	const attachments: LinearAttachment[] = [];
 	if (uploadResults.length > 0) {
-		const attachmentsService = createGraphQLAttachmentsService(rootOpts);
+		const attachmentsService = await createGraphQLAttachmentsService(rootOpts);
 		for (const uploadResult of uploadResults) {
 			if (!isImageFile(uploadResult.filename)) {
 				const attachment = await attachmentsService.createAttachment({
@@ -737,9 +738,9 @@ async function handleHistoryIssue(
 	_options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	const rootOpts = command.parent!.parent!.opts();
-	const graphQLService = createGraphQLService(rootOpts);
-	const linearService = createLinearService(rootOpts);
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
 
 	const resolvedId = await linearService.resolveIssueId(issueId);
 	const result = await graphQLService.rawRequest(
@@ -781,9 +782,9 @@ async function handleRelateIssue(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	const rootOpts = command.parent!.parent!.opts();
-	const graphQLService = createGraphQLService(rootOpts);
-	const linearService = createLinearService(rootOpts);
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
 
 	const sourceId = await linearService.resolveIssueId(issueId);
 	const relations = await createRelations(
@@ -894,9 +895,9 @@ async function handleRelatedIssues(
 	_options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	const rootOpts = command.parent!.parent!.opts();
-	const graphQLService = createGraphQLService(rootOpts);
-	const linearService = createLinearService(rootOpts);
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
 
 	const resolvedId = await linearService.resolveIssueId(issueId);
 	const result = await graphQLService.rawRequest(GET_ISSUE_RELATIONS_QUERY, {
@@ -1188,14 +1189,14 @@ async function handleLinkReferencesBatch(
 	});
 }
 
-function handleLinkReferencesIssue(
+async function handleLinkReferencesIssue(
 	issueIdOrTeamFlag: string | undefined,
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	const rootOpts = command.parent!.parent!.opts();
-	const graphQLService = createGraphQLService(rootOpts);
-	const linearService = createLinearService(rootOpts);
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
 
 	if (options.team) {
 		if (issueIdOrTeamFlag) {
@@ -1234,9 +1235,9 @@ async function handleReadIssue(
 	_options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	const rootOpts = command.parent!.parent!.opts();
-	const graphQLService = createGraphQLService(rootOpts);
-	const linearService = createLinearService(rootOpts);
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
 	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
 	const apiToken = getApiToken(rootOpts);
 	if (issueIds.length === 1) {
@@ -1271,9 +1272,9 @@ async function handleUpdateIssue(
 		options.description = readDescriptionFile(options.descriptionFile);
 	}
 	validateUpdateOptions(options);
-	const rootOpts = command.parent!.parent!.opts();
-	const graphQLService = createGraphQLService(rootOpts);
-	const linearService = createLinearService(rootOpts);
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
 
 	if (options.appendDescription) {
 		const resolved = await linearService.resolveIssueId(issueId);
@@ -1383,9 +1384,9 @@ async function handleRetrolink(
 			? commits.map((msg: string) => `- ${msg}`).join("\n")
 			: `Retrolinked from branch: ${currentBranch}`;
 
-	const rootOpts = command.parent!.parent!.opts();
-	const graphQLService = createGraphQLService(rootOpts);
-	const linearService = createLinearService(rootOpts);
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
 	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
 
 	let result: LinearIssue;

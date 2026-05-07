@@ -73,9 +73,9 @@ class GraphQLAttachmentsService {
 	}
 }
 
-export function createGraphQLAttachmentsService(
+export async function createGraphQLAttachmentsService(
 	options: AuthOptions,
-): GraphQLAttachmentsService {
-	const graphqlService = createGraphQLService(options);
+): Promise<GraphQLAttachmentsService> {
+	const graphqlService = await createGraphQLService(options);
 	return new GraphQLAttachmentsService(graphqlService);
 }

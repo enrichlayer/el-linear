@@ -3,15 +3,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mockRawRequest = vi.fn();
 
 vi.mock("./graphql-service.js", () => ({
-	createGraphQLService: vi.fn().mockReturnValue({ rawRequest: mockRawRequest }),
+	createGraphQLService: vi
+		.fn()
+		.mockResolvedValue({ rawRequest: mockRawRequest }),
 }));
 
 const { createGraphQLDocumentsService } = await import(
 	"./graphql-documents-service.js"
 );
 
-function createService() {
-	return createGraphQLDocumentsService({ apiToken: "test-token" });
+async function createService() {
+	return await createGraphQLDocumentsService({ apiToken: "test-token" });
 }
 
 describe("GraphQLDocumentsService", () => {
@@ -21,7 +23,7 @@ describe("GraphQLDocumentsService", () => {
 
 	describe("transformDocument", () => {
 		it("transforms a minimal document", async () => {
-			const service = createService();
+			const service = await createService();
 			mockRawRequest.mockResolvedValue({
 				document: {
 					id: "doc-1",
@@ -38,7 +40,7 @@ describe("GraphQLDocumentsService", () => {
 		});
 
 		it("transforms document with all optional fields", async () => {
-			const service = createService();
+			const service = await createService();
 			mockRawRequest.mockResolvedValue({
 				document: {
 					id: "doc-2",
@@ -79,7 +81,7 @@ describe("GraphQLDocumentsService", () => {
 
 	describe("createDocument", () => {
 		it("creates a document and returns transformed result", async () => {
-			const service = createService();
+			const service = await createService();
 			mockRawRequest.mockResolvedValue({
 				documentCreate: {
 					success: true,
@@ -92,7 +94,7 @@ describe("GraphQLDocumentsService", () => {
 		});
 
 		it("throws on create failure", async () => {
-			const service = createService();
+			const service = await createService();
 			mockRawRequest.mockResolvedValue({
 				documentCreate: { success: false },
 			});
@@ -104,7 +106,7 @@ describe("GraphQLDocumentsService", () => {
 
 	describe("updateDocument", () => {
 		it("updates a document and returns transformed result", async () => {
-			const service = createService();
+			const service = await createService();
 			mockRawRequest.mockResolvedValue({
 				documentUpdate: {
 					success: true,
@@ -119,7 +121,7 @@ describe("GraphQLDocumentsService", () => {
 		});
 
 		it("throws on update failure", async () => {
-			const service = createService();
+			const service = await createService();
 			mockRawRequest.mockResolvedValue({
 				documentUpdate: { success: false },
 			});
@@ -131,7 +133,7 @@ describe("GraphQLDocumentsService", () => {
 
 	describe("getDocument", () => {
 		it("throws when document not found", async () => {
-			const service = createService();
+			const service = await createService();
 			mockRawRequest.mockResolvedValue({ document: null });
 			await expect(service.getDocument("nonexistent")).rejects.toThrow(
 				"Document not found: nonexistent",
@@ -141,7 +143,7 @@ describe("GraphQLDocumentsService", () => {
 
 	describe("listDocuments", () => {
 		it("lists documents with default limit", async () => {
-			const service = createService();
+			const service = await createService();
 			mockRawRequest.mockResolvedValue({
 				documents: {
 					nodes: [
@@ -161,7 +163,7 @@ describe("GraphQLDocumentsService", () => {
 		});
 
 		it("lists documents with project filter", async () => {
-			const service = createService();
+			const service = await createService();
 			mockRawRequest.mockResolvedValue({
 				documents: { nodes: [{ id: "doc-1", title: "Project Doc" }] },
 			});
@@ -175,7 +177,7 @@ describe("GraphQLDocumentsService", () => {
 		});
 
 		it("lists documents with custom limit", async () => {
-			const service = createService();
+			const service = await createService();
 			mockRawRequest.mockResolvedValue({ documents: { nodes: [] } });
 			await service.listDocuments({ first: 10 });
 			expect(mockRawRequest).toHaveBeenCalledWith(
@@ -187,7 +189,7 @@ describe("GraphQLDocumentsService", () => {
 
 	describe("deleteDocument", () => {
 		it("returns true on successful delete", async () => {
-			const service = createService();
+			const service = await createService();
 			mockRawRequest.mockResolvedValue({
 				documentDelete: { success: true },
 			});
@@ -196,7 +198,7 @@ describe("GraphQLDocumentsService", () => {
 		});
 
 		it("throws on delete failure", async () => {
-			const service = createService();
+			const service = await createService();
 			mockRawRequest.mockResolvedValue({
 				documentDelete: { success: false },
 			});
@@ -208,14 +210,14 @@ describe("GraphQLDocumentsService", () => {
 
 	describe("listDocumentsBySlugIds", () => {
 		it("returns empty array for empty slugIds", async () => {
-			const service = createService();
+			const service = await createService();
 			const results = await service.listDocumentsBySlugIds([]);
 			expect(results).toEqual([]);
 			expect(mockRawRequest).not.toHaveBeenCalled();
 		});
 
 		it("builds OR filter for multiple slugIds", async () => {
-			const service = createService();
+			const service = await createService();
 			mockRawRequest.mockResolvedValue({
 				documents: {
 					nodes: [

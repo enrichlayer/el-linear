@@ -138,7 +138,7 @@ export function parseGoogleDoc(doc: GDocResponse): string {
 						.filter((c) => c.paragraph)
 						.map((c) => {
 							let text = "";
-							for (const el of c.paragraph!.elements) {
+							for (const el of c.paragraph?.elements ?? []) {
 								text += formatTextRun(el);
 							}
 							return text.replace(TRAILING_NEWLINE_RE, "");

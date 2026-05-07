@@ -1,6 +1,7 @@
 import { LinearClient } from "@linear/sdk";
+import { getActiveAuth } from "../auth/token-resolver.js";
 import type { GraphQLResponseData, GraphQLVariables } from "../types/linear.js";
-import { type AuthOptions, getApiToken } from "./auth.js";
+import type { AuthOptions } from "./auth.js";
 
 interface GraphQLRawClient {
 	rawRequest: <T>(
@@ -76,7 +77,12 @@ export class GraphQLService {
 	}
 }
 
-export function createGraphQLService(options: AuthOptions): GraphQLService {
-	const apiToken = getApiToken(options);
-	return new GraphQLService(apiToken);
+export async function createGraphQLService(
+	options: AuthOptions,
+): Promise<GraphQLService> {
+	const auth = await getActiveAuth(options);
+	if (auth.kind === "oauth") {
+		return new GraphQLService({ oauthToken: auth.token });
+	}
+	return new GraphQLService({ apiKey: auth.token });
 }

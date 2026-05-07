@@ -2,6 +2,7 @@ import type { Command, OptionValues } from "commander";
 import { getApiToken } from "../utils/auth.js";
 import { FileService } from "../utils/file-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
+import { getRootOpts } from "../utils/root-opts.js";
 
 export function setupEmbedsCommands(program: Command): void {
 	const embeds = program
@@ -17,7 +18,7 @@ export function setupEmbedsCommands(program: Command): void {
 		.action(
 			handleAsyncCommand(
 				async (url: string, options: OptionValues, command: Command) => {
-					const apiToken = getApiToken(command.parent!.parent!.opts());
+					const apiToken = getApiToken(getRootOpts(command));
 					const fileService = new FileService(apiToken);
 					const result = await fileService.downloadFile(url, {
 						output: options.output,
@@ -49,7 +50,7 @@ export function setupEmbedsCommands(program: Command): void {
 		.action(
 			handleAsyncCommand(
 				async (filePath: string, _options: OptionValues, command: Command) => {
-					const apiToken = getApiToken(command.parent!.parent!.opts());
+					const apiToken = getApiToken(getRootOpts(command));
 					const fileService = new FileService(apiToken);
 					const result = await fileService.uploadFile(filePath);
 					if (result.success) {

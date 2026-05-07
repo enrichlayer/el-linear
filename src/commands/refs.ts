@@ -8,6 +8,7 @@ import {
 } from "../utils/issue-reference-wrapper.js";
 import { createLinearService } from "../utils/linear-service.js";
 import { handleAsyncCommand } from "../utils/output.js";
+import { getRootOpts } from "../utils/root-opts.js";
 import { validateReferences } from "../utils/validate-references.js";
 import { getWorkspaceUrlKey } from "../utils/workspace-url.js";
 
@@ -96,16 +97,16 @@ async function handleWrap(
 			? readFileSync(options.file, "utf8")
 			: await readAllStdin();
 
-	const rootOpts = command.parent!.parent!.opts();
+	const rootOpts = getRootOpts(command);
 
 	const deps: WrapDeps = {
 		async resolveValidIdentifiers(ids) {
-			const linearService = createLinearService(rootOpts);
+			const linearService = await createLinearService(rootOpts);
 			const map = await validateReferences(ids, linearService);
 			return new Set(map.keys());
 		},
 		async resolveUrlKey() {
-			const graphQLService = createGraphQLService(rootOpts);
+			const graphQLService = await createGraphQLService(rootOpts);
 			return getWorkspaceUrlKey(graphQLService);
 		},
 	};

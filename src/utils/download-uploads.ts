@@ -96,7 +96,7 @@ function extractUniqueFilename(url: string): string {
 		// Path like /workspace-id/uuid1/uuid2/filename.png — take last two parts for uniqueness
 		const parts = urlObj.pathname.split("/").filter(Boolean);
 		if (parts.length >= 2) {
-			return `${parts.at(-2)!.slice(0, 8)}-${parts.at(-1)!}`;
+			return `${parts.at(-2)?.slice(0, 8)}-${parts.at(-1) ?? ""}`;
 		}
 		return parts.at(-1) || "download";
 	} catch {

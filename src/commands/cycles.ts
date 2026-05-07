@@ -7,6 +7,7 @@ import {
 } from "../utils/error-messages.js";
 import { createLinearService } from "../utils/linear-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
+import { getRootOpts } from "../utils/root-opts.js";
 
 export function setupCyclesCommands(program: Command): void {
 	const cycles = program
@@ -30,9 +31,9 @@ export function setupCyclesCommands(program: Command): void {
 				if (options.aroundActive && !options.team) {
 					throw requiresParameterError("--around-active", "--team");
 				}
-				const rootOpts = command.parent!.parent!.opts();
+				const rootOpts = getRootOpts(command);
 				const teamFilter = options.team ? resolveTeam(options.team) : undefined;
-				const linearService = createLinearService(rootOpts);
+				const linearService = await createLinearService(rootOpts);
 				const allCycles = await linearService.getCycles(
 					teamFilter,
 					options.active || undefined,
@@ -80,11 +81,11 @@ export function setupCyclesCommands(program: Command): void {
 					options: OptionValues,
 					command: Command,
 				) => {
-					const rootOpts = command.parent!.parent!.opts();
+					const rootOpts = getRootOpts(command);
 					const teamFilter = options.team
 						? resolveTeam(options.team)
 						: undefined;
-					const linearService = createLinearService(rootOpts);
+					const linearService = await createLinearService(rootOpts);
 					const cycleId = await linearService.resolveCycleId(
 						cycleIdOrName,
 						teamFilter,

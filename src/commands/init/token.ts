@@ -121,7 +121,6 @@ export async function runTokenStep(
 	if (existing && !options.force) {
 		try {
 			const viewer = await validateToken(existing);
-			// biome-ignore lint/suspicious/noConsole: wizard
 			console.log(
 				`  Existing token works — authenticated as ${viewer.displayName} <${viewer.email}>.`,
 			);
@@ -135,16 +134,13 @@ export async function runTokenStep(
 		} catch (err) {
 			const raw = err instanceof Error ? err.message : String(err);
 			const message = sanitizeForLog(raw);
-			// biome-ignore lint/suspicious/noConsole: wizard
 			console.log(
 				`  Existing token failed validation (${message}). You'll need to provide a new one.`,
 			);
 		}
 	}
 
-	// biome-ignore lint/suspicious/noConsole: wizard
 	console.log(`  Generate a personal API token: ${TOKEN_GENERATION_URL}`);
-	// biome-ignore lint/suspicious/noConsole: wizard
 	console.log(
 		"  The token stays on your machine. el-linear only sends it to Linear's API. " +
 			"It's stored at ~/.config/el-linear/token (mode 0600).",
@@ -164,18 +160,15 @@ export async function runTokenStep(
 		).trim();
 
 		try {
-			// biome-ignore lint/suspicious/noConsole: wizard
 			console.log("  Validating…");
 			const viewer = await validateToken(token);
 			await writeToken(token);
-			// biome-ignore lint/suspicious/noConsole: wizard
 			console.log(
 				`  ✓ Authenticated as ${viewer.displayName} <${viewer.email}> (${viewer.organization.name}).`,
 			);
 			return { token, viewer };
 		} catch (err) {
 			const raw = err instanceof Error ? err.message : String(err);
-			// biome-ignore lint/suspicious/noConsole: wizard
 			console.log(`  ✗ ${sanitizeForLog(raw)}`);
 		}
 	}

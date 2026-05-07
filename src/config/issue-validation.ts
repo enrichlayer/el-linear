@@ -284,7 +284,7 @@ function checkTitleVerbAlignment(
 		for (const verb of typeVerbs) {
 			if (!verb.includes(" ")) continue;
 			if (
-				title.toLowerCase().startsWith(verb.toLowerCase() + " ") ||
+				title.toLowerCase().startsWith(`${verb.toLowerCase()} `) ||
 				title.toLowerCase() === verb.toLowerCase()
 			) {
 				if (type === typeLabel) return; // match — all good
