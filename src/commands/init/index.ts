@@ -23,6 +23,7 @@ import {
 	runAliasesStep,
 } from "./aliases.js";
 import { runDefaultsStep } from "./defaults.js";
+import { runOAuthRevoke, runOAuthStep } from "./oauth.js";
 import {
 	assignDefined,
 	printStep,
@@ -76,6 +77,46 @@ export function setupInitCommands(program: Command): void {
 				printStep("token", "Linear API token");
 				await runTokenStep({ force: options.force ?? false });
 			}),
+		);
+
+	init
+		.command("oauth")
+		.description(
+			"Authorize via OAuth 2.0 (PKCE) — alternative to a personal API token",
+		)
+		.option("--force", "ignore existing tokens; re-authorize unconditionally")
+		.option("--revoke", "revoke and remove the stored OAuth tokens")
+		.option(
+			"--no-browser",
+			"skip the browser-open + localhost listener; paste the code manually",
+		)
+		.option(
+			"--port <port>",
+			"localhost callback port (default 8765)",
+			(value) => Number.parseInt(value, 10),
+		)
+		.action(
+			withCleanExit(
+				async (options: {
+					force?: boolean;
+					revoke?: boolean;
+					browser?: boolean;
+					port?: number;
+				}) => {
+					printStep("oauth", "Linear OAuth (PKCE)");
+					if (options.revoke) {
+						const result = await runOAuthRevoke();
+						console.log(`  ${result.message}`);
+						return;
+					}
+					await runOAuthStep({
+						force: options.force ?? false,
+						// commander's `--no-browser` produces `browser: false`.
+						noBrowser: options.browser === false,
+						port: options.port,
+					});
+				},
+			),
 		);
 
 	init
