@@ -6,6 +6,12 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.7.0] — 2026-05-08
+
+This release rounds out the issue-creation defaults and adds disk caching
+for the workspace list commands. Drops the need for a personal-skill
+"always set this" rule for assignee + priority on every `issues create`.
+
 ### Added
 
 - **`config.defaultAssignee` + `--no-assignee` flag.** Optional default
@@ -281,7 +287,8 @@ sed -i.bak 's/\bel-linear\b/linctl/g' your-scripts.sh
 The legacy `brand` config block is auto-migrated to `terms[]` on first run.
 
 
-[Unreleased]: https://github.com/enrichlayer/el-linear/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/enrichlayer/el-linear/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/enrichlayer/el-linear/releases/tag/v1.7.0
 [1.6.0]: https://github.com/enrichlayer/el-linear/releases/tag/v1.6.0
 [1.5.0]: https://github.com/enrichlayer/el-linear/releases/tag/v1.5.0
 [1.4.0]: https://github.com/enrichlayer/el-linear/releases/tag/v1.4.0
