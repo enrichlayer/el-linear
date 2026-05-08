@@ -910,6 +910,12 @@ export class GraphQLIssuesService {
 		if (args.dueDate !== undefined) {
 			input.dueDate = args.dueDate;
 		}
+		if (args.templateId !== undefined && args.templateId !== null) {
+			// Server-side template instantiation: Linear copies the
+			// template's title/description/labels/priority onto the
+			// new issue. Any explicit field above wins by override.
+			input.templateId = args.templateId;
+		}
 		return input;
 	}
 

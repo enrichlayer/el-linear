@@ -591,8 +591,15 @@ async function resolveCreateInputs(
 
 	// --- Validation (labels, description, assignee, project, title) ---
 	// Controlled by config.validation.enabled (default: true).
-	// Bypassed by --skip-validation flag.
-	if (!options.skipValidation) {
+	// Bypassed by --skip-validation flag, OR by --from-template which
+	// defers field provision to Linear's server-side template
+	// instantiation. With --from-template + no overrides, the
+	// resulting issue inherits title/description/labels/etc. from the
+	// template — running the local validator against undefined fields
+	// would produce a false-negative "Missing --labels" error.
+	const hasFromTemplate =
+		typeof options.fromTemplate === "string" && options.fromTemplate;
+	if (!options.skipValidation && !hasFromTemplate) {
 		const rawLabels = options.labels ? splitList(options.labels) : null;
 		const description = resolveDescription(options);
 		const validationResult = validateIssueCreation({
@@ -771,6 +778,12 @@ async function handleCreateIssue(
 		cycleId: options.cycle,
 		subscriberIds,
 		dueDate: options.dueDate,
+		// Linear server-side template instantiation. When set,
+		// Linear copies the template's title/description/labels/priority
+		// onto the new issue; any explicit field above wins by override.
+		...(typeof options.fromTemplate === "string" && options.fromTemplate
+			? { templateId: options.fromTemplate as string }
+			: {}),
 	});
 	const relations = await createRelations(
 		result.id,
@@ -1601,6 +1614,10 @@ export function setupIssuesCommands(program: Command): void {
 		.option(
 			"--template <name>",
 			"use a named description template from config.descriptionTemplates",
+		)
+		.option(
+			"--from-template <id>",
+			"instantiate the issue from a Linear server-side template (UUID from `el-linear templates list`). Sets templateId on the underlying issueCreate mutation; Linear copies the template's title, description, labels, priority, etc. as the new issue's defaults. Override any field with the matching --title / --description / --labels flag.",
 		)
 		.option(
 			"-a, --assignee <assignee>",
