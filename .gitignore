@@ -26,3 +26,8 @@ tmp/
 
 # Playwright MCP traces — local artifacts only
 .playwright-mcp/
+
+# Claude Code per-user runtime + local settings.
+# If you later want to commit team-shared skills/agents/hooks, un-ignore
+# specific subpaths (e.g. `!.claude/skills/`) below this line.
+.claude/
