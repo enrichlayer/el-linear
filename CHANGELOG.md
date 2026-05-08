@@ -6,6 +6,45 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.9.0] — 2026-05-09
+
+Adds a global `--format summary` output mode for human-readable rendering
+of single-resource and list payloads. Designed to replace the
+`el-linear ... | python -c "json.load(...)"` and `jq` pipelines that
+every consumer (humans and LLMs) ends up writing to extract a brief
+summary from the default JSON envelope.
+
+### Added
+
+- **`--format <kind>` root flag.** Accepts `json` (default, unchanged
+  behavior) or `summary`. The `summary` mode emits a fixed
+  human-readable rendering with stable field ordering per resource
+  type. Format value is also accepted on the per-command `--format`
+  options of `issues list`, `issues search`, and `projects list`
+  alongside the existing `table` / `md` / `csv` options.
+- **Summary formatters** for issues (single + list), projects
+  (single + list), comments (single + list), cycles (single + list),
+  project milestones (single + list), teams (list), labels (list),
+  users (single + list), search results (cross-resource list), plus
+  a generic key/value fallback for resource shapes the dispatcher
+  doesn't recognize. Single-issue summary shows identifier, title,
+  state, assignee, project, labels, URL, and the first ten lines of
+  the description with a truncation footer.
+- **Bundled SKILL.md guidance.** `claude-skills/linear-operations/SKILL.md`
+  now opens with an explicit instruction to prefer `--format summary`
+  over piping through `jq` or `python -c` for terminal / agent output.
+  Ships in the npm tarball.
+
+### Behavior
+
+- Existing JSON output is unchanged when `--format` is not set or set
+  to `json`. `--raw`, `--jq`, and `--fields` continue to work in
+  json mode.
+- `--raw` composes with `--format summary` (an envelope `{data:[...]}`
+  is unwrapped before formatting). `--jq` and `--fields` do not
+  compose with summary mode — they're JSON-shape filters.
+
+
 ## [1.7.0] — 2026-05-08
 
 This release rounds out the issue-creation defaults and adds disk caching

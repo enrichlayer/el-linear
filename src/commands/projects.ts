@@ -452,7 +452,11 @@ export function setupProjectsCommands(program: Command): void {
 		.command("list")
 		.description("List projects")
 		.option("-l, --limit <number>", "limit results", "100")
-		.option("--format <format>", "output format (json, table, md, csv)", "json")
+		.option(
+			"--format <format>",
+			"output format (json, summary, table, md, csv)",
+			"json",
+		)
 		.option(
 			"--fields <fields>",
 			"columns for table/csv (comma-separated: name,state,progress,teams,lead,targetDate)",

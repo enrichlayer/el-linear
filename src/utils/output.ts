@@ -1,10 +1,18 @@
 import { execFileSync } from "node:child_process";
+import {
+	dispatch as dispatchSummary,
+	inferKindFromPayload,
+	type ResourceKind,
+} from "./formatters/summary.js";
 import { logger } from "./logger.js";
 
 const warningBuffer: string[] = [];
 let rawMode = false;
 let jqFilter: string | null = null;
 let fieldsFilter: string[] | null = null;
+
+export type OutputFormat = "json" | "summary";
+let outputFormat: OutputFormat = "json";
 
 export function setRawMode(enabled: boolean): void {
 	rawMode = enabled;
@@ -16,6 +24,14 @@ export function setJqFilter(filter: string | null): void {
 
 export function setFieldsFilter(fields: string[] | null): void {
 	fieldsFilter = fields;
+}
+
+export function setOutputFormat(format: OutputFormat): void {
+	outputFormat = format;
+}
+
+export function getOutputFormat(): OutputFormat {
+	return outputFormat;
 }
 
 function filterFields(obj: unknown, fields: string[]): unknown {
@@ -33,6 +49,46 @@ function filterFields(obj: unknown, fields: string[]): unknown {
 		return result;
 	}
 	return obj;
+}
+
+/**
+ * Emit a summary-format render to stdout for the given payload. Honours
+ * the same `--raw` unwrap behaviour as JSON output (so a list envelope
+ * with `--raw` is treated as a bare array). Adds a trailing newline.
+ *
+ * Optionally takes an explicit `kind` — used by command handlers that
+ * know the resource type (e.g. `issues read` always passes "issue") to
+ * avoid the shape-based heuristic. When omitted, `inferKindFromPayload`
+ * picks the formatter from the data shape.
+ */
+function emitSummary(payload: unknown, kind?: ResourceKind): void {
+	let value = payload;
+	if (
+		rawMode &&
+		value !== null &&
+		typeof value === "object" &&
+		!Array.isArray(value)
+	) {
+		const obj = value as Record<string, unknown>;
+		if (Array.isArray(obj.data)) value = obj.data;
+	}
+	const resolved = kind ?? inferKindFromPayload(value);
+	const rendered = dispatchSummary(resolved, value);
+	logger.info(rendered);
+}
+
+/**
+ * Per-call override: when a command knows what it returns it can pass an
+ * explicit `kind` so we don't have to fall back on shape inference. Pure
+ * sugar over `outputSuccess` — handlers can keep calling `outputSuccess`
+ * directly if they don't care.
+ */
+export function outputSuccessAs(kind: ResourceKind, data: unknown): void {
+	if (outputFormat === "summary") {
+		emitSummary(data, kind);
+		return;
+	}
+	outputSuccess(data);
 }
 
 export function outputSuccess(data: unknown): void {
@@ -73,6 +129,15 @@ export function outputSuccess(data: unknown): void {
 			}
 		}
 	}
+
+	// summary format takes the post-raw / post-fields value and renders it
+	// as a human-readable block. We bypass the jq path because jq is a
+	// JSON-shape filter — it doesn't compose with text output.
+	if (outputFormat === "summary") {
+		emitSummary(output);
+		return;
+	}
+
 	if (jqFilter) {
 		const json = JSON.stringify(output);
 		// Normalize common shell-escape artifacts (zsh history expansion)
@@ -113,6 +178,10 @@ function drainWarnings(): string[] {
 
 export function resetWarnings(): void {
 	warningBuffer.length = 0;
+}
+
+export function resetOutputFormat(): void {
+	outputFormat = "json";
 }
 
 function outputError(error: Error): void {

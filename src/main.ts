@@ -24,7 +24,12 @@ import { setupTeamsCommands } from "./commands/teams.js";
 import { setupTemplatesCommands } from "./commands/templates.js";
 import { setupUsersCommands } from "./commands/users.js";
 import { setActiveProfileForSession } from "./config/paths.js";
-import { setFieldsFilter, setJqFilter, setRawMode } from "./utils/output.js";
+import {
+	setFieldsFilter,
+	setJqFilter,
+	setOutputFormat,
+	setRawMode,
+} from "./utils/output.js";
 import { outputUsageInfo } from "./utils/usage.js";
 import { splitList } from "./utils/validators.js";
 
@@ -33,13 +38,18 @@ program
 	.description(
 		"A pragmatic CLI for Linear.app — deterministic resolution, structured validation, GraphQL escape hatch.",
 	)
-	.version("1.8.0")
+	.version("1.9.0")
 	.option("--api-token <token>", "Linear API token")
 	.option(
 		"--profile <name>",
 		"named profile (under ~/.config/el-linear/profiles/<name>/) for this invocation. Overrides EL_LINEAR_PROFILE env + the on-disk active-profile marker.",
 	)
 	.option("--json", "output as JSON (default, accepted for compatibility)")
+	.option(
+		"--format <kind>",
+		"output format: json (default, structured envelope) or summary (human-readable)",
+		"json",
+	)
 	.option(
 		"--raw",
 		"strip { data, meta } wrapper from list output — emit the array directly",
@@ -64,6 +74,41 @@ program.hook("preAction", (_thisCommand: Command, actionCommand: Command) => {
 	}
 	if (rootOpts.fields) {
 		setFieldsFilter(splitList(rootOpts.fields));
+	}
+	// Subcommand --format wins over the global flag (commander resolves
+	// options closest to the action), so `optsWithGlobals` returns the
+	// subcommand value when one is set. We accept any of the per-command
+	// formats (table/md/csv) silently — those take a different code path
+	// inside the handler and never reach outputSuccess. The global
+	// behaviour only triggers for `summary`.
+	const fmt =
+		typeof rootOpts.format === "string"
+			? rootOpts.format.toLowerCase()
+			: "json";
+	if (fmt === "summary") {
+		setOutputFormat("summary");
+	} else if (fmt === "json") {
+		setOutputFormat("json");
+	} else if (
+		fmt === "table" ||
+		fmt === "md" ||
+		fmt === "markdown" ||
+		fmt === "csv"
+	) {
+		// Per-subcommand format: no global state change. The subcommand
+		// owns its own output path.
+		setOutputFormat("json");
+	} else {
+		// Match outputSuccess's stable JSON-on-stdout shape so machine
+		// callers always get a parseable error envelope on stdout. We
+		// can't route through handleAsyncCommand here — preAction runs
+		// before the action handler.
+		const msg =
+			`Unknown --format: "${rootOpts.format}". Use one of: json, summary` +
+			" (per-command formats table/md/csv are also accepted on issues" +
+			" list/search and projects list).";
+		process.stdout.write(`${JSON.stringify({ error: msg }, null, 2)}\n`);
+		process.exit(1);
 	}
 	// `--profile <name>` is highest-priority. preAction runs BEFORE the
 	// command body, which is BEFORE getApiToken / loadConfig fire — so

@@ -12,6 +12,32 @@ This skill covers **mandatory processes and non-obvious rules** — everything t
 
 > **Team-specific overrides.** Many teams keep their own issue-creation guide, label taxonomy, or member alias map. If your project has a `CLAUDE.md` or sibling skill that supplements this one, treat its rules as authoritative on top of these defaults.
 
+## Output formats — use `--format summary` for terminals and agents
+
+`el-linear` defaults to a structured JSON envelope. **For human-readable or chat-bound output, always pass `--format summary`.** Do not pipe el-linear through `python -c "json.load(...)"` or `jq` to pull out title / state / assignee — that is exactly what `--format summary` is for, and it produces a stable rendering across releases.
+
+```bash
+el-linear issues read DEV-123 --format summary
+# DEV-123  Fix login flicker on Safari 17
+# State:    In Progress
+# Assignee: Alice
+# Project:  Auth Refactor
+# Labels:   Feature, tool
+# URL:      https://linear.app/acme/issue/DEV-123/...
+
+el-linear issues search "auth" --format summary
+# ID        TITLE                                                    STATE        ASSIGNEE
+# ---------------------------------------------------------------------------------------
+# DEV-100   Migrate auth middleware to new session store             In Progress  Alice
+# DEV-104   Auth callback returns 502 under load                     Todo         Bob
+#
+# 2 issues
+```
+
+Use `--format json` (the default — pass nothing) **only** when you genuinely need the full envelope: writing scripts that parse the response, mutating with `--jq`, or chaining into another tool that expects structured data. Default to summary; reach for JSON when the task warrants it.
+
+Coverage: `--format summary` is implemented for `issues read|list|search`, `projects read|list`, `comments list`, `cycles read|list`, `project-milestones read|list`, `labels list`, `teams list`, `users list`, and the cross-resource `search` command. Other commands fall back to a generic key/value rendering of their JSON payload.
+
 ---
 
 ## Intent-Driven Issue Writing
