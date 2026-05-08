@@ -18,7 +18,6 @@
 
 import { getApiToken } from "../utils/auth.js";
 import {
-	isAccessTokenFresh,
 	type OAuthState,
 	readOAuthState,
 	writeOAuthState,
@@ -89,12 +88,13 @@ export async function ensureFreshAccessToken(
 	options: GetActiveAuthOptions = {},
 ): Promise<OAuthState> {
 	const now = options.now ?? Date.now;
-	if (isAccessTokenFresh(state, /* skewMs */ 60_000)) {
-		// `isAccessTokenFresh` reads `Date.now()` internally; for the
-		// purpose of the test seam we re-check against the injected clock.
-		if (now() + 60_000 < state.expiresAt) {
-			return state;
-		}
+	// Use the injected clock for the freshness check — `isAccessTokenFresh`
+	// reads `Date.now()` directly, which doesn't honor the test seam. When
+	// a test pins `now` to a fake epoch (or the production wall clock has
+	// drifted relative to `state.expiresAt`), going through the helper
+	// short-circuits the wrong way and falls through to a real refresh.
+	if (now() + 60_000 < state.expiresAt) {
+		return state;
 	}
 	if (!state.refreshToken) {
 		throw new Error(
