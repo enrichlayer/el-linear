@@ -6,7 +6,7 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [1.9.0] — 2026-05-09
+## [1.8.1] — 2026-05-09
 
 Adds a global `--format summary` output mode for human-readable rendering
 of single-resource and list payloads. Designed to replace the
