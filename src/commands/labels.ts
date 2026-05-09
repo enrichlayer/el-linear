@@ -7,7 +7,12 @@ import {
 	RESTORE_LABEL_MUTATION,
 	RETIRE_LABEL_MUTATION,
 } from "../queries/labels.js";
-import type { GraphQLResponseData } from "../types/linear.js";
+import type {
+	CreateLabelResponse,
+	FindParentLabelResponse,
+	RestoreLabelResponse,
+	RetireLabelResponse,
+} from "../queries/labels-types.js";
 import { cached, resolveCacheTTL } from "../utils/disk-cache.js";
 import { createGraphQLService } from "../utils/graphql-service.js";
 import { createLinearService } from "../utils/linear-service.js";
@@ -33,33 +38,28 @@ async function handleCreateLabel(
 	}
 
 	if (options.parent) {
-		const parentResult = await graphQLService.rawRequest(
-			FIND_PARENT_LABEL_QUERY,
-			{
-				name: options.parent,
-				teamId,
-			},
-		);
-		const issueLabels = parentResult.issueLabels as
-			| GraphQLResponseData
-			| undefined;
-		const nodes = issueLabels?.nodes as GraphQLResponseData[] | undefined;
-		const parentLabel = nodes?.[0];
+		const parentResult =
+			await graphQLService.rawRequest<FindParentLabelResponse>(
+				FIND_PARENT_LABEL_QUERY,
+				{
+					name: options.parent,
+					teamId,
+				},
+			);
+		const parentLabel = parentResult.issueLabels.nodes[0];
 		if (parentLabel) {
 			input.parentId = parentLabel.id;
 		}
 	}
 
-	const result = await graphQLService.rawRequest(CREATE_LABEL_MUTATION, {
-		input,
-	});
-	const createResult = result.issueLabelCreate as
-		| GraphQLResponseData
-		| undefined;
-	if (!createResult?.success) {
+	const result = await graphQLService.rawRequest<CreateLabelResponse>(
+		CREATE_LABEL_MUTATION,
+		{ input },
+	);
+	if (!result.issueLabelCreate.success || !result.issueLabelCreate.issueLabel) {
 		throw new Error(`Failed to create label "${name}"`);
 	}
-	outputSuccess(createResult.issueLabel);
+	outputSuccess(result.issueLabelCreate.issueLabel);
 }
 
 async function handleRetireLabel(
@@ -69,16 +69,14 @@ async function handleRetireLabel(
 ): Promise<void> {
 	const rootOpts = getRootOpts(command);
 	const graphQLService = await createGraphQLService(rootOpts);
-	const result = await graphQLService.rawRequest(RETIRE_LABEL_MUTATION, {
-		id: labelId,
-	});
-	const retireResult = result.issueLabelRetire as
-		| GraphQLResponseData
-		| undefined;
-	if (!retireResult?.success) {
+	const result = await graphQLService.rawRequest<RetireLabelResponse>(
+		RETIRE_LABEL_MUTATION,
+		{ id: labelId },
+	);
+	if (!result.issueLabelRetire.success || !result.issueLabelRetire.issueLabel) {
 		throw new Error(`Failed to retire label "${labelId}"`);
 	}
-	outputSuccess(retireResult.issueLabel);
+	outputSuccess(result.issueLabelRetire.issueLabel);
 }
 
 async function handleRestoreLabel(
@@ -88,16 +86,17 @@ async function handleRestoreLabel(
 ): Promise<void> {
 	const rootOpts = getRootOpts(command);
 	const graphQLService = await createGraphQLService(rootOpts);
-	const result = await graphQLService.rawRequest(RESTORE_LABEL_MUTATION, {
-		id: labelId,
-	});
-	const restoreResult = result.issueLabelRestore as
-		| GraphQLResponseData
-		| undefined;
-	if (!restoreResult?.success) {
+	const result = await graphQLService.rawRequest<RestoreLabelResponse>(
+		RESTORE_LABEL_MUTATION,
+		{ id: labelId },
+	);
+	if (
+		!result.issueLabelRestore.success ||
+		!result.issueLabelRestore.issueLabel
+	) {
 		throw new Error(`Failed to restore label "${labelId}"`);
 	}
-	outputSuccess(restoreResult.issueLabel);
+	outputSuccess(result.issueLabelRestore.issueLabel);
 }
 
 export function setupLabelsCommands(program: Command): void {
