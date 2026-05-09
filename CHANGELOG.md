@@ -8,6 +8,18 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Extract shared `wrapAndResolveRefs` core for description
+  rewriting.** `prepareAutoLinkedDescription` (issues create/update)
+  and `prepareDescriptionRewrite` (`issues link-references
+  --rewrite-description`) used to carry near-duplicate 25-line
+  bodies that differed only in their return shape and opt-out
+  semantics. Both now call one shared validate-refs-then-wrap
+  helper; the wrappers handle the per-caller policy (the
+  `--no-auto-link` opt-out, `preResolved: undefined` vs empty Map
+  signaling). One place to fix bugs in the pipeline. Refs ALL-938.
+
+### Changed
+
 - **Centralized list-table renderer in the summary formatter.** The
   13 `formatXList` functions in `src/utils/formatters/summary.ts`
   used to inline their own column-width math, header/separator

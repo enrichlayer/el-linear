@@ -257,6 +257,50 @@ interface PreparedDescription {
  * - description is empty/undefined
  * - the user passed `--no-auto-link`
  */
+/**
+ * Shared core for the wrap-and-resolve pipeline used by both the
+ * create/update path (`prepareAutoLinkedDescription`) and the
+ * `link-references --rewrite-description` path
+ * (`prepareDescriptionRewrite`). Pre-fix these were near-duplicate
+ * 25-line bodies that differed only in their return shape and
+ * opt-out semantics.
+ *
+ * Returns:
+ *   - `wrapped: undefined` when the original description had no
+ *     resolvable refs to wrap (no-op for the caller),
+ *   - `wrapped: <string>` when at least one ref was wrapped,
+ *   - `preResolved` — the validated id→uuid map, passed downstream
+ *     to `autoLinkReferences` to skip a second resolve roundtrip.
+ */
+async function wrapAndResolveRefs(
+	description: string,
+	selfIdentifier: string | undefined,
+	linearService: LinearService,
+	graphQLService: GraphQLService,
+): Promise<{
+	wrapped: string | undefined;
+	preResolved: Map<string, string>;
+}> {
+	const refs = extractIssueReferences(description, selfIdentifier);
+	if (refs.length === 0) {
+		return { wrapped: undefined, preResolved: new Map() };
+	}
+	const preResolved = await validateReferences(
+		refs.map((r) => r.identifier),
+		linearService,
+	);
+	if (preResolved.size === 0) {
+		return { wrapped: undefined, preResolved };
+	}
+	const validIds = new Set(preResolved.keys());
+	const urlKey = await getWorkspaceUrlKey(graphQLService);
+	const rewritten = wrapIssueReferencesAsLinks(description, validIds, urlKey);
+	return {
+		wrapped: rewritten === description ? undefined : rewritten,
+		preResolved,
+	};
+}
+
 async function prepareAutoLinkedDescription(
 	description: string | undefined,
 	options: OptionValues,
@@ -267,24 +311,16 @@ async function prepareAutoLinkedDescription(
 	if (!description || options.autoLink === false) {
 		return { description, preResolved: new Map(), rewritten: false };
 	}
-	const refs = extractIssueReferences(description, selfIdentifier);
-	if (refs.length === 0) {
-		return { description, preResolved: new Map(), rewritten: false };
-	}
-	const preResolved = await validateReferences(
-		refs.map((r) => r.identifier),
+	const { wrapped, preResolved } = await wrapAndResolveRefs(
+		description,
+		selfIdentifier,
 		linearService,
+		graphQLService,
 	);
-	if (preResolved.size === 0) {
-		return { description, preResolved, rewritten: false };
-	}
-	const validIds = new Set(preResolved.keys());
-	const urlKey = await getWorkspaceUrlKey(graphQLService);
-	const wrapped = wrapIssueReferencesAsLinks(description, validIds, urlKey);
 	return {
-		description: wrapped,
+		description: wrapped ?? description,
 		preResolved,
-		rewritten: wrapped !== description,
+		rewritten: wrapped !== undefined,
 	};
 }
 
@@ -1109,23 +1145,18 @@ async function prepareDescriptionRewrite(
 	if (!description) {
 		return { preResolved: undefined, wrapped: undefined };
 	}
-	const refs = extractIssueReferences(description, selfIdentifier);
-	if (refs.length === 0) {
-		return { preResolved: undefined, wrapped: undefined };
-	}
-	const preResolved = await validateReferences(
-		refs.map((r) => r.identifier),
+	const { wrapped, preResolved } = await wrapAndResolveRefs(
+		description,
+		selfIdentifier,
 		linearService,
+		graphQLService,
 	);
-	if (preResolved.size === 0) {
-		return { preResolved, wrapped: undefined };
-	}
-	const validIds = new Set(preResolved.keys());
-	const urlKey = await getWorkspaceUrlKey(graphQLService);
-	const wrapped = wrapIssueReferencesAsLinks(description, validIds, urlKey);
 	return {
-		preResolved,
-		wrapped: wrapped === description ? undefined : wrapped,
+		// `link-references --rewrite-description` historically used
+		// `preResolved: undefined` to mean "no refs at all"; preserve that
+		// signal so the existing call site keeps the same shape.
+		preResolved: preResolved.size === 0 ? undefined : preResolved,
+		wrapped,
 	};
 }
 
