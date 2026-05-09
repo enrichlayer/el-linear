@@ -8,6 +8,13 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Typed `UpdateIssueArgs` for `GraphQLIssuesService.updateIssue`.**
+  Same treatment as `CreateIssueArgs` — `id` is required, the helper
+  pipeline (`resolveUpdateContext`, `extractMilestoneNodes`,
+  `resolveCycleIdForUpdate`, `resolveStatusIdForUpdate`,
+  `buildUpdateInput`) all take the typed shape, the internal
+  `as string`/`as string[]` casts are gone, and `buildUpdateArgs` in
+  `commands/issues.ts` returns the typed args directly. Refs ALL-937.
 - **Typed `CreateIssueArgs` for `GraphQLIssuesService.createIssue`.**
   The method (and its private helpers `resolveCreateFields`,
   `buildCreateInput`, `buildCreateResolveVariables`) used to accept
@@ -17,7 +24,7 @@ project adheres to [Semantic Versioning](https://semver.org/).
   cleanly and silently dropped the field. Now the args take a
   typed interface, the casts inside are gone, and the typo
   becomes a `tsc` error. First slice of the ALL-937 type-design
-  refactor; `updateIssue` and `searchIssues` follow. Refs ALL-937.
+  refactor. Refs ALL-937.
 
 ### Changed
 
