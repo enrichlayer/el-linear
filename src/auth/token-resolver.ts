@@ -103,10 +103,15 @@ export async function ensureFreshAccessToken(
 	if (now() + 60_000 < state.expiresAt) {
 		return state;
 	}
-	return withFileLock(oauthStatePath(), async () => {
+	// Snapshot the target path ONCE so a profile switch between the
+	// lock acquisition and the write inside the closure can't cause
+	// cross-profile contamination. The lock + read + write all bind
+	// to this path. ALL-935 deferred fix.
+	const targetPath = oauthStatePath();
+	return withFileLock(targetPath, async () => {
 		// Re-read inside the lock — another process may have refreshed
 		// while we were waiting. If so, use their result.
-		const current = (await readOAuthState()) ?? state;
+		const current = (await readOAuthState(targetPath)) ?? state;
 		if (now() + 60_000 < current.expiresAt) {
 			return current;
 		}
@@ -147,7 +152,7 @@ export async function ensureFreshAccessToken(
 			expiresAt: refreshed.expiresAt,
 			obtainedAt: now(),
 		};
-		await writeOAuthState(next);
+		await writeOAuthState(next, targetPath);
 		return next;
 	});
 }

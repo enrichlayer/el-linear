@@ -53,10 +53,17 @@ export function oauthStatePath(): string {
  * Returns `null` (not throw) on JSON parse errors so callers can fall back
  * to personal-token auth without spamming users with repair instructions —
  * the `init oauth` command is responsible for repair.
+ *
+ * Pass an explicit `targetPath` to bind to a specific profile's
+ * `oauth.json`. Useful for read-modify-write sequences that snapshot
+ * the path once at the top so a profile switch mid-sequence can't
+ * cause cross-profile contamination. ALL-935.
  */
-export async function readOAuthState(): Promise<OAuthState | null> {
+export async function readOAuthState(
+	targetPath: string = oauthStatePath(),
+): Promise<OAuthState | null> {
 	try {
-		const raw = await fs.readFile(oauthStatePath(), "utf8");
+		const raw = await fs.readFile(targetPath, "utf8");
 		const parsed = JSON.parse(raw) as OAuthState;
 		if (parsed?.v !== OAUTH_STATE_VERSION) return null;
 		if (typeof parsed.accessToken !== "string" || parsed.accessToken === "") {
@@ -77,22 +84,29 @@ export async function readOAuthState(): Promise<OAuthState | null> {
  * IMPORTANT: uses the same write-tmp + rename pattern as `writeToken` so a
  * pre-existing 0644 file gets its mode reset. Tokens leaking via group/other
  * read is the failure mode we want to make impossible.
+ *
+ * Pass an explicit `targetPath` to bind to a specific profile (see
+ * `readOAuthState`).
  */
-export async function writeOAuthState(state: OAuthState): Promise<void> {
-	const target = oauthStatePath();
+export async function writeOAuthState(
+	state: OAuthState,
+	targetPath: string = oauthStatePath(),
+): Promise<void> {
 	// Ensure both the legacy CONFIG_DIR (where active-profile + profiles/
 	// live) and the active profile's directory exist before writing.
 	await fs.mkdir(CONFIG_DIR, { recursive: true, mode: 0o700 });
-	await fs.mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
-	await atomicWrite(target, `${JSON.stringify(state, null, 2)}\n`, 0o600);
+	await fs.mkdir(path.dirname(targetPath), { recursive: true, mode: 0o700 });
+	await atomicWrite(targetPath, `${JSON.stringify(state, null, 2)}\n`, 0o600);
 }
 
 /**
  * Delete the active profile's OAuth state. No-op if the file is already gone.
  */
-export async function clearOAuthState(): Promise<void> {
+export async function clearOAuthState(
+	targetPath: string = oauthStatePath(),
+): Promise<void> {
 	try {
-		await fs.unlink(oauthStatePath());
+		await fs.unlink(targetPath);
 	} catch (err) {
 		if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
 	}

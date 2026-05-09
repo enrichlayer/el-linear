@@ -66,6 +66,47 @@ describe("loadConfig", () => {
 		expect(first).toBe(second);
 	});
 
+	it("cache is keyed by active profile (ALL-935 deferred)", async () => {
+		// Pre-fix: the cachedConfig was a single slot. Switching the
+		// active profile mid-process and calling loadConfig again
+		// returned the OLD profile's config. Post-fix: each profile
+		// gets its own cache slot, so a profile switch returns the
+		// correct config.
+		vi.resetModules();
+		const { loadConfig, _resetConfigCacheForTests } = await import(
+			"./config.js"
+		);
+		const { setActiveProfileForSession } = await import("./paths.js");
+		_resetConfigCacheForTests();
+
+		try {
+			// Profile A.
+			existsSyncReturn = true;
+			readFileSyncReturn = JSON.stringify({ defaultTeam: "AAA" });
+			setActiveProfileForSession("alpha");
+			const configA = loadConfig();
+			expect(configA.defaultTeam).toBe("AAA");
+
+			// Switch to profile B mid-process. With the old single-slot
+			// cache this would re-return AAA; with the keyed cache it
+			// reads the new profile's config.
+			readFileSyncReturn = JSON.stringify({ defaultTeam: "BBB" });
+			setActiveProfileForSession("bravo");
+			const configB = loadConfig();
+			expect(configB.defaultTeam).toBe("BBB");
+
+			// Switch BACK to alpha — should hit the cache and return AAA
+			// without reading from disk again.
+			readFileSyncReturn = JSON.stringify({ defaultTeam: "CCC" });
+			setActiveProfileForSession("alpha");
+			const configA2 = loadConfig();
+			expect(configA2.defaultTeam).toBe("AAA");
+			expect(configA2).toBe(configA);
+		} finally {
+			setActiveProfileForSession(null);
+		}
+	});
+
 	it("handles parse errors gracefully", async () => {
 		existsSyncReturn = true;
 		readFileSyncReturn = "invalid json!!!";

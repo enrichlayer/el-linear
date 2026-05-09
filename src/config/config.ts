@@ -104,26 +104,41 @@ const DEFAULT_CONFIG: ElLinearConfig = {
 	terms: [],
 };
 
-let cachedConfig: ElLinearConfig | undefined;
+// Profile-keyed cache. Pre-fix this was a single `cachedConfig` —
+// switching the active profile mid-process and calling `loadConfig`
+// again would return the OLD profile's config until
+// `_resetConfigCacheForTests` ran. Today the CLI sets the profile
+// in `preAction` before any command body, so this is latent — but
+// keying by profile makes it future-proof and makes test isolation
+// less footgun-prone (profile A's setup pollutes profile B's read).
+// ALL-935 deferred fix.
+//
+// Key: `null` for the legacy single-file layout (no active profile),
+// otherwise the profile name. We never mix the two paths in the
+// cache — the marker name selects exactly one path.
+const cachedConfigByProfile = new Map<string | null, ElLinearConfig>();
 
 /** Test seam — resets the cache between test cases. */
 export function _resetConfigCacheForTests(): void {
-	cachedConfig = undefined;
+	cachedConfigByProfile.clear();
 }
 
 export function loadConfig(): ElLinearConfig {
-	if (cachedConfig) {
-		return cachedConfig;
-	}
-
 	// Profile-aware: read from <CONFIG_DIR>/profiles/<name>/config.json
 	// when a profile is active, falling back to the legacy single-file
 	// path so existing setups keep working without migration.
 	const active = resolveActiveProfile();
+	const cacheKey = active.name;
+	const cached = cachedConfigByProfile.get(cacheKey);
+	if (cached) {
+		return cached;
+	}
+
 	const candidates = [active.configPath];
 	if (active.configPath !== CONFIG_PATH) candidates.push(CONFIG_PATH);
 	const sourcePath = candidates.find((p) => fs.existsSync(p));
 
+	let resolved: ElLinearConfig;
 	if (sourcePath) {
 		try {
 			const userConfig = JSON.parse(
@@ -152,13 +167,13 @@ export function loadConfig(): ElLinearConfig {
 				}
 				delete userConfig.brand;
 			}
-			cachedConfig = deepMerge(
+			resolved = deepMerge(
 				DEFAULT_CONFIG as unknown as Record<string, unknown>,
 				userConfig,
 			) as unknown as ElLinearConfig;
 		} catch {
 			outputWarning(`Failed to parse ${sourcePath}, using empty defaults`);
-			cachedConfig = DEFAULT_CONFIG;
+			resolved = DEFAULT_CONFIG;
 		}
 	} else {
 		const profileNote = active.name
@@ -167,10 +182,11 @@ export function loadConfig(): ElLinearConfig {
 		outputWarning(
 			`No config found at ${active.configPath}${profileNote}. Run \`el-linear init\` (or \`el-linear profile add ${active.name ?? "<name>"}\`) to create one.`,
 		);
-		cachedConfig = DEFAULT_CONFIG;
+		resolved = DEFAULT_CONFIG;
 	}
 
-	return cachedConfig;
+	cachedConfigByProfile.set(cacheKey, resolved);
+	return resolved;
 }
 
 function deepMerge(
