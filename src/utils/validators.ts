@@ -63,7 +63,16 @@ export function validateIsoDate(value: string): string {
 	return value;
 }
 
-export function splitList(value: string): string[] {
+/**
+ * Split a comma-separated list into trimmed, non-empty items.
+ *
+ * Accepts `undefined` so call sites can pipe through commander's
+ * optional flag values without an explicit truthy guard. `false`
+ * (commander's representation of `--no-foo`) and empty string both
+ * resolve to `[]`.
+ */
+export function splitList(value: string | undefined | null | false): string[] {
+	if (!value) return [];
 	return value
 		.split(",")
 		.map((s) => s.trim())

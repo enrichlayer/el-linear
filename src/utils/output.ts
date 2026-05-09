@@ -127,10 +127,7 @@ export function outputSuccess(data: unknown): void {
 	}
 }
 
-export function outputWarning(
-	message: string | string[],
-	_type?: string,
-): void {
+export function outputWarning(message: string | string[]): void {
 	const messages = Array.isArray(message) ? message : [message];
 	for (const msg of messages) {
 		warningBuffer.push(msg);

@@ -24,6 +24,7 @@ import {
 	tryParseIssueIdentifier,
 } from "./identifier-parser.js";
 import type { LinearService } from "./linear-service.js";
+import { logger } from "./logger.js";
 import { isUuid } from "./uuid.js";
 
 const TEAM_KEY_REGEX = /^[A-Z0-9]+$/i;
@@ -538,8 +539,8 @@ export class GraphQLIssuesService {
 		if (teamNodes.length === 1) {
 			const correctTeamId = teamNodes[0].id as string;
 			const correctKey = teamKeys[0];
-			process.stderr.write(
-				`Auto-switched team to ${correctKey} (the only team associated with project "${projectName}").\n`,
+			logger.error(
+				`Auto-switched team to ${correctKey} (the only team associated with project "${projectName}").`,
 			);
 			return correctTeamId;
 		}
@@ -660,9 +661,7 @@ export class GraphQLIssuesService {
 				const labelData = created.issueLabel as GraphQLResponseData;
 				const teamInfo = labelData.team as GraphQLResponseData | undefined;
 				const teamKey = teamInfo?.key ?? "";
-				process.stderr.write(
-					`Auto-created label "${name}" on team ${teamKey}\n`,
-				);
+				logger.error(`Auto-created label "${name}" on team ${teamKey}`);
 				return labelData.id as string;
 			}
 			return null;

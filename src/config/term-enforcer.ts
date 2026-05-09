@@ -99,7 +99,7 @@ export function enforceTerms(
 			`Term enforcement failed:\n${warnings.map((w) => `  - ${w}`).join("\n")}`,
 		);
 	}
-	outputWarning(warnings, "term_enforcement");
+	outputWarning(warnings);
 }
 
 function escapeRegExp(string: string): string {

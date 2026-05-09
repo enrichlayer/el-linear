@@ -26,6 +26,7 @@ import { randomBytes } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { resolveActiveProfile } from "../config/paths.js";
+import { logger } from "./logger.js";
 
 const CACHE_VERSION = 1;
 const CACHE_FILE_MODE = 0o644;
@@ -169,7 +170,7 @@ export async function cached<T>(
 		// Cache writes are best-effort — log to stderr and return the data
 		// anyway so a flaky disk doesn't break the user's command.
 		const msg = err instanceof Error ? err.message : String(err);
-		process.stderr.write(`[disk-cache] write failed for "${key}": ${msg}\n`);
+		logger.error(`[disk-cache] write failed for "${key}": ${msg}`);
 	}
 	return data;
 }

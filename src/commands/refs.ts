@@ -7,6 +7,7 @@ import {
 	wrapIssueReferencesAsLinks,
 } from "../utils/issue-reference-wrapper.js";
 import { createLinearService } from "../utils/linear-service.js";
+import { logger } from "../utils/logger.js";
 import { handleAsyncCommand } from "../utils/output.js";
 import { getRootOpts } from "../utils/root-opts.js";
 import { validateReferences } from "../utils/validate-references.js";
@@ -113,8 +114,8 @@ async function handleWrap(
 
 	if (!validate) {
 		// stderr advisory only — keeps stdout a clean text stream for piping.
-		process.stderr.write(
-			"el-linear refs wrap: --no-validate set; emitting links for every regex match without checking the workspace.\n",
+		logger.error(
+			"el-linear refs wrap: --no-validate set; emitting links for every regex match without checking the workspace.",
 		);
 	}
 

@@ -338,7 +338,7 @@ function checkTitleVerbAlignment(
  */
 export function enforceValidation(result: ValidationResult): void {
 	for (const warning of result.warnings) {
-		outputWarning(warning, "validation");
+		outputWarning(warning);
 	}
 	if (result.errors.length > 0) {
 		const errorMsg =
