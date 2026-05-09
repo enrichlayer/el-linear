@@ -5,40 +5,45 @@ import {
 	LIST_DOCUMENTS_QUERY,
 	UPDATE_DOCUMENT_MUTATION,
 } from "../queries/documents.js";
-import type { GraphQLResponseData, LinearDocument } from "../types/linear.js";
+import type {
+	CreateDocumentResponse,
+	DeleteDocumentResponse,
+	DocumentNode,
+	GetDocumentResponse,
+	ListDocumentsResponse,
+	UpdateDocumentResponse,
+} from "../queries/documents-types.js";
+import type { LinearDocument } from "../types/linear.js";
 import type { AuthOptions } from "./auth.js";
 import {
 	createGraphQLService,
 	type GraphQLService,
 } from "./graphql-service.js";
 
-function transformDocument(doc: GraphQLResponseData): LinearDocument {
-	const creator = doc.creator as GraphQLResponseData | undefined;
-	const project = doc.project as GraphQLResponseData | undefined;
-	const issue = doc.issue as GraphQLResponseData | undefined;
+function transformDocument(doc: DocumentNode): LinearDocument {
 	return {
-		id: doc.id as string,
-		title: doc.title as string,
-		content: (doc.content as string | undefined) || undefined,
-		color: (doc.color as string | undefined) || undefined,
-		icon: (doc.icon as string | undefined) || undefined,
-		slugId: (doc.slugId as string | undefined) || undefined,
-		url: (doc.url as string | undefined) || undefined,
-		creator: creator
-			? { id: creator.id as string, name: creator.name as string }
+		id: doc.id,
+		title: doc.title,
+		content: doc.content ?? undefined,
+		color: doc.color ?? undefined,
+		icon: doc.icon ?? undefined,
+		slugId: doc.slugId ?? undefined,
+		url: doc.url ?? undefined,
+		creator: doc.creator
+			? { id: doc.creator.id, name: doc.creator.name }
 			: undefined,
-		project: project
-			? { id: project.id as string, name: project.name as string }
+		project: doc.project
+			? { id: doc.project.id, name: doc.project.name }
 			: undefined,
-		issue: issue
+		issue: doc.issue
 			? {
-					id: issue.id as string,
-					identifier: issue.identifier as string,
-					title: issue.title as string,
+					id: doc.issue.id,
+					identifier: doc.issue.identifier,
+					title: doc.issue.title,
 				}
 			: undefined,
-		createdAt: (doc.createdAt as string | undefined) || undefined,
-		updatedAt: (doc.updatedAt as string | undefined) || undefined,
+		createdAt: doc.createdAt ?? undefined,
+		updatedAt: doc.updatedAt ?? undefined,
 	};
 }
 
@@ -52,42 +57,43 @@ class GraphQLDocumentsService {
 	async createDocument(
 		input: Record<string, unknown>,
 	): Promise<LinearDocument> {
-		const result = await this.graphqlService.rawRequest(
+		const result = await this.graphqlService.rawRequest<CreateDocumentResponse>(
 			CREATE_DOCUMENT_MUTATION,
 			{ input },
 		);
-		const createData = result.documentCreate as GraphQLResponseData;
-		if (!createData.success) {
+		const createData = result.documentCreate;
+		if (!createData.success || !createData.document) {
 			throw new Error(
 				`Failed to create document "${input.title}"${input.projectId ? ` in project ${input.projectId}` : ""}${input.teamId ? ` for team ${input.teamId}` : ""}`,
 			);
 		}
-		return transformDocument(createData.document as GraphQLResponseData);
+		return transformDocument(createData.document);
 	}
 
 	async updateDocument(
 		id: string,
 		input: Record<string, unknown>,
 	): Promise<LinearDocument> {
-		const result = await this.graphqlService.rawRequest(
+		const result = await this.graphqlService.rawRequest<UpdateDocumentResponse>(
 			UPDATE_DOCUMENT_MUTATION,
 			{ id, input },
 		);
-		const updateData = result.documentUpdate as GraphQLResponseData;
-		if (!updateData.success) {
+		const updateData = result.documentUpdate;
+		if (!updateData.success || !updateData.document) {
 			throw new Error(`Failed to update document: ${id}`);
 		}
-		return transformDocument(updateData.document as GraphQLResponseData);
+		return transformDocument(updateData.document);
 	}
 
 	async getDocument(id: string): Promise<LinearDocument> {
-		const result = await this.graphqlService.rawRequest(GET_DOCUMENT_QUERY, {
-			id,
-		});
+		const result = await this.graphqlService.rawRequest<GetDocumentResponse>(
+			GET_DOCUMENT_QUERY,
+			{ id },
+		);
 		if (!result.document) {
 			throw new Error(`Document not found: ${id}`);
 		}
-		return transformDocument(result.document as GraphQLResponseData);
+		return transformDocument(result.document);
 	}
 
 	async listDocuments(options?: {
@@ -97,22 +103,22 @@ class GraphQLDocumentsService {
 		const filter = options?.projectId
 			? { project: { id: { eq: options.projectId } } }
 			: undefined;
-		const result = await this.graphqlService.rawRequest(LIST_DOCUMENTS_QUERY, {
-			first: options?.first ?? 50,
-			filter,
-		});
-		return (
-			(result.documents as GraphQLResponseData).nodes as GraphQLResponseData[]
-		).map(transformDocument);
+		const result = await this.graphqlService.rawRequest<ListDocumentsResponse>(
+			LIST_DOCUMENTS_QUERY,
+			{
+				first: options?.first ?? 50,
+				filter,
+			},
+		);
+		return result.documents.nodes.map(transformDocument);
 	}
 
 	async deleteDocument(id: string): Promise<boolean> {
-		const result = await this.graphqlService.rawRequest(
+		const result = await this.graphqlService.rawRequest<DeleteDocumentResponse>(
 			DELETE_DOCUMENT_MUTATION,
 			{ id },
 		);
-		const deleteData = result.documentDelete as GraphQLResponseData;
-		if (!deleteData.success) {
+		if (!result.documentDelete.success) {
 			throw new Error(`Failed to delete document: ${id}`);
 		}
 		return true;
@@ -128,13 +134,14 @@ class GraphQLDocumentsService {
 		const filter = {
 			or: slugIds.map((slugId) => ({ slugId: { eq: slugId } })),
 		};
-		const result = await this.graphqlService.rawRequest(LIST_DOCUMENTS_QUERY, {
-			first: limit ?? slugIds.length,
-			filter,
-		});
-		return (
-			(result.documents as GraphQLResponseData).nodes as GraphQLResponseData[]
-		).map(transformDocument);
+		const result = await this.graphqlService.rawRequest<ListDocumentsResponse>(
+			LIST_DOCUMENTS_QUERY,
+			{
+				first: limit ?? slugIds.length,
+				filter,
+			},
+		);
+		return result.documents.nodes.map(transformDocument);
 	}
 }
 
