@@ -1,5 +1,4 @@
 import { execFileSync } from "node:child_process";
-import fs from "node:fs";
 import type { Command, OptionValues } from "commander";
 import { loadConfig } from "../config/config.js";
 import {
@@ -20,7 +19,6 @@ import {
 	GET_ISSUE_STATE_HISTORY_QUERY,
 	ISSUE_RELATION_CREATE_MUTATION,
 	SCAN_ISSUES_QUERY,
-	UPDATE_ISSUE_MUTATION,
 } from "../queries/issues.js";
 import type {
 	GraphQLResponseData,
@@ -45,8 +43,6 @@ import {
 	createGraphQLService,
 	type GraphQLService,
 } from "../utils/graphql-service.js";
-import { extractIssueReferences } from "../utils/issue-reference-extractor.js";
-import { wrapIssueReferencesAsLinks } from "../utils/issue-reference-wrapper.js";
 import {
 	createLinearService,
 	type LinearService,
@@ -63,13 +59,20 @@ import {
 	formatMarkdown,
 	formatTable,
 } from "../utils/table-formatter.js";
-import { validateReferences } from "../utils/validate-references.js";
 import {
 	parsePriorityFilter,
 	splitList,
 	validatePriority,
 } from "../utils/validators.js";
-import { getWorkspaceUrlKey } from "../utils/workspace-url.js";
+import { gitCheckoutBranch, toBranchName } from "./issues/branch.js";
+import {
+	maybeAutoLink,
+	prepareAutoLinkedDescription,
+	prepareDescriptionRewrite,
+	pushDescriptionUpdate,
+	readDescriptionFile,
+	resolveDescription,
+} from "./issues/description.js";
 import { readIssues } from "./read-shortcut.js";
 
 const IMAGE_EXTENSIONS = new Set([
@@ -82,98 +85,7 @@ const IMAGE_EXTENSIONS = new Set([
 	".ico",
 ]);
 
-const LINEAR_BRANCH_REGEX = /^([a-zA-Z]+)-(\d+)-(.+)$/;
 const COMMIT_HASH_PREFIX_REGEX = /^[a-f0-9]+ /;
-
-/**
- * Transform Linear's branchName (e.g. "dev-3549-slug") into our convention:
- * "feature/DEV-3549-slug" — uppercase team key with a configurable prefix.
- */
-function toBranchName(linearBranchName: string, prefix = "feature/"): string {
-	// Linear branch names look like "dev-123-some-slug"
-	// We need to uppercase the team key: "DEV-123-some-slug"
-	const match = linearBranchName.match(LINEAR_BRANCH_REGEX);
-	if (!match) {
-		return `${prefix}${linearBranchName}`;
-	}
-	const [, teamKey, number, slug] = match;
-	return `${prefix}${teamKey.toUpperCase()}-${number}-${slug}`;
-}
-
-/**
- * Check out a new git branch. Warns and skips if not in a git repo.
- * Throws if the branch already exists.
- */
-function gitCheckoutBranch(branchName: string): void {
-	try {
-		execFileSync("git", ["rev-parse", "--is-inside-work-tree"], {
-			stdio: "pipe",
-		});
-	} catch {
-		outputWarning("Not inside a git repository — skipping branch checkout.");
-		return;
-	}
-	execFileSync("git", ["checkout", "-b", branchName], { stdio: "pipe" });
-}
-
-/**
- * Read description from a file path or stdin ("-").
- * Avoids shell escaping issues when descriptions contain special characters.
- */
-function readDescriptionFile(filePath: string): string {
-	if (filePath === "-") {
-		return fs.readFileSync(0, "utf8").trim();
-	}
-	if (!fs.existsSync(filePath)) {
-		throw new Error(`Description file not found: ${filePath}`);
-	}
-	return fs.readFileSync(filePath, "utf8").trim();
-}
-
-/**
- * Resolve the description from --description, --description-file, or
- * --template (looked up in `config.descriptionTemplates`).
- *
- * Precedence:
- *   --description-file > --description > --template
- *
- * Passing --template alongside --description or --description-file is a
- * usage error — the explicit body and a template both producing content
- * would be silently dropping one. We throw so the user picks one.
- */
-function resolveDescription(options: OptionValues): string | undefined {
-	const hasInline =
-		typeof options.description === "string" && options.description.length > 0;
-	const hasFile = Boolean(options.descriptionFile);
-	const hasTemplate = typeof options.template === "string" && options.template;
-
-	if (hasTemplate && (hasInline || hasFile)) {
-		throw new Error(
-			"--template is mutually exclusive with --description / --description-file. " +
-				"Pick one.",
-		);
-	}
-
-	if (hasFile) {
-		return readDescriptionFile(options.descriptionFile as string);
-	}
-	if (hasInline) {
-		return options.description as string;
-	}
-	if (hasTemplate) {
-		const templates = loadConfig().descriptionTemplates ?? {};
-		const body = templates[options.template as string];
-		if (!body) {
-			const available = Object.keys(templates).sort();
-			const hint = available.length
-				? `Available templates: ${available.join(", ")}`
-				: "No templates configured. Add one under `descriptionTemplates` in your config.";
-			throw new Error(`Template "${options.template}" not found. ${hint}`);
-		}
-		return body;
-	}
-	return undefined;
-}
 
 function isImageFile(filename: string): boolean {
 	const ext = filename.lastIndexOf(".");
@@ -238,145 +150,6 @@ async function createRelations(
 	}
 
 	return relations;
-}
-
-interface PreparedDescription {
-	/** The (possibly rewritten) description text to send to Linear */
-	description: string | undefined;
-	/** Map<identifier, uuid> of refs that resolved — passed to autoLink to avoid re-resolution */
-	preResolved: Map<string, string>;
-	/** True when the original description was rewritten (i.e. at least one link was wrapped) */
-	rewritten: boolean;
-}
-
-/**
- * Pre-process a description before sending to Linear:
- * 1. Extract all issue references from the description.
- * 2. Validate them (drop those that don't resolve in this workspace — handles "ISO-1424"-style false positives).
- * 3. Wrap valid identifiers as markdown links — skipping any already inside a link, code block, or backtick span.
- *
- * Returns the rewritten description plus the validated map for downstream auto-linking.
- *
- * No-ops (returns the original description with an empty map) when:
- * - description is empty/undefined
- * - the user passed `--no-auto-link`
- */
-/**
- * Shared core for the wrap-and-resolve pipeline used by both the
- * create/update path (`prepareAutoLinkedDescription`) and the
- * `link-references --rewrite-description` path
- * (`prepareDescriptionRewrite`). Pre-fix these were near-duplicate
- * 25-line bodies that differed only in their return shape and
- * opt-out semantics.
- *
- * Returns:
- *   - `wrapped: undefined` when the original description had no
- *     resolvable refs to wrap (no-op for the caller),
- *   - `wrapped: <string>` when at least one ref was wrapped,
- *   - `preResolved` — the validated id→uuid map, passed downstream
- *     to `autoLinkReferences` to skip a second resolve roundtrip.
- */
-async function wrapAndResolveRefs(
-	description: string,
-	selfIdentifier: string | undefined,
-	linearService: LinearService,
-	graphQLService: GraphQLService,
-): Promise<{
-	wrapped: string | undefined;
-	preResolved: Map<string, string>;
-}> {
-	const refs = extractIssueReferences(description, selfIdentifier);
-	if (refs.length === 0) {
-		return { wrapped: undefined, preResolved: new Map() };
-	}
-	const preResolved = await validateReferences(
-		refs.map((r) => r.identifier),
-		linearService,
-	);
-	if (preResolved.size === 0) {
-		return { wrapped: undefined, preResolved };
-	}
-	const validIds = new Set(preResolved.keys());
-	const urlKey = await getWorkspaceUrlKey(graphQLService);
-	const rewritten = wrapIssueReferencesAsLinks(description, validIds, urlKey);
-	return {
-		wrapped: rewritten === description ? undefined : rewritten,
-		preResolved,
-	};
-}
-
-async function prepareAutoLinkedDescription(
-	description: string | undefined,
-	options: OptionValues,
-	selfIdentifier: string | undefined,
-	linearService: LinearService,
-	graphQLService: GraphQLService,
-): Promise<PreparedDescription> {
-	if (!description || options.autoLink === false) {
-		return { description, preResolved: new Map(), rewritten: false };
-	}
-	const { wrapped, preResolved } = await wrapAndResolveRefs(
-		description,
-		selfIdentifier,
-		linearService,
-		graphQLService,
-	);
-	return {
-		description: wrapped ?? description,
-		preResolved,
-		rewritten: wrapped !== undefined,
-	};
-}
-
-interface MaybeAutoLinkInput {
-	description: string | null | undefined;
-	graphQLService: GraphQLService;
-	identifier: string;
-	issueId: string;
-	linearService: LinearService;
-	options: OptionValues;
-	preResolved?: Map<string, string>;
-}
-
-/**
- * Run auto-linking for issue references found in a description, unless the user opted out
- * with --no-auto-link or no description was provided. Returns undefined when nothing was linked
- * and nothing was skipped/failed (so callers can omit the field from JSON output).
- */
-async function maybeAutoLink(
-	input: MaybeAutoLinkInput,
-): Promise<AutoLinkResult | undefined> {
-	const {
-		issueId,
-		identifier,
-		description,
-		options,
-		graphQLService,
-		linearService,
-		preResolved,
-	} = input;
-	if (options.autoLink === false) {
-		return;
-	}
-	if (!description) {
-		return;
-	}
-	const result = await autoLinkReferences({
-		issueId,
-		identifier,
-		description,
-		graphQLService,
-		linearService,
-		preResolved,
-	});
-	if (
-		result.linked.length === 0 &&
-		result.skipped.length === 0 &&
-		result.failed.length === 0
-	) {
-		return;
-	}
-	return result;
 }
 
 function validateUpdateOptions(options: OptionValues): void {
@@ -1126,56 +899,6 @@ async function linkReferencesForIssue(args: {
 		linearService: args.linearService,
 		preResolved: args.preResolved,
 	});
-}
-
-interface PreparedRewrite {
-	/** Resolved id→uuid map (passed to autoLink to skip duplicate resolution) */
-	preResolved: Map<string, string> | undefined;
-	/** New description text — undefined when wrapping wouldn't change anything */
-	wrapped: string | undefined;
-}
-
-/**
- * Prepare a description rewrite: validate refs, wrap valid IDs as markdown links,
- * and return the rewritten text (or undefined if nothing would change).
- */
-async function prepareDescriptionRewrite(
-	description: string,
-	selfIdentifier: string,
-	linearService: LinearService,
-	graphQLService: GraphQLService,
-): Promise<PreparedRewrite> {
-	if (!description) {
-		return { preResolved: undefined, wrapped: undefined };
-	}
-	const { wrapped, preResolved } = await wrapAndResolveRefs(
-		description,
-		selfIdentifier,
-		linearService,
-		graphQLService,
-	);
-	return {
-		// `link-references --rewrite-description` historically used
-		// `preResolved: undefined` to mean "no refs at all"; preserve that
-		// signal so the existing call site keeps the same shape.
-		preResolved: preResolved.size === 0 ? undefined : preResolved,
-		wrapped,
-	};
-}
-
-async function pushDescriptionUpdate(
-	issueUuid: string,
-	description: string,
-	graphQLService: GraphQLService,
-): Promise<void> {
-	const updateResult = await graphQLService.rawRequest(UPDATE_ISSUE_MUTATION, {
-		id: issueUuid,
-		input: { description },
-	});
-	const mutation = updateResult.issueUpdate as GraphQLResponseData | undefined;
-	if (!mutation?.success) {
-		throw new Error("Failed to rewrite description");
-	}
 }
 
 async function handleLinkReferencesSingle(

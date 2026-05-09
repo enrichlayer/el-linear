@@ -6,6 +6,24 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Split `commands/issues.ts` into focused modules.** The 1865-line
+  file mixed branch helpers, description prep, the wrap-and-resolve
+  pipeline, the auto-link hook, and ten command handlers into a
+  single module. Two helper modules carved out:
+  - `commands/issues/branch.ts` — `toBranchName`, `gitCheckoutBranch`,
+    + the Linear-branchName regex.
+  - `commands/issues/description.ts` — `readDescriptionFile`,
+    `resolveDescription`, the shared `wrapAndResolveRefs` core,
+    `prepareAutoLinkedDescription`, `prepareDescriptionRewrite`,
+    `pushDescriptionUpdate`, and `maybeAutoLink`.
+
+  `commands/issues.ts` is now 1588 lines (was 1865) and focused on
+  commander wiring + handlers + the remaining helpers
+  (`createRelations`, attachment glue, retrolink, link-references).
+  No behavior change; 1201/1201 tests still pass. Refs ALL-938.
+
 ### Security
 
 - **OAuth read-modify-write now snapshots the target path.** Pre-fix,
