@@ -17,12 +17,45 @@
 
 const TITLE_TRUNC = 60;
 const DESCRIPTION_LINE_LIMIT = 10;
+const DESCRIPTION_CHAR_LIMIT = 4096;
 const TRUNC_FOOTER = "... (truncated; --format json for full body)";
 
 // ── tiny helpers ───────────────────────────────────────────────
 
+/**
+ * Strip terminal control sequences from a string so the summary
+ * formatter cannot be hijacked by attacker-controlled content
+ * (issue/comment titles set by anyone with workspace write access).
+ *
+ * Removes:
+ *
+ * - C0 control bytes (0x00–0x1F) except `\t` (kept for legible
+ *   embedded tabs) and `\n` (callers like `clipDescription` rely on
+ *   it). `\x1B` (ESC) — the start byte for CSI / OSC / DCS / SS3
+ *   sequences — is dropped along with the rest of C0.
+ * - DEL (0x7F).
+ * - C1 control bytes (0x80–0x9F).
+ *
+ * This is conservative — anything that would tell a terminal to move
+ * the cursor, switch screens, set a hyperlink target, change palette,
+ * etc. is silently dropped. Visible Unicode (including emoji and CJK)
+ * passes through untouched.
+ */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: this regex is the sanitizer.
+const TERMINAL_CONTROL_RE = /[\x00-\x08\x0B-\x1F\x7F-\x9F]/g;
+function sanitizeForTerminal(value: string): string {
+	return value.replace(TERMINAL_CONTROL_RE, "");
+}
+
 function truncate(s: string, n: number): string {
+	// truncate(s, n<=0) → "" (no room even for an ellipsis)
+	// truncate(s, 1)    → "…"
+	// truncate(s, n>=2) → first n-1 characters + ellipsis
+	// Width math elsewhere assumes the result is ≤ n characters; this
+	// keeps the contract honest at the small-n boundary.
 	if (s.length <= n) return s;
+	if (n <= 0) return "";
+	if (n === 1) return "…";
 	return `${s.slice(0, n - 1)}…`;
 }
 
@@ -40,16 +73,26 @@ function indent(text: string, prefix = "  "): string {
 
 function clipDescription(body: string | undefined): string | null {
 	if (!body) return null;
-	const lines = body.split("\n");
-	if (lines.length <= DESCRIPTION_LINE_LIMIT) {
-		return indent(body);
+	const sanitized = sanitizeForTerminal(body);
+	// Char cap first: a 5MB description with no newlines would otherwise
+	// pass the line-count check unchanged and dump verbatim to stdout.
+	let clipped = sanitized;
+	let charClipped = false;
+	if (clipped.length > DESCRIPTION_CHAR_LIMIT) {
+		clipped = clipped.slice(0, DESCRIPTION_CHAR_LIMIT);
+		charClipped = true;
 	}
-	return `${indent(lines.slice(0, DESCRIPTION_LINE_LIMIT).join("\n"))}\n${indent(TRUNC_FOOTER)}`;
+	const lines = clipped.split("\n");
+	if (lines.length <= DESCRIPTION_LINE_LIMIT && !charClipped) {
+		return indent(clipped);
+	}
+	const kept = lines.slice(0, DESCRIPTION_LINE_LIMIT).join("\n");
+	return `${indent(kept)}\n${indent(TRUNC_FOOTER)}`;
 }
 
 function s(v: unknown): string {
 	if (v === null || v === undefined || v === "") return "—";
-	return String(v);
+	return sanitizeForTerminal(String(v));
 }
 
 function asObj(v: unknown): Record<string, unknown> | null {
