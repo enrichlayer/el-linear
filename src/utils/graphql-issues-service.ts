@@ -29,6 +29,51 @@ import { isUuid } from "./uuid.js";
 
 const TEAM_KEY_REGEX = /^[A-Z0-9]+$/i;
 
+/**
+ * Arguments accepted by `GraphQLIssuesService.createIssue`. Most fields
+ * may be passed as a Linear UUID OR a name/identifier — the service
+ * resolves names to UUIDs against the workspace before issuing the
+ * mutation. The few fields that must already be UUIDs are noted on
+ * the property docstring.
+ *
+ * Pre-fix this was `Record<string, unknown>` and every command-side
+ * caller built up a free-form object. A typo in `assigeeId` vs
+ * `assigneeId` compiled cleanly and silently dropped the field. With
+ * the typed shape, `tsc` catches the typo.
+ */
+export interface CreateIssueArgs {
+	title?: string;
+	/** Team key, name, or UUID. Required unless `templateId` is set. */
+	teamId?: string;
+	/** Original team token (key or name) — used in label resolution error messages. */
+	teamInput?: string;
+	description?: string;
+	/** Assignee name, email, alias, or UUID. */
+	assigneeId?: string;
+	/** Linear priority: 0 (none), 1 (urgent), 2 (high), 3 (medium), 4 (low). */
+	priority?: number;
+	/** Project name or UUID. */
+	projectId?: string;
+	/** Status name or UUID — resolved per team. */
+	statusId?: string;
+	/** Label names or UUIDs — auto-created on the team if missing. */
+	labelIds?: string[];
+	/** Parent issue identifier or UUID. */
+	parentId?: string;
+	/** Project milestone name or UUID — resolved within the project. */
+	milestoneId?: string;
+	/** Cycle number, name, or UUID — resolved per team. */
+	cycleId?: string;
+	/** Subscriber names, emails, aliases, or UUIDs. */
+	subscriberIds?: string[];
+	/** Due date, ISO 8601. */
+	dueDate?: string;
+	/** Story-points / estimate. */
+	estimate?: number;
+	/** Linear server-side template UUID for `--from-template`. */
+	templateId?: string;
+}
+
 function extractSummaryText(summary: GraphQLResponseData): string | undefined {
 	if (summary.generationStatus !== "completed" || !summary.content) {
 		return undefined;
@@ -229,7 +274,7 @@ export class GraphQLIssuesService {
 		return this.transformIssueData(issueUpdate.issue as GraphQLResponseData);
 	}
 
-	async createIssue(args: Record<string, unknown>): Promise<LinearIssue> {
+	async createIssue(args: CreateIssueArgs): Promise<LinearIssue> {
 		const resolveVariables = this.buildCreateResolveVariables(args);
 
 		let resolveResult: GraphQLResponseData = {};
@@ -261,79 +306,67 @@ export class GraphQLIssuesService {
 
 		const resolved = await this.resolveCreateFields(args, resolveResult);
 
-		if (args.assigneeId && !isUuid(args.assigneeId as string)) {
-			args.assigneeId = await this.linearService.resolveUserId(
-				args.assigneeId as string,
-			);
+		// Mutate-the-input feels gross but matches the existing pattern
+		// — `resolved` doesn't carry assigneeId, so the buildCreateInput
+		// step reads `args.assigneeId` directly. Resolve in place.
+		let assigneeId = args.assigneeId;
+		if (assigneeId && !isUuid(assigneeId)) {
+			assigneeId = await this.linearService.resolveUserId(assigneeId);
 		}
 
-		const createInput = this.buildCreateInput(args, resolved);
+		const createInput = this.buildCreateInput(
+			{ ...args, assigneeId },
+			resolved,
+		);
 		return this.executeCreateMutation(createInput);
 	}
 
 	private async resolveCreateFields(
-		args: Record<string, unknown>,
+		args: CreateIssueArgs,
 		resolveResult: GraphQLResponseData,
 	): Promise<{
-		teamId: unknown;
-		projectId: unknown;
-		statusId: unknown;
+		teamId: string | undefined;
+		projectId: string | undefined;
+		statusId: string | undefined;
 		labelIds: string[] | undefined;
 		parentId: string | undefined;
 		milestoneId: string | undefined;
-		cycleId: unknown;
+		cycleId: string | undefined;
 	}> {
-		let teamId = args.teamId
-			? await this.resolveTeamId(args.teamId as string, resolveResult)
-			: args.teamId;
+		let teamId: string | undefined = args.teamId
+			? await this.resolveTeamId(args.teamId, resolveResult)
+			: undefined;
 
-		const projectId = args.projectId
-			? this.resolveProjectId(args.projectId as string, resolveResult)
-			: args.projectId;
+		const projectId: string | undefined = args.projectId
+			? this.resolveProjectId(args.projectId, resolveResult)
+			: undefined;
 
 		// Validate team-project compatibility and auto-correct when possible
-		if (projectId && teamId) {
-			teamId = this.validateProjectTeam(
-				teamId as string,
-				args.projectId as string,
-				resolveResult,
-			);
+		if (projectId && teamId && args.projectId) {
+			teamId = this.validateProjectTeam(teamId, args.projectId, resolveResult);
 		}
 
 		const labelIds = await this.resolveLabels(
-			args.labelIds as string[] | undefined,
+			args.labelIds,
 			resolveResult,
-			teamId as string | undefined,
-			args.teamInput as string | undefined,
+			teamId,
+			args.teamInput,
 		);
-		const parentId = this.resolveParentId(
-			args.parentId as string | undefined,
-			resolveResult,
-		);
+		const parentId = this.resolveParentId(args.parentId, resolveResult);
 		const milestoneId = this.resolveMilestoneIdForCreate(
-			args.milestoneId as string | undefined,
+			args.milestoneId,
 			resolveResult,
-			projectId as string | undefined,
+			projectId,
 		);
 
-		let cycleId = args.cycleId;
-		if (
-			args.cycleId &&
-			typeof args.cycleId === "string" &&
-			!isUuid(args.cycleId)
-		) {
-			cycleId = await this.linearService.resolveCycleId(
-				args.cycleId,
-				teamId as string | undefined,
-			);
+		let cycleId: string | undefined = args.cycleId;
+		if (cycleId && !isUuid(cycleId)) {
+			cycleId = await this.linearService.resolveCycleId(cycleId, teamId);
 		}
 
-		let statusId = args.statusId;
-		if (args.statusId && !isUuid(args.statusId as string)) {
-			statusId = await this.linearService.resolveStatusId(
-				args.statusId as string,
-				teamId as string | undefined,
-			);
+		let statusId: string | undefined = args.statusId;
+		if (statusId && !isUuid(statusId)) {
+			statusId = await this.linearService.resolveStatusId(statusId, teamId);
 		}
 
 		return {
@@ -850,15 +883,15 @@ export class GraphQLIssuesService {
 	}
 
 	private buildCreateInput(
-		args: Record<string, unknown>,
+		args: CreateIssueArgs,
 		resolved: {
-			teamId?: unknown;
-			projectId?: unknown;
-			statusId?: unknown;
-			labelIds?: unknown;
-			parentId?: unknown;
-			milestoneId?: unknown;
-			cycleId?: unknown;
+			teamId: string | undefined;
+			projectId: string | undefined;
+			statusId: string | undefined;
+			labelIds: string[] | undefined;
+			parentId: string | undefined;
+			milestoneId: string | undefined;
+			cycleId: string | undefined;
 		},
 	): Record<string, unknown> {
 		const input: Record<string, unknown> = {};
@@ -887,11 +920,7 @@ export class GraphQLIssuesService {
 		if (resolved.statusId) {
 			input.stateId = resolved.statusId;
 		}
-		if (
-			resolved.labelIds &&
-			Array.isArray(resolved.labelIds) &&
-			resolved.labelIds.length > 0
-		) {
+		if (resolved.labelIds && resolved.labelIds.length > 0) {
 			input.labelIds = resolved.labelIds;
 		}
 		if (args.estimate !== undefined) {
@@ -906,11 +935,7 @@ export class GraphQLIssuesService {
 		if (resolved.cycleId) {
 			input.cycleId = resolved.cycleId;
 		}
-		if (
-			args.subscriberIds &&
-			Array.isArray(args.subscriberIds) &&
-			args.subscriberIds.length > 0
-		) {
+		if (args.subscriberIds && args.subscriberIds.length > 0) {
 			input.subscriberIds = args.subscriberIds;
 		}
 		if (args.dueDate !== undefined) {
@@ -1210,31 +1235,29 @@ export class GraphQLIssuesService {
 	}
 
 	private buildCreateResolveVariables(
-		args: Record<string, unknown>,
+		args: CreateIssueArgs,
 	): Record<string, unknown> {
 		const resolveVariables: Record<string, unknown> = {};
-		if (args.teamId && !isUuid(args.teamId as string)) {
+		if (args.teamId && !isUuid(args.teamId)) {
 			Object.assign(
 				resolveVariables,
-				this.buildResolveVariablesForTeam(args.teamId as string),
+				this.buildResolveVariablesForTeam(args.teamId),
 			);
 		}
-		if (args.projectId && !isUuid(args.projectId as string)) {
+		if (args.projectId && !isUuid(args.projectId)) {
 			resolveVariables.projectName = args.projectId;
 		}
-		if (args.milestoneId && !isUuid(args.milestoneId as string)) {
+		if (args.milestoneId && !isUuid(args.milestoneId)) {
 			resolveVariables.milestoneName = args.milestoneId;
 		}
-		if (args.labelIds && Array.isArray(args.labelIds)) {
-			const nonUuidLabels = (args.labelIds as string[]).filter(
-				(id: string) => !isUuid(id),
-			);
+		if (args.labelIds && args.labelIds.length > 0) {
+			const nonUuidLabels = args.labelIds.filter((id) => !isUuid(id));
 			if (nonUuidLabels.length > 0) {
 				resolveVariables.__labelNames = nonUuidLabels;
 			}
 		}
-		if (args.parentId && !isUuid(args.parentId as string)) {
-			const parentParsed = tryParseIssueIdentifier(args.parentId as string);
+		if (args.parentId && !isUuid(args.parentId)) {
+			const parentParsed = tryParseIssueIdentifier(args.parentId);
 			if (parentParsed) {
 				resolveVariables.parentTeamKey = parentParsed.teamKey;
 				resolveVariables.parentIssueNumber = parentParsed.issueNumber;
