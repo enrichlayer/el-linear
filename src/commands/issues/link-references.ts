@@ -21,6 +21,7 @@
 import type { Command, OptionValues } from "commander";
 import { resolveTeam } from "../../config/resolver.js";
 import { LIST_COMMENTS_QUERY } from "../../queries/comments.js";
+import type { ListCommentsResponse } from "../../queries/comments-types.js";
 import {
 	GET_ISSUE_RELATIONS_QUERY,
 	SCAN_ISSUES_QUERY,
@@ -49,16 +50,15 @@ async function fetchCommentBodies(
 	issueUuid: string,
 	graphQLService: GraphQLService,
 ): Promise<string[]> {
-	const result = await graphQLService.rawRequest(LIST_COMMENTS_QUERY, {
-		issueId: issueUuid,
-		first: 250,
-	});
-	const issue = result.issue as GraphQLResponseData | undefined;
-	const comments = issue?.comments as GraphQLResponseData | undefined;
-	const nodes = (comments?.nodes as GraphQLResponseData[] | undefined) ?? [];
-	return nodes
-		.map((c) => c.body as string | null | undefined)
-		.filter((b): b is string => typeof b === "string" && b.length > 0);
+	const result = await graphQLService.rawRequest<ListCommentsResponse>(
+		LIST_COMMENTS_QUERY,
+		{
+			issueId: issueUuid,
+			first: 250,
+		},
+	);
+	const nodes = result.issue?.comments.nodes ?? [];
+	return nodes.map((c) => c.body).filter((b) => b.length > 0);
 }
 
 async function linkReferencesForIssue(args: {
