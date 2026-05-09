@@ -8,6 +8,26 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **`splitList` accepts `string | undefined | null | false`** and
+  returns `[]` for any falsy value, including commander's `false`
+  (which is what `--no-foo` produces). Removes the per-callsite
+  truthy-guard footgun. Refs ALL-938.
+- **`outputWarning` no longer takes an unused `_type` parameter.** The
+  three callers (`term-enforcer`, `issue-validation`, `issues create`)
+  passed category strings (`"term_enforcement"`, `"validation"`,
+  `"missing_fields"`) that the function never read. Drop the param;
+  category info that mattered was already in the warning text.
+  Refs ALL-938.
+- **Funnel direct `process.stderr.write` calls through `logger.error`**
+  in `graphql-issues-service.ts`, `disk-cache.ts`, and `commands/refs.ts`.
+  Three of the four sites now go through the same exit point as the
+  rest of the code's stderr output. Remaining `process.stdout.write`
+  calls (jq result, `refs wrap` payload, `gdoc` markdown,
+  `main.ts:110` JSON-error envelope) are intentional raw-stream emits
+  and stay direct. Refs ALL-938.
+
+### Changed
+
 - **Extract shared `wrapAndResolveRefs` core for description
   rewriting.** `prepareAutoLinkedDescription` (issues create/update)
   and `prepareDescriptionRewrite` (`issues link-references

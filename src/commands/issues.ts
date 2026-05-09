@@ -656,7 +656,6 @@ async function resolveCreateInputs(
 	if (!effectivePriorityInput) {
 		outputWarning(
 			"Creating issue without --priority. Consider specifying it for better triage.",
-			"missing_fields",
 		);
 	}
 
