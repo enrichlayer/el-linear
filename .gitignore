@@ -24,6 +24,9 @@ tmp/
 .tmp/
 .product-finalizer-skip.json
 
+# npm pack release artifacts (`pnpm pack` / `npm pack` output)
+*.tgz
+
 # Playwright MCP traces — local artifacts only
 .playwright-mcp/
 
