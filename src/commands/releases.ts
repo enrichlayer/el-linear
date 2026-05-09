@@ -5,47 +5,59 @@ import {
 	GET_RELEASE_PIPELINES_QUERY,
 	GET_RELEASES_QUERY,
 } from "../queries/releases.js";
-import type { GraphQLResponseData, LinearRelease } from "../types/linear.js";
+import type {
+	CreatedReleaseNode,
+	CreateReleaseResponse,
+	GetReleaseByIdResponse,
+	GetReleasePipelinesResponse,
+	GetReleasesResponse,
+	ReleaseDetailNode,
+	ReleaseListNode,
+} from "../queries/releases-types.js";
+import type { LinearRelease } from "../types/linear.js";
 import { createGraphQLService } from "../utils/graphql-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
 import { getRootOpts } from "../utils/root-opts.js";
 
-function transformRelease(release: GraphQLResponseData): LinearRelease {
+function transformRelease(
+	release: ReleaseListNode | ReleaseDetailNode | CreatedReleaseNode,
+): LinearRelease {
+	// Lifecycle timestamps + dates only exist on the list/detail node shapes,
+	// not on the create-mutation shape; read defensively rather than splitting
+	// the function in two.
+	const r = release as Partial<ReleaseListNode> & ReleaseListNode;
+	const documents = (release as Partial<ReleaseDetailNode>).documents?.nodes;
 	return {
-		id: release.id as string,
-		name: release.name as string,
-		description: (release.description as string) || undefined,
-		version: (release.version as string) || undefined,
-		url: (release.url as string) || undefined,
-		startDate: (release.startDate as string) || undefined,
-		targetDate: (release.targetDate as string) || undefined,
-		startedAt: (release.startedAt as string) || undefined,
-		completedAt: (release.completedAt as string) || undefined,
-		canceledAt: (release.canceledAt as string) || undefined,
+		id: release.id,
+		name: release.name,
+		description: release.description ?? undefined,
+		version: release.version ?? undefined,
+		url: release.url ?? undefined,
+		startDate: r.startDate ?? undefined,
+		targetDate: r.targetDate ?? undefined,
+		startedAt: r.startedAt ?? undefined,
+		completedAt: r.completedAt ?? undefined,
+		canceledAt: r.canceledAt ?? undefined,
 		stage: release.stage
 			? {
-					id: (release.stage as GraphQLResponseData).id as string,
-					name: (release.stage as GraphQLResponseData).name as string,
-					type: (release.stage as GraphQLResponseData).type as string,
+					id: release.stage.id,
+					name: release.stage.name,
+					type: release.stage.type,
 				}
 			: undefined,
 		pipeline: release.pipeline
 			? {
-					id: (release.pipeline as GraphQLResponseData).id as string,
-					name: (release.pipeline as GraphQLResponseData).name as string,
+					id: release.pipeline.id,
+					name: release.pipeline.name,
 				}
 			: undefined,
-		documents: (
-			(release.documents as GraphQLResponseData)?.nodes as
-				| GraphQLResponseData[]
-				| undefined
-		)?.map((d: GraphQLResponseData) => ({
-			id: d.id as string,
-			title: d.title as string,
-			slugId: d.slugId as string,
+		documents: documents?.map((d) => ({
+			id: d.id,
+			title: d.title,
+			slugId: d.slugId,
 		})),
-		createdAt: release.createdAt as string,
-		updatedAt: release.updatedAt as string,
+		createdAt: release.createdAt,
+		updatedAt: release.updatedAt,
 	};
 }
 
@@ -57,21 +69,19 @@ async function handleCreateRelease(
 	const rootOpts = getRootOpts(command);
 	const graphQLService = await createGraphQLService(rootOpts);
 
-	const pipelines = await graphQLService.rawRequest(
-		GET_RELEASE_PIPELINES_QUERY,
-		{ first: 50 },
-	);
-	const pipelineNodes = (pipelines.releasePipelines as GraphQLResponseData)
-		?.nodes as GraphQLResponseData[] | undefined;
-	const pipeline = pipelineNodes?.find(
-		(p: GraphQLResponseData) =>
+	const pipelines =
+		await graphQLService.rawRequest<GetReleasePipelinesResponse>(
+			GET_RELEASE_PIPELINES_QUERY,
+			{ first: 50 },
+		);
+	const pipelineNodes = pipelines.releasePipelines.nodes;
+	const pipeline = pipelineNodes.find(
+		(p) =>
 			p.id === options.pipeline ||
-			(p.name as string).toLowerCase() === options.pipeline.toLowerCase(),
+			p.name.toLowerCase() === options.pipeline.toLowerCase(),
 	);
 	if (!pipeline) {
-		const available = (pipelineNodes ?? [])
-			.map((p: GraphQLResponseData) => p.name as string)
-			.join(", ");
+		const available = pipelineNodes.map((p) => p.name).join(", ");
 		throw new Error(
 			`Pipeline "${options.pipeline}" not found. Available: ${available || "none"}`,
 		);
@@ -85,27 +95,24 @@ async function handleCreateRelease(
 		input.version = options.version;
 	}
 	if (options.stage) {
-		const stageNodes = (pipeline.stages as GraphQLResponseData)?.nodes as
-			| GraphQLResponseData[]
-			| undefined;
-		const stage = stageNodes?.find(
-			(s: GraphQLResponseData) =>
+		const stage = pipeline.stages.nodes.find(
+			(s) =>
 				s.id === options.stage ||
-				(s.name as string).toLowerCase() === options.stage.toLowerCase(),
+				s.name.toLowerCase() === options.stage.toLowerCase(),
 		);
 		if (stage) {
 			input.stageId = stage.id;
 		}
 	}
 
-	const result = await graphQLService.rawRequest(CREATE_RELEASE_MUTATION, {
-		input,
-	});
-	const releaseCreate = result.releaseCreate as GraphQLResponseData | undefined;
-	if (!releaseCreate?.success) {
+	const result = await graphQLService.rawRequest<CreateReleaseResponse>(
+		CREATE_RELEASE_MUTATION,
+		{ input },
+	);
+	if (!result.releaseCreate.success || !result.releaseCreate.release) {
 		throw new Error(`Failed to create release "${name}"`);
 	}
-	outputSuccess(transformRelease(releaseCreate.release as GraphQLResponseData));
+	outputSuccess(transformRelease(result.releaseCreate.release));
 }
 
 export function setupReleasesCommands(program: Command): void {
@@ -127,14 +134,14 @@ export function setupReleasesCommands(program: Command): void {
 				if (options.pipeline) {
 					filter.pipeline = { name: { eqIgnoreCase: options.pipeline } };
 				}
-				const result = await graphQLService.rawRequest(GET_RELEASES_QUERY, {
-					first: Number.parseInt(options.limit, 10),
-					filter: Object.keys(filter).length > 0 ? filter : undefined,
-				});
-				const data = (
-					((result.releases as GraphQLResponseData)
-						?.nodes as GraphQLResponseData[]) ?? []
-				).map(transformRelease);
+				const result = await graphQLService.rawRequest<GetReleasesResponse>(
+					GET_RELEASES_QUERY,
+					{
+						first: Number.parseInt(options.limit, 10),
+						filter: Object.keys(filter).length > 0 ? filter : undefined,
+					},
+				);
+				const data = result.releases.nodes.map(transformRelease);
 				outputSuccess({ data, meta: { count: data.length } });
 			}),
 		);
@@ -147,16 +154,15 @@ export function setupReleasesCommands(program: Command): void {
 				async (releaseId: string, _options: OptionValues, command: Command) => {
 					const rootOpts = getRootOpts(command);
 					const graphQLService = await createGraphQLService(rootOpts);
-					const result = await graphQLService.rawRequest(
-						GET_RELEASE_BY_ID_QUERY,
-						{ id: releaseId },
-					);
+					const result =
+						await graphQLService.rawRequest<GetReleaseByIdResponse>(
+							GET_RELEASE_BY_ID_QUERY,
+							{ id: releaseId },
+						);
 					if (!result.release) {
 						throw new Error(`Release "${releaseId}" not found`);
 					}
-					outputSuccess(
-						transformRelease(result.release as GraphQLResponseData),
-					);
+					outputSuccess(transformRelease(result.release));
 				},
 			),
 		);
@@ -177,20 +183,15 @@ export function setupReleasesCommands(program: Command): void {
 			handleAsyncCommand(async (_options: OptionValues, command: Command) => {
 				const rootOpts = getRootOpts(command);
 				const graphQLService = await createGraphQLService(rootOpts);
-				const result = await graphQLService.rawRequest(
-					GET_RELEASE_PIPELINES_QUERY,
-					{ first: 50 },
-				);
-				const data = (
-					((result.releasePipelines as GraphQLResponseData)
-						?.nodes as GraphQLResponseData[]) ?? []
-				).map((p: GraphQLResponseData) => ({
+				const result =
+					await graphQLService.rawRequest<GetReleasePipelinesResponse>(
+						GET_RELEASE_PIPELINES_QUERY,
+						{ first: 50 },
+					);
+				const data = result.releasePipelines.nodes.map((p) => ({
 					id: p.id,
 					name: p.name,
-					stages: (
-						((p.stages as GraphQLResponseData)
-							?.nodes as GraphQLResponseData[]) ?? []
-					).map((s: GraphQLResponseData) => ({
+					stages: p.stages.nodes.map((s) => ({
 						id: s.id,
 						name: s.name,
 						type: s.type,
