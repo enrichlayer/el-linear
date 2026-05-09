@@ -26,7 +26,10 @@ import {
 	GET_ISSUE_RELATIONS_QUERY,
 	SCAN_ISSUES_QUERY,
 } from "../../queries/issues.js";
-import type { GraphQLResponseData } from "../../types/linear.js";
+import type {
+	GetIssueRelationsResponse,
+	ScanIssuesResponse,
+} from "../../queries/issues-types.js";
 import {
 	type AutoLinkResult,
 	autoLinkReferences,
@@ -95,18 +98,17 @@ async function handleLinkReferencesSingle(
 	const resolvedId = await linearService.resolveIssueId(issueId);
 	// GET_ISSUE_RELATIONS_QUERY also returns description, so this single call gives us everything
 	// we need for the description-only path. Comments are fetched separately on demand.
-	const issueResult = await graphQLService.rawRequest(
-		GET_ISSUE_RELATIONS_QUERY,
-		{
-			id: resolvedId,
-		},
-	);
+	const issueResult =
+		await graphQLService.rawRequest<GetIssueRelationsResponse>(
+			GET_ISSUE_RELATIONS_QUERY,
+			{ id: resolvedId },
+		);
 	if (!issueResult.issue) {
 		throw new Error(`Issue "${issueId}" not found`);
 	}
-	const issue = issueResult.issue as GraphQLResponseData;
-	const identifier = issue.identifier as string;
-	const description = (issue.description as string | null | undefined) ?? "";
+	const issue = issueResult.issue;
+	const identifier = issue.identifier;
+	const description = issue.description ?? "";
 
 	const dryRun = Boolean(options.dryRun);
 	const includeComments = Boolean(options.includeComments);
@@ -143,7 +145,7 @@ async function handleLinkReferencesSingle(
 	outputSuccess({
 		id: resolvedId,
 		identifier,
-		title: issue.title as string,
+		title: issue.title,
 		autoLinked,
 		...(rewriteDescription
 			? {
@@ -185,20 +187,20 @@ async function handleLinkReferencesBatch(
 	const dryRun = Boolean(options.dryRun);
 	const includeComments = Boolean(options.includeComments);
 
-	const scan = await graphQLService.rawRequest(SCAN_ISSUES_QUERY, {
-		filter: { team: { id: { eq: teamId } } },
-		first: limit,
-	});
-	const issues = (scan.issues as GraphQLResponseData | undefined)?.nodes as
-		| GraphQLResponseData[]
-		| undefined;
-	const nodes = issues ?? [];
+	const scan = await graphQLService.rawRequest<ScanIssuesResponse>(
+		SCAN_ISSUES_QUERY,
+		{
+			filter: { team: { id: { eq: teamId } } },
+			first: limit,
+		},
+	);
+	const nodes = scan.issues.nodes;
 
 	const entries: BatchEntry[] = [];
 	for (const node of nodes) {
-		const issueUuid = node.id as string;
-		const identifier = node.identifier as string;
-		const description = (node.description as string | null | undefined) ?? "";
+		const issueUuid = node.id;
+		const identifier = node.identifier;
+		const description = node.description ?? "";
 		const autoLinked = await linkReferencesForIssue({
 			issueUuid,
 			identifier,

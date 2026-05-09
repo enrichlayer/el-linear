@@ -9,30 +9,35 @@
 
 import { ISSUE_RELATION_CREATE_MUTATION } from "../../queries/issues.js";
 import type {
-	GraphQLResponseData,
-	LinearIssueRelation,
-} from "../../types/linear.js";
+	IssueRelationCreateResponse,
+	RelationIncomingNode,
+	RelationOutgoingNode,
+	RelationPeerNode,
+} from "../../queries/issues-types.js";
+import type { LinearIssueRelation } from "../../types/linear.js";
 import type { GraphQLService } from "../../utils/graphql-service.js";
 import type { LinearService } from "../../utils/linear-service.js";
 import { splitList } from "../../utils/validators.js";
 
+type CreatedIssueRelation = NonNullable<
+	IssueRelationCreateResponse["issueRelationCreate"]["issueRelation"]
+>;
+
 export function transformIssueRelation(
-	rel: GraphQLResponseData,
+	rel: CreatedIssueRelation,
 ): LinearIssueRelation {
-	const issue = rel.issue as GraphQLResponseData;
-	const relatedIssue = rel.relatedIssue as GraphQLResponseData;
 	return {
-		id: rel.id as string,
-		type: rel.type as string,
+		id: rel.id,
+		type: rel.type,
 		issue: {
-			id: issue.id as string,
-			identifier: issue.identifier as string,
-			title: issue.title as string,
+			id: rel.issue.id,
+			identifier: rel.issue.identifier,
+			title: rel.issue.title,
 		},
 		relatedIssue: {
-			id: relatedIssue.id as string,
-			identifier: relatedIssue.identifier as string,
-			title: relatedIssue.title as string,
+			id: rel.relatedIssue.id,
+			identifier: rel.relatedIssue.identifier,
+			title: rel.relatedIssue.title,
 		},
 	};
 }
@@ -64,18 +69,23 @@ export async function createRelations(
 		}
 		for (const id of splitList(value)) {
 			const targetId = await linearService.resolveIssueId(id);
-			const rel = await graphQLService.rawRequest(
-				ISSUE_RELATION_CREATE_MUTATION,
-				{
-					input: {
-						issueId: spec.reverse ? targetId : sourceId,
-						relatedIssueId: spec.reverse ? sourceId : targetId,
-						type: spec.type,
+			const result =
+				await graphQLService.rawRequest<IssueRelationCreateResponse>(
+					ISSUE_RELATION_CREATE_MUTATION,
+					{
+						input: {
+							issueId: spec.reverse ? targetId : sourceId,
+							relatedIssueId: spec.reverse ? sourceId : targetId,
+							type: spec.type,
+						},
 					},
-				},
-			);
-			const create = rel.issueRelationCreate as GraphQLResponseData | undefined;
-			const issueRelation = create?.issueRelation as GraphQLResponseData;
+				);
+			const issueRelation = result.issueRelationCreate.issueRelation;
+			if (!issueRelation) {
+				throw new Error(
+					`Failed to create ${spec.type} relation from ${sourceId} to ${id}`,
+				);
+			}
 			relations.push(transformIssueRelation(issueRelation));
 		}
 	}
@@ -112,56 +122,67 @@ export function normalizeInverseType(type: string): string {
 }
 
 export function buildRelatedIssueSummary(
-	peer: GraphQLResponseData,
+	peer: RelationPeerNode,
 ): RelatedIssueEntry["issue"] {
-	const state = peer.state as GraphQLResponseData | undefined;
-	const assignee = peer.assignee as GraphQLResponseData | undefined;
-	const team = peer.team as GraphQLResponseData | undefined;
 	return {
-		id: peer.id as string,
-		identifier: peer.identifier as string,
-		title: peer.title as string,
-		...(state
-			? { state: { id: state.id as string, name: state.name as string } }
+		id: peer.id,
+		identifier: peer.identifier,
+		title: peer.title,
+		...(peer.state
+			? { state: { id: peer.state.id, name: peer.state.name } }
 			: {}),
-		...(peer.priority == null ? {} : { priority: peer.priority as number }),
-		...(assignee
+		...(peer.priority == null ? {} : { priority: peer.priority }),
+		...(peer.assignee
 			? {
 					assignee: {
-						id: assignee.id as string,
-						name: assignee.name as string,
+						id: peer.assignee.id,
+						name: peer.assignee.name,
 					},
 				}
 			: {}),
-		...(team
+		...(peer.team
 			? {
 					team: {
-						id: team.id as string,
-						key: team.key as string,
-						name: team.name as string,
+						id: peer.team.id,
+						key: peer.team.key,
+						name: peer.team.name,
 					},
 				}
 			: {}),
 	};
 }
 
-export function buildRelationEntries(
-	nodes: GraphQLResponseData[] | undefined,
-	peerKey: "relatedIssue" | "issue",
-	direction: "outgoing" | "incoming",
-	normalizeType: (raw: string) => string,
+export function buildOutgoingRelationEntries(
+	nodes: RelationOutgoingNode[] | undefined,
 ): RelatedIssueEntry[] {
 	const entries: RelatedIssueEntry[] = [];
 	for (const rel of nodes ?? []) {
-		const peer = rel[peerKey] as GraphQLResponseData | undefined;
-		if (!peer) {
+		if (!rel.relatedIssue) {
 			continue;
 		}
 		entries.push({
-			id: rel.id as string,
-			type: normalizeType(rel.type as string),
-			direction,
-			issue: buildRelatedIssueSummary(peer),
+			id: rel.id,
+			type: rel.type,
+			direction: "outgoing",
+			issue: buildRelatedIssueSummary(rel.relatedIssue),
+		});
+	}
+	return entries;
+}
+
+export function buildIncomingRelationEntries(
+	nodes: RelationIncomingNode[] | undefined,
+): RelatedIssueEntry[] {
+	const entries: RelatedIssueEntry[] = [];
+	for (const rel of nodes ?? []) {
+		if (!rel.issue) {
+			continue;
+		}
+		entries.push({
+			id: rel.id,
+			type: normalizeInverseType(rel.type),
+			direction: "incoming",
+			issue: buildRelatedIssueSummary(rel.issue),
 		});
 	}
 	return entries;

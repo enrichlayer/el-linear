@@ -21,7 +21,7 @@ import fs from "node:fs";
 import type { OptionValues } from "commander";
 import { loadConfig } from "../../config/config.js";
 import { UPDATE_ISSUE_MUTATION } from "../../queries/issues.js";
-import type { GraphQLResponseData } from "../../types/linear.js";
+import type { UpdateIssueResponse } from "../../queries/issues-types.js";
 import {
 	type AutoLinkResult,
 	autoLinkReferences,
@@ -218,12 +218,11 @@ export async function pushDescriptionUpdate(
 	description: string,
 	graphQLService: GraphQLService,
 ): Promise<void> {
-	const updateResult = await graphQLService.rawRequest(UPDATE_ISSUE_MUTATION, {
-		id: issueUuid,
-		input: { description },
-	});
-	const mutation = updateResult.issueUpdate as GraphQLResponseData | undefined;
-	if (!mutation?.success) {
+	const updateResult = await graphQLService.rawRequest<UpdateIssueResponse>(
+		UPDATE_ISSUE_MUTATION,
+		{ id: issueUuid, input: { description } },
+	);
+	if (!updateResult.issueUpdate.success) {
 		throw new Error("Failed to rewrite description");
 	}
 }

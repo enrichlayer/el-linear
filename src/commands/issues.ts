@@ -17,6 +17,7 @@ import {
 	GET_ISSUE_RELATIONS_QUERY,
 	GET_ISSUE_STATE_HISTORY_QUERY,
 } from "../queries/issues.js";
+import type { GetIssueRelationsResponse } from "../queries/issues-types.js";
 import type {
 	GraphQLResponseData,
 	IssueStateSpan,
@@ -59,9 +60,9 @@ import {
 } from "./issues/description.js";
 import { handleLinkReferencesIssue } from "./issues/link-references.js";
 import {
-	buildRelationEntries,
+	buildIncomingRelationEntries,
+	buildOutgoingRelationEntries,
 	createRelations,
-	normalizeInverseType,
 	type RelatedIssueEntry,
 } from "./issues/relations.js";
 import { readIssues } from "./read-shortcut.js";
@@ -669,39 +670,26 @@ async function handleRelatedIssues(
 	const linearService = await createLinearService(rootOpts);
 
 	const resolvedId = await linearService.resolveIssueId(issueId);
-	const result = await graphQLService.rawRequest(GET_ISSUE_RELATIONS_QUERY, {
-		id: resolvedId,
-	});
+	const result = await graphQLService.rawRequest<GetIssueRelationsResponse>(
+		GET_ISSUE_RELATIONS_QUERY,
+		{ id: resolvedId },
+	);
 
 	if (!result.issue) {
 		throw new Error(`Issue "${issueId}" not found`);
 	}
 
-	const issue = result.issue as GraphQLResponseData;
-	const relations = issue.relations as GraphQLResponseData | undefined;
-	const inverseRelations = issue.inverseRelations as
-		| GraphQLResponseData
-		| undefined;
+	const issue = result.issue;
 
 	const entries: RelatedIssueEntry[] = [
-		...buildRelationEntries(
-			relations?.nodes as GraphQLResponseData[] | undefined,
-			"relatedIssue",
-			"outgoing",
-			(raw) => raw,
-		),
-		...buildRelationEntries(
-			inverseRelations?.nodes as GraphQLResponseData[] | undefined,
-			"issue",
-			"incoming",
-			normalizeInverseType,
-		),
+		...buildOutgoingRelationEntries(issue.relations.nodes),
+		...buildIncomingRelationEntries(issue.inverseRelations.nodes),
 	];
 
 	outputSuccess({
-		id: issue.id as string,
-		identifier: issue.identifier as string,
-		title: issue.title as string,
+		id: issue.id,
+		identifier: issue.identifier,
+		title: issue.title,
 		data: entries,
 		meta: { count: entries.length },
 	});
