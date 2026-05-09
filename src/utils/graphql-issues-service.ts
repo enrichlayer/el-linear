@@ -20,6 +20,7 @@ import type {
 	GetIssueByIdResponse,
 	GetIssuesResponse,
 	GetIssueTeamResponse,
+	IssueNode,
 	IssueWithCommentsNode,
 	SearchIssuesResponse,
 	UpdateIssueResponse,
@@ -146,22 +147,29 @@ export interface CreateIssueArgs {
 	templateId?: string;
 }
 
-function extractSummaryText(summary: GraphQLResponseData): string | undefined {
+interface SummaryWalkNode {
+	text?: string;
+	content?: SummaryWalkNode[];
+}
+
+function extractSummaryText(
+	summary: NonNullable<IssueNode["summary"]>,
+): string | undefined {
 	if (summary.generationStatus !== "completed" || !summary.content) {
 		return undefined;
 	}
 	const parts: string[] = [];
-	const walk = (node: GraphQLResponseData) => {
-		if (node.text) {
-			parts.push(node.text as string);
+	const walk = (node: SummaryWalkNode) => {
+		if (typeof node.text === "string") {
+			parts.push(node.text);
 		}
 		if (Array.isArray(node.content)) {
-			for (const child of node.content as GraphQLResponseData[]) {
+			for (const child of node.content) {
 				walk(child);
 			}
 		}
 	};
-	walk(summary.content as GraphQLResponseData);
+	walk(summary.content as SummaryWalkNode);
 	return parts.length > 0 ? parts.join("") : undefined;
 }
 
@@ -175,13 +183,6 @@ export class GraphQLIssuesService {
 	}
 
 	async getIssues(limit = 25): Promise<LinearIssue[]> {
-		// First slice of the per-query response typing pass (ALL-937):
-		// the rawRequest call binds to `GetIssuesResponse` so the
-		// consumer can read `.issues.nodes` without a cast, and a
-		// renamed Linear field becomes a `tsc` error instead of a
-		// silent `undefined`. The transformer still takes
-		// `GraphQLResponseData` — typing it requires reshaping ~100
-		// lines of internal field reads, scoped to a follow-up.
 		const result = await this.graphQLService.rawRequest<GetIssuesResponse>(
 			GET_ISSUES_QUERY,
 			{ first: limit, orderBy: "updatedAt" },
@@ -190,9 +191,7 @@ export class GraphQLIssuesService {
 		if (!nodes?.length) {
 			return [];
 		}
-		return nodes.map((issue) =>
-			this.transformIssueData(issue as unknown as GraphQLResponseData),
-		);
+		return nodes.map((issue) => this.transformIssueData(issue));
 	}
 
 	async getIssueById(issueId: string): Promise<LinearIssue> {
@@ -219,7 +218,7 @@ export class GraphQLIssuesService {
 			}
 			issueData = nodes[0];
 		}
-		return this.transformIssueData(issueData as unknown as GraphQLResponseData);
+		return this.transformIssueData(issueData);
 	}
 
 	async updateIssue(
@@ -347,9 +346,7 @@ export class GraphQLIssuesService {
 		if (!issueUpdate.issue) {
 			throw new Error("Failed to retrieve updated issue");
 		}
-		return this.transformIssueData(
-			issueUpdate.issue as unknown as GraphQLResponseData,
-		);
+		return this.transformIssueData(issueUpdate.issue);
 	}
 
 	async createIssue(args: CreateIssueArgs): Promise<LinearIssue> {
@@ -480,9 +477,7 @@ export class GraphQLIssuesService {
 		if (!issueCreate.issue) {
 			throw new Error("Failed to retrieve created issue");
 		}
-		return this.transformIssueData(
-			issueCreate.issue as unknown as GraphQLResponseData,
-		);
+		return this.transformIssueData(issueCreate.issue);
 	}
 
 	async searchIssues(args: SearchIssueArgs): Promise<LinearIssue[]> {
@@ -541,9 +536,7 @@ export class GraphQLIssuesService {
 			if (!nodes?.length) {
 				return [];
 			}
-			const results = nodes.map((issue) =>
-				this.transformIssueData(issue as unknown as GraphQLResponseData),
-			);
+			const results = nodes.map((issue) => this.transformIssueData(issue));
 			return this.applySearchFilters(results, {
 				teamId: finalTeamId,
 				assigneeId: finalAssigneeId,
@@ -575,9 +568,7 @@ export class GraphQLIssuesService {
 		if (!filteredIssues?.nodes) {
 			return [];
 		}
-		return filteredIssues.nodes.map((issue) =>
-			this.transformIssueData(issue as unknown as GraphQLResponseData),
-		);
+		return filteredIssues.nodes.map((issue) => this.transformIssueData(issue));
 	}
 
 	// --- Private helper methods for field resolution ---
@@ -1358,33 +1349,34 @@ export class GraphQLIssuesService {
 		return parentNodes[0].id as string;
 	}
 
-	transformIssueData(issue: GraphQLResponseData): LinearIssue {
-		const labels = issue.labels as GraphQLResponseData;
-
+	transformIssueData(issue: IssueNode | IssueWithCommentsNode): LinearIssue {
+		// `labels`/`children`/`comments` are connection fields that the
+		// fragment always selects, so production responses populate them.
+		// Test mocks pass partial objects, so read defensively to keep
+		// those test fixtures small.
 		return {
 			...this.transformIssueCoreFields(issue),
 			...this.transformIssueRelations(issue),
-			summary: issue.summary
-				? extractSummaryText(issue.summary as GraphQLResponseData)
-				: undefined,
-			priority: issue.priority as number,
-			estimate: (issue.estimate as number | undefined) || undefined,
-			dueDate: (issue.dueDate as string | undefined) || undefined,
-			labels: (labels.nodes as GraphQLResponseData[]).map(
-				(label: GraphQLResponseData) => ({
-					id: label.id as string,
-					name: label.name as string,
-				}),
-			),
+			summary: issue.summary ? extractSummaryText(issue.summary) : undefined,
+			priority: issue.priority,
+			estimate: issue.estimate ?? undefined,
+			dueDate: issue.dueDate ?? undefined,
+			labels: (issue.labels?.nodes ?? []).map((label) => ({
+				id: label.id,
+				name: label.name,
+			})),
 			...this.transformIssueHierarchy(issue),
-			comments: this.transformIssueComments(issue),
-			createdAt: toISOStringOrNow(issue.createdAt as string),
-			updatedAt: toISOStringOrNow(issue.updatedAt as string),
+			comments:
+				"comments" in issue && issue.comments
+					? this.transformIssueComments(issue)
+					: [],
+			createdAt: toISOStringOrNow(issue.createdAt),
+			updatedAt: toISOStringOrNow(issue.updatedAt),
 		};
 	}
 
 	private transformIssueCoreFields(
-		issue: GraphQLResponseData,
+		issue: IssueNode,
 	): Pick<
 		LinearIssue,
 		| "id"
@@ -1396,125 +1388,104 @@ export class GraphQLIssuesService {
 		| "embeds"
 	> {
 		return {
-			id: issue.id as string,
-			identifier: issue.identifier as string,
-			url: issue.url as string,
-			title: issue.title as string,
-			description: (issue.description as string | undefined) || undefined,
-			branchName: (issue.branchName as string | undefined) || undefined,
-			embeds: issue.description
-				? extractEmbeds(issue.description as string)
-				: undefined,
+			id: issue.id,
+			identifier: issue.identifier,
+			url: issue.url,
+			title: issue.title,
+			description: issue.description ?? undefined,
+			branchName: issue.branchName || undefined,
+			embeds: issue.description ? extractEmbeds(issue.description) : undefined,
 		};
 	}
 
 	private transformIssueRelations(
-		issue: GraphQLResponseData,
+		issue: IssueNode,
 	): Pick<
 		LinearIssue,
 		"state" | "assignee" | "team" | "project" | "cycle" | "projectMilestone"
 	> {
-		const state = issue.state as GraphQLResponseData | undefined;
-		const assignee = issue.assignee as GraphQLResponseData | undefined;
-		const team = issue.team as GraphQLResponseData | undefined;
-		const project = issue.project as GraphQLResponseData | undefined;
-		const cycle = issue.cycle as GraphQLResponseData | undefined;
-		const milestone = issue.projectMilestone as GraphQLResponseData | undefined;
-
 		return {
-			state: state
-				? { id: state.id as string, name: state.name as string }
+			state: issue.state
+				? { id: issue.state.id, name: issue.state.name }
 				: undefined,
-			assignee: assignee
+			assignee: issue.assignee
 				? {
-						id: assignee.id as string,
+						id: issue.assignee.id,
 						name: resolveUserDisplayName(
-							assignee.id as string,
-							assignee.name as string,
+							issue.assignee.id,
+							issue.assignee.name,
 						),
-						url: (assignee.url as string | undefined) || undefined,
+						url: issue.assignee.url ?? undefined,
 					}
 				: undefined,
-			team: team
+			team: issue.team
 				? {
-						id: team.id as string,
-						key: team.key as string,
-						name: team.name as string,
+						id: issue.team.id,
+						key: issue.team.key,
+						name: issue.team.name,
 					}
 				: undefined,
-			project: project
-				? { id: project.id as string, name: project.name as string }
+			project: issue.project
+				? { id: issue.project.id, name: issue.project.name }
 				: undefined,
-			cycle: cycle
+			cycle: issue.cycle
 				? {
-						id: cycle.id as string,
-						name: cycle.name as string,
-						number: cycle.number as number,
+						id: issue.cycle.id,
+						name: issue.cycle.name ?? "",
+						number: issue.cycle.number,
 					}
 				: undefined,
-			projectMilestone: milestone
+			projectMilestone: issue.projectMilestone
 				? {
-						id: milestone.id as string,
-						name: milestone.name as string,
-						targetDate:
-							(milestone.targetDate as string | undefined) || undefined,
+						id: issue.projectMilestone.id,
+						name: issue.projectMilestone.name,
+						targetDate: issue.projectMilestone.targetDate ?? undefined,
 					}
 				: undefined,
 		};
 	}
 
 	private transformIssueHierarchy(
-		issue: GraphQLResponseData,
+		issue: IssueNode,
 	): Pick<LinearIssue, "parentIssue" | "subIssues"> {
-		const parent = issue.parent as GraphQLResponseData | undefined;
-		const children = issue.children as GraphQLResponseData | undefined;
-
+		// children is a connection field — always present in production
+		// responses. Defensive read keeps test mocks small.
+		const childNodes = issue.children?.nodes ?? [];
 		return {
-			parentIssue: parent
+			parentIssue: issue.parent
 				? {
-						id: parent.id as string,
-						identifier: parent.identifier as string,
-						title: parent.title as string,
+						id: issue.parent.id,
+						identifier: issue.parent.identifier,
+						title: issue.parent.title,
 					}
 				: undefined,
 			subIssues:
-				(children?.nodes as GraphQLResponseData[] | undefined)?.map(
-					(child: GraphQLResponseData) => ({
-						id: child.id as string,
-						identifier: child.identifier as string,
-						title: child.title as string,
-					}),
-				) || undefined,
+				childNodes.length > 0
+					? childNodes.map((child) => ({
+							id: child.id,
+							identifier: child.identifier,
+							title: child.title,
+						}))
+					: undefined,
 		};
 	}
 
 	private transformIssueComments(
-		issue: GraphQLResponseData,
+		issue: IssueWithCommentsNode,
 	): LinearIssue["comments"] {
-		const comments = issue.comments as GraphQLResponseData | undefined;
-		return (
-			(comments?.nodes as GraphQLResponseData[] | undefined)?.map(
-				(comment: GraphQLResponseData) => {
-					const commentUser = comment.user as GraphQLResponseData | null;
-					return {
-						id: comment.id as string,
-						body: comment.body as string,
-						embeds: extractEmbeds(comment.body as string),
-						user: commentUser
-							? {
-									id: commentUser.id as string,
-									name: resolveUserDisplayName(
-										commentUser.id as string,
-										commentUser.name as string,
-									),
-									url: (commentUser.url as string | undefined) || undefined,
-								}
-							: undefined,
-						createdAt: toISOStringOrNow(comment.createdAt as string),
-						updatedAt: toISOStringOrNow(comment.updatedAt as string),
-					};
-				},
-			) || []
-		);
+		return issue.comments.nodes.map((comment) => ({
+			id: comment.id,
+			body: comment.body,
+			embeds: extractEmbeds(comment.body),
+			user: comment.user
+				? {
+						id: comment.user.id,
+						name: resolveUserDisplayName(comment.user.id, comment.user.name),
+						url: comment.user.url ?? undefined,
+					}
+				: undefined,
+			createdAt: toISOStringOrNow(comment.createdAt),
+			updatedAt: toISOStringOrNow(comment.updatedAt),
+		}));
 	}
 }
