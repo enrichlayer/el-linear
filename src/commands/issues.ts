@@ -38,6 +38,7 @@ import { applyFooter } from "../utils/footer.js";
 import { createGraphQLAttachmentsService } from "../utils/graphql-attachments-service.js";
 import {
 	GraphQLIssuesService,
+	type SearchIssueArgs,
 	type UpdateIssueArgs,
 } from "../utils/graphql-issues-service.js";
 import {
@@ -525,7 +526,7 @@ async function handleListIssues(
 		options.project === false ||
 		options.priority;
 	if (hasFilters) {
-		const searchArgs: Record<string, unknown> = {
+		const searchArgs: SearchIssueArgs = {
 			teamId: options.team ? resolveTeam(options.team) : undefined,
 			assigneeId: options.assignee
 				? await resolveAssignee(options.assignee, rootOpts)
@@ -569,7 +570,7 @@ async function handleSearchIssues(
 	const linearService = await createLinearService(rootOpts);
 	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
 
-	const searchArgs: Record<string, unknown> = {
+	const searchArgs: SearchIssueArgs = {
 		query,
 		teamId: options.team ? resolveTeam(options.team) : undefined,
 		assigneeId: options.assignee
