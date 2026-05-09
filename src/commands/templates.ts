@@ -7,24 +7,20 @@ import {
 	TEMPLATE_UPDATE_MUTATION,
 	TEMPLATES_LIST_QUERY,
 } from "../queries/templates.js";
+import type {
+	CreateTemplateResponse,
+	DeleteTemplateResponse,
+	GetTemplateResponse,
+	TemplateNode,
+	TemplatesListResponse,
+	UpdateTemplateResponse,
+} from "../queries/templates-types.js";
 import { createGraphQLService } from "../utils/graphql-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
 import { getRootOpts } from "../utils/root-opts.js";
 import { parsePositiveInt } from "../utils/validators.js";
 
-interface TemplateResult {
-	createdAt: string;
-	creator: { id: string; name: string } | null;
-	description: string | null;
-	id: string;
-	name: string;
-	team: { id: string; key: string; name: string } | null;
-	templateData: unknown;
-	type: string;
-	updatedAt: string;
-}
-
-function formatTemplateSummary(t: TemplateResult): Record<string, unknown> {
+function formatTemplateSummary(t: TemplateNode): Record<string, unknown> {
 	return {
 		id: t.id,
 		name: t.name,
@@ -58,8 +54,11 @@ export function setupTemplatesCommands(program: Command): void {
 				const rootOpts = getRootOpts(command);
 				const graphQLService = await createGraphQLService(rootOpts);
 				const limit = parsePositiveInt(options.limit, "--limit");
-				const result = await graphQLService.rawRequest(TEMPLATES_LIST_QUERY);
-				let items = (result.templates as unknown as TemplateResult[]) ?? [];
+				const result =
+					await graphQLService.rawRequest<TemplatesListResponse>(
+						TEMPLATES_LIST_QUERY,
+					);
+				let items = result.templates ?? [];
 
 				if (options.type) {
 					const filterType = options.type.toLowerCase();
@@ -87,16 +86,14 @@ export function setupTemplatesCommands(program: Command): void {
 				) => {
 					const rootOpts = getRootOpts(command);
 					const graphQLService = await createGraphQLService(rootOpts);
-					const result = await graphQLService.rawRequest(TEMPLATE_BY_ID_QUERY, {
-						id: templateId,
-					});
-					const template = result.template as unknown as
-						| TemplateResult
-						| undefined;
-					if (!template) {
+					const result = await graphQLService.rawRequest<GetTemplateResponse>(
+						TEMPLATE_BY_ID_QUERY,
+						{ id: templateId },
+					);
+					if (!result.template) {
 						throw new Error(`Template "${templateId}" not found`);
 					}
-					outputSuccess(template);
+					outputSuccess(result.template);
 				},
 			),
 		);
@@ -144,18 +141,14 @@ export function setupTemplatesCommands(program: Command): void {
 				if (options.icon) input.icon = options.icon;
 				if (options.color) input.color = options.color;
 
-				const result = await graphQLService.rawRequest(
+				const result = await graphQLService.rawRequest<CreateTemplateResponse>(
 					TEMPLATE_CREATE_MUTATION,
 					{ input },
 				);
-				const payload = result.templateCreate as unknown as {
-					success: boolean;
-					template: TemplateResult;
-				};
-				if (!payload?.success) {
+				if (!result.templateCreate.success || !result.templateCreate.template) {
 					throw new Error("templateCreate returned success=false");
 				}
-				outputSuccess(payload.template);
+				outputSuccess(result.templateCreate.template);
 			}),
 		);
 
@@ -201,18 +194,18 @@ export function setupTemplatesCommands(program: Command): void {
 						);
 					}
 
-					const result = await graphQLService.rawRequest(
-						TEMPLATE_UPDATE_MUTATION,
-						{ id: templateId, input },
-					);
-					const payload = result.templateUpdate as unknown as {
-						success: boolean;
-						template: TemplateResult;
-					};
-					if (!payload?.success) {
+					const result =
+						await graphQLService.rawRequest<UpdateTemplateResponse>(
+							TEMPLATE_UPDATE_MUTATION,
+							{ id: templateId, input },
+						);
+					if (
+						!result.templateUpdate.success ||
+						!result.templateUpdate.template
+					) {
 						throw new Error("templateUpdate returned success=false");
 					}
-					outputSuccess(payload.template);
+					outputSuccess(result.templateUpdate.template);
 				},
 			),
 		);
@@ -229,14 +222,12 @@ export function setupTemplatesCommands(program: Command): void {
 				) => {
 					const rootOpts = getRootOpts(command);
 					const graphQLService = await createGraphQLService(rootOpts);
-					const result = await graphQLService.rawRequest(
-						TEMPLATE_DELETE_MUTATION,
-						{ id: templateId },
-					);
-					const payload = result.templateDelete as unknown as {
-						success: boolean;
-					};
-					if (!payload?.success) {
+					const result =
+						await graphQLService.rawRequest<DeleteTemplateResponse>(
+							TEMPLATE_DELETE_MUTATION,
+							{ id: templateId },
+						);
+					if (!result.templateDelete.success) {
 						throw new Error("templateDelete returned success=false");
 					}
 					outputSuccess({ id: templateId, deleted: true });
