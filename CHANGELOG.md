@@ -26,6 +26,19 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+- **OAuth refresh is now serialized across concurrent processes.** When
+  the access token is near expiry, the refresh path acquires an
+  exclusive file lock on the `oauth.json` sidecar before reading,
+  refreshing, and writing. Without this, two parallel `el-linear`
+  invocations (parallel CI matrix, two terminal tabs, watchdog scripts)
+  would both observe an expired state, both call `refreshTokens` with
+  the same refresh token, and both write — Linear's OAuth server
+  invalidates the loser's token, and the loser's next refresh
+  permanently fails. The lock makes the loser re-read the freshly-
+  written state inside the critical section and use the winner's tokens
+  instead of issuing a duplicate refresh. Stale locks (process crashed
+  mid-refresh) are detected via mtime and stolen after 30s. Closes
+  ALL-931.
 - **Atomic writes for `profile migrate-legacy`.** The migrate-legacy
   command's config / token / active-profile writes now go through the
   existing `atomicWrite` helper (write-tmp + rename) instead of raw

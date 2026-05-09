@@ -17,8 +17,10 @@
  */
 
 import { getApiToken } from "../utils/auth.js";
+import { withFileLock } from "./oauth-fs.js";
 import {
 	type OAuthState,
+	oauthStatePath,
 	readOAuthState,
 	writeOAuthState,
 } from "./oauth-storage.js";
@@ -82,57 +84,70 @@ export async function getActiveAuth(
  *
  * On refresh failure, throws an actionable error pointing at
  * `el-linear init oauth`.
+ *
+ * **Concurrency.** When a refresh is needed, this acquires an exclusive
+ * file lock on the oauth.json sidecar before reading-refreshing-writing.
+ * Two parallel CLI invocations would otherwise both call `refreshTokens`
+ * with the same refresh token; Linear's server invalidates the loser's
+ * stored token and the next refresh permanently fails. The lock
+ * serialises them — the second process re-reads the freshly-written
+ * state inside the lock and uses the winner's tokens instead of issuing
+ * a second refresh.
  */
 export async function ensureFreshAccessToken(
 	state: OAuthState,
 	options: GetActiveAuthOptions = {},
 ): Promise<OAuthState> {
 	const now = options.now ?? Date.now;
-	// Use the injected clock for the freshness check — `isAccessTokenFresh`
-	// reads `Date.now()` directly, which doesn't honor the test seam. When
-	// a test pins `now` to a fake epoch (or the production wall clock has
-	// drifted relative to `state.expiresAt`), going through the helper
-	// short-circuits the wrong way and falls through to a real refresh.
+	// Fast path: token is fresh; no lock, no refresh.
 	if (now() + 60_000 < state.expiresAt) {
 		return state;
 	}
-	if (!state.refreshToken) {
-		throw new Error(
-			"OAuth access token expired and no refresh token is stored. Re-run `el-linear init oauth`.",
-		);
-	}
+	return withFileLock(oauthStatePath(), async () => {
+		// Re-read inside the lock — another process may have refreshed
+		// while we were waiting. If so, use their result.
+		const current = (await readOAuthState()) ?? state;
+		if (now() + 60_000 < current.expiresAt) {
+			return current;
+		}
+		if (!current.refreshToken) {
+			throw new Error(
+				"OAuth access token expired and no refresh token is stored. Re-run `el-linear init oauth`.",
+			);
+		}
 
-	let refreshed: ExchangeResult;
-	try {
-		refreshed = await refreshTokens(
-			{
-				clientId: state.clientId,
-				clientSecret: state.clientSecret,
-				refreshToken: state.refreshToken,
-			},
-			options.fetchImpl,
-			now,
-		);
-	} catch (err) {
-		const message = err instanceof Error ? err.message : String(err);
-		throw new Error(
-			`OAuth refresh failed: ${message}. Re-run \`el-linear init oauth\` to re-authorize.`,
-		);
-	}
+		let refreshed: ExchangeResult;
+		try {
+			refreshed = await refreshTokens(
+				{
+					clientId: current.clientId,
+					clientSecret: current.clientSecret,
+					refreshToken: current.refreshToken,
+				},
+				options.fetchImpl,
+				now,
+			);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			throw new Error(
+				`OAuth refresh failed: ${message}. Re-run \`el-linear init oauth\` to re-authorize.`,
+			);
+		}
 
-	const next: OAuthState = {
-		...state,
-		accessToken: refreshed.accessToken,
-		// Preserve the previous refresh token if the server didn't rotate
-		// (some OAuth servers only return a new refresh_token periodically).
-		refreshToken: refreshed.refreshToken ?? state.refreshToken,
-		tokenType: refreshed.tokenType,
-		// Use the freshly-returned scopes only if non-empty; otherwise keep
-		// what we had, since some token endpoints omit `scope` on refresh.
-		scopes: refreshed.scopes.length > 0 ? refreshed.scopes : state.scopes,
-		expiresAt: refreshed.expiresAt,
-		obtainedAt: now(),
-	};
-	await writeOAuthState(next);
-	return next;
+		const next: OAuthState = {
+			...current,
+			accessToken: refreshed.accessToken,
+			// Preserve the previous refresh token if the server didn't rotate
+			// (some OAuth servers only return a new refresh_token periodically).
+			refreshToken: refreshed.refreshToken ?? current.refreshToken,
+			tokenType: refreshed.tokenType,
+			// Use the freshly-returned scopes only if non-empty; otherwise
+			// keep what we had — some token endpoints omit `scope` on refresh.
+			scopes: refreshed.scopes.length > 0 ? refreshed.scopes : current.scopes,
+			expiresAt: refreshed.expiresAt,
+			obtainedAt: now(),
+		};
+		await writeOAuthState(next);
+		return next;
+	});
 }

@@ -183,6 +183,10 @@ describe("ensureFreshAccessToken", () => {
 
 	it("throws actionable error when refresh fails", async () => {
 		const state = freshState({ expiresAt: NOW - 1 });
+		// Persist the state first so the file lock can be acquired —
+		// production callers always go readOAuthState → ensureFreshAccessToken,
+		// so oauth.json exists by the time we reach the lock.
+		await writeOAuthState(state);
 		const fetchImpl = vi.fn<FetchLike>(async () => ({
 			ok: false,
 			status: 401,
@@ -199,8 +203,51 @@ describe("ensureFreshAccessToken", () => {
 			expiresAt: NOW - 1,
 			refreshToken: undefined,
 		});
+		await writeOAuthState(state);
 		await expect(
 			ensureFreshAccessToken(state, { now: () => NOW }),
 		).rejects.toThrow(/no refresh token/);
+	});
+
+	it("two concurrent refreshes only call the token endpoint once (lock serialises them)", async () => {
+		// State expired enough to force a refresh.
+		const state = freshState({
+			accessToken: "stale",
+			expiresAt: NOW - 60_000,
+		});
+		await writeOAuthState(state);
+
+		// Fetcher counts how many real refreshes fired. The slow reply lets
+		// both callers race for the lock — only the winner should issue the
+		// network call; the loser re-reads the freshly-written state.
+		let calls = 0;
+		const fetchImpl = vi.fn<FetchLike>(async () => {
+			calls += 1;
+			await new Promise((r) => setTimeout(r, 50));
+			return {
+				ok: true,
+				status: 200,
+				statusText: "OK",
+				text: async () =>
+					JSON.stringify({
+						access_token: "fresh-after-race",
+						token_type: "Bearer",
+						expires_in: 86400,
+						scope: "read,write",
+						refresh_token: "rt-rotated",
+					}),
+			};
+		});
+
+		const [a, b] = await Promise.all([
+			ensureFreshAccessToken(state, { fetchImpl, now: () => NOW }),
+			ensureFreshAccessToken(state, { fetchImpl, now: () => NOW }),
+		]);
+		expect(calls).toBe(1);
+		expect(a.accessToken).toBe("fresh-after-race");
+		expect(b.accessToken).toBe("fresh-after-race");
+		// Both observers see the same rotated refresh token.
+		expect(a.refreshToken).toBe("rt-rotated");
+		expect(b.refreshToken).toBe("rt-rotated");
 	});
 });
