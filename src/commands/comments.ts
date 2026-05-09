@@ -6,7 +6,12 @@ import {
 	LIST_COMMENTS_QUERY,
 	UPDATE_COMMENT_MUTATION,
 } from "../queries/comments.js";
-import type { GraphQLResponseData } from "../types/linear.js";
+import type {
+	CommentNode,
+	CreateCommentResponse,
+	ListCommentsResponse,
+	UpdateCommentResponse,
+} from "../queries/comments-types.js";
 import {
 	type AutoLinkResult,
 	autoLinkReferences,
@@ -47,28 +52,26 @@ async function fetchSelfUserId(
 	graphQLService: GraphQLService,
 ): Promise<string | undefined> {
 	try {
-		const result = await graphQLService.rawRequest("{ viewer { id } }");
-		const viewer = result.viewer as { id?: string } | undefined;
-		return viewer?.id;
+		const result = await graphQLService.rawRequest<{
+			viewer: { id: string } | null;
+		}>("{ viewer { id } }");
+		return result.viewer?.id;
 	} catch {
 		return;
 	}
 }
 
-function transformComment(
-	comment: GraphQLResponseData,
-): Record<string, unknown> {
-	const user = comment.user as GraphQLResponseData;
+function transformComment(comment: CommentNode): Record<string, unknown> {
 	return {
-		id: comment.id as string,
-		body: comment.body as string,
+		id: comment.id,
+		body: comment.body,
 		user: {
-			id: user.id as string,
-			name: resolveUserDisplayName(user.id as string, user.name as string),
-			url: (user.url as string | undefined) || undefined,
+			id: comment.user.id,
+			name: resolveUserDisplayName(comment.user.id, comment.user.name),
+			url: comment.user.url ?? undefined,
 		},
-		createdAt: comment.createdAt as string,
-		updatedAt: comment.updatedAt as string,
+		createdAt: comment.createdAt,
+		updatedAt: comment.updatedAt,
 	};
 }
 
@@ -192,11 +195,12 @@ async function handleCreateComment(
 		input.body = body;
 	}
 
-	let result: Record<string, unknown>;
+	let result: CreateCommentResponse;
 	try {
-		result = await graphQLService.rawRequest(CREATE_COMMENT_MUTATION, {
-			input,
-		});
+		result = await graphQLService.rawRequest<CreateCommentResponse>(
+			CREATE_COMMENT_MUTATION,
+			{ input },
+		);
 	} catch (err: unknown) {
 		// If the bodyData ProseMirror document is rejected (invalid shape,
 		// unsupported node, schema change), fall back to raw body text and let
@@ -207,15 +211,16 @@ async function handleCreateComment(
 				issueId: resolvedIssueId,
 				body,
 			};
-			result = await graphQLService.rawRequest(CREATE_COMMENT_MUTATION, {
-				input: fallbackInput,
-			});
+			result = await graphQLService.rawRequest<CreateCommentResponse>(
+				CREATE_COMMENT_MUTATION,
+				{ input: fallbackInput },
+			);
 		} else {
 			throw err;
 		}
 	}
-	const mutation = result.commentCreate as GraphQLResponseData;
-	if (!mutation.success) {
+	const mutation = result.commentCreate;
+	if (!mutation.success || !mutation.comment) {
 		throw new Error("Failed to create comment");
 	}
 	// We don't have the parent issue's identifier from the create mutation response,
@@ -236,7 +241,7 @@ async function handleCreateComment(
 		graphQLService,
 		linearService,
 	});
-	const output = transformComment(mutation.comment as GraphQLResponseData);
+	const output = transformComment(mutation.comment);
 	outputSuccess(autoLinked ? { ...output, autoLinked } : output);
 }
 
@@ -272,22 +277,21 @@ async function handleUpdateComment(
 		input.body = body;
 	}
 
-	const result = await graphQLService.rawRequest(UPDATE_COMMENT_MUTATION, {
-		id: commentId,
-		input,
-	});
-	const mutation = result.commentUpdate as GraphQLResponseData;
-	if (!mutation.success) {
+	const result = await graphQLService.rawRequest<UpdateCommentResponse>(
+		UPDATE_COMMENT_MUTATION,
+		{ id: commentId, input },
+	);
+	const mutation = result.commentUpdate;
+	if (!mutation.success || !mutation.comment) {
 		throw new Error("Failed to update comment");
 	}
-	const comment = mutation.comment as GraphQLResponseData;
-	const issue = comment.issue as GraphQLResponseData | undefined;
+	const comment = mutation.comment;
 	let autoLinked: AutoLinkResult | undefined;
-	if (issue) {
+	if (comment.issue) {
 		// rawBody (pre-wrap) — see note in handleCreateComment about keyword inference
 		autoLinked = await autoLinkCommentReferences({
-			parentIssueUuid: issue.id as string,
-			parentIssueIdentifier: (issue.identifier as string) ?? "",
+			parentIssueUuid: comment.issue.id,
+			parentIssueIdentifier: comment.issue.identifier,
 			body: rawBody,
 			preResolved,
 			options,
@@ -308,23 +312,22 @@ async function handleListComments(
 	const graphQLService = await createGraphQLService(rootOpts);
 	const linearService = await createLinearService(rootOpts);
 	const resolvedId = await linearService.resolveIssueId(issueId);
-	const result = await graphQLService.rawRequest(LIST_COMMENTS_QUERY, {
-		issueId: resolvedId,
-		first: Number.parseInt(options.limit, 10),
-	});
-	const issue = result.issue as GraphQLResponseData;
-	if (!issue) {
+	const result = await graphQLService.rawRequest<ListCommentsResponse>(
+		LIST_COMMENTS_QUERY,
+		{
+			issueId: resolvedId,
+			first: Number.parseInt(options.limit, 10),
+		},
+	);
+	if (!result.issue) {
 		throw new Error(`Issue "${issueId}" not found`);
 	}
-	const commentsData = issue.comments as GraphQLResponseData;
-	const nodes = (commentsData.nodes as GraphQLResponseData[]).map(
-		transformComment,
-	);
+	const nodes = result.issue.comments.nodes.map(transformComment);
 	outputSuccess({
 		data: nodes,
 		meta: {
 			count: nodes.length,
-			issue: issue.identifier as string,
+			issue: result.issue.identifier,
 		},
 	});
 }
