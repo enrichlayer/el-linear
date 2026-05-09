@@ -4,7 +4,10 @@ import {
 	INTROSPECT_ROOT_QUERY,
 	INTROSPECT_TYPE_QUERY,
 } from "../queries/introspect.js";
-import type { GraphQLResponseData } from "../types/linear.js";
+import type {
+	IntrospectRootResponse,
+	IntrospectTypeResponse,
+} from "../queries/introspect-types.js";
 import { createGraphQLService } from "../utils/graphql-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
 import { getRootOpts } from "../utils/root-opts.js";
@@ -73,36 +76,33 @@ export function setupGraphQLCommands(program: Command): void {
 					const graphQLService = await createGraphQLService(rootOpts);
 
 					if (typeName) {
-						const result = await graphQLService.rawRequest(
-							INTROSPECT_TYPE_QUERY,
-							{ typeName },
-						);
-						const typeInfo = result.__type as GraphQLResponseData | undefined;
-						if (!typeInfo) {
+						const result =
+							await graphQLService.rawRequest<IntrospectTypeResponse>(
+								INTROSPECT_TYPE_QUERY,
+								{ typeName },
+							);
+						if (!result.__type) {
 							throw new Error(`Type "${typeName}" not found in schema`);
 						}
-						outputSuccess(typeInfo);
+						outputSuccess(result.__type);
 					} else {
-						const result = await graphQLService.rawRequest(
-							INTROSPECT_ROOT_QUERY,
-						);
-						const queryType = result.__type as GraphQLResponseData | undefined;
-						let fields =
-							(queryType?.fields as GraphQLResponseData[] | undefined) ?? [];
+						const result =
+							await graphQLService.rawRequest<IntrospectRootResponse>(
+								INTROSPECT_ROOT_QUERY,
+							);
+						let fields = result.__type?.fields ?? [];
 
 						if (options.filter) {
 							const pattern = options.filter.toLowerCase();
 							fields = fields.filter((f) =>
-								(f.name as string).toLowerCase().includes(pattern),
+								f.name.toLowerCase().includes(pattern),
 							);
 						}
 
 						const summary = fields.map((f) => ({
 							name: f.name,
 							description: f.description ?? null,
-							args: ((f.args as GraphQLResponseData[] | undefined) ?? []).map(
-								(a) => a.name,
-							),
+							args: f.args.map((a) => a.name),
 						}));
 						outputSuccess({ fields: summary, count: summary.length });
 					}

@@ -109,14 +109,15 @@ export async function resolveAssignee(
 ): Promise<string> {
 	if (input.toLowerCase() === "me") {
 		const graphQLService = await createGraphQLService(rootOpts);
-		const result = await graphQLService.rawRequest("{ viewer { id } }");
-		const viewer = result.viewer as Record<string, unknown> | undefined;
-		if (!viewer?.id) {
+		const result = await graphQLService.rawRequest<{
+			viewer: { id: string } | null;
+		}>("{ viewer { id } }");
+		if (!result.viewer?.id) {
 			throw new Error(
 				'Could not resolve "me" — viewer query returned no user. Check your API token.',
 			);
 		}
-		return viewer.id as string;
+		return result.viewer.id;
 	}
 	return resolveMember(input);
 }

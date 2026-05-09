@@ -103,10 +103,8 @@ export function setupIssueIdCommand(program: Command): void {
 					const service = await createGraphQLService({
 						apiToken: rootOpts.apiToken,
 					});
-					const result = (await service.rawRequest(ISSUE_QUERY, {
-						id: parsed.issueId,
-					})) as {
-						issue?: {
+					const result = await service.rawRequest<{
+						issue: {
 							id: string;
 							identifier: string;
 							title: string;
@@ -114,8 +112,8 @@ export function setupIssueIdCommand(program: Command): void {
 							branchName: string;
 							state: { name: string; type: string };
 							assignee: { id: string; name: string; email: string } | null;
-						};
-					};
+						} | null;
+					}>(ISSUE_QUERY, { id: parsed.issueId });
 
 					outputSuccess({ ...parsed, issue: result.issue ?? null });
 				},
