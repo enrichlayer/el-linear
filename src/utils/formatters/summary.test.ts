@@ -27,6 +27,104 @@ import {
 	inferKindFromPayload,
 } from "./summary.js";
 
+describe("formatIssueList truncate edge cases (ALL-934)", () => {
+	it("truncates a 100-char title to fit the column", () => {
+		const longTitle = "x".repeat(100);
+		const out = formatIssueList([
+			{
+				identifier: "LIN-1",
+				title: longTitle,
+				state: { name: "Todo" },
+				assignee: null,
+			},
+		]);
+		// truncate(s, n) returns at most n chars (n-1 + ellipsis).
+		// The title column is bounded by TITLE_TRUNC = 60.
+		const titleRow = out.split("\n").find((line) => line.includes("LIN-1"));
+		expect(titleRow).toBeDefined();
+		expect(titleRow as string).toContain("…");
+		expect(titleRow as string).not.toContain(longTitle);
+	});
+
+	// Note: truncate(s, 0) and truncate(s, 1) would normally never be hit
+	// in production (column widths are ≥ 2 everywhere), but the helper is
+	// shaped like a public utility, so the boundary contract matters.
+	// Exercised here via formatIssueList by forcing a tiny title.
+	it("does not corrupt output when called with a string already shorter than n", () => {
+		const out = formatIssueList([
+			{
+				identifier: "X",
+				title: "ok",
+				state: { name: "Todo" },
+				assignee: null,
+			},
+		]);
+		expect(out).toContain("ok");
+		// No stray ellipsis on a string that fits.
+		expect(out.split("\n")[2]).not.toMatch(/^X\s+ok…/);
+	});
+});
+
+describe("terminal sanitization (ALL-934)", () => {
+	it("strips ANSI/OSC sequences from issue titles", () => {
+		// Hyperlink-spoofing payload: `\x1b]8;;https://evil/\x07Click me\x1b]8;;\x07`
+		const malicious = "\x1b]8;;https://evil/\x07Click me\x1b]8;;\x07trailing";
+		const out = formatIssueSummary({
+			identifier: "DEV-1",
+			title: malicious,
+			state: { name: "Todo" },
+			url: "https://x",
+		});
+		expect(out).not.toContain("\x1b");
+		expect(out).not.toContain("\x07");
+		expect(out).toContain("Click me");
+		expect(out).toContain("trailing");
+	});
+
+	it("strips screen-clearing CSI from descriptions", () => {
+		const malicious = "Real description\x1b[2J\x1b[Hgotcha";
+		const out = formatIssueSummary({
+			identifier: "DEV-1",
+			title: "x",
+			state: { name: "Todo" },
+			url: "https://x",
+			description: malicious,
+		});
+		expect(out).not.toContain("\x1b");
+		expect(out).toContain("Real description");
+		expect(out).toContain("gotcha");
+	});
+
+	it("preserves newlines and tabs in descriptions", () => {
+		const out = formatIssueSummary({
+			identifier: "DEV-1",
+			title: "x",
+			state: { name: "Todo" },
+			url: "https://x",
+			description: "line1\nline2\twith\ttabs",
+		});
+		expect(out).toContain("line1");
+		expect(out).toContain("line2");
+		// Tab is preserved (legible), control chars are not.
+		expect(out).toContain("\t");
+	});
+
+	it("clipDescription enforces a character cap regardless of line count", () => {
+		// One single-line 1MB description would previously slip past the
+		// line-count cap and dump verbatim.
+		const huge = "x".repeat(1_000_000);
+		const out = formatIssueSummary({
+			identifier: "DEV-1",
+			title: "x",
+			state: { name: "Todo" },
+			url: "https://x",
+			description: huge,
+		});
+		expect(out.length).toBeLessThan(10_000);
+		expect(out).toContain("--format json for full body");
+	});
+});
+
 describe("formatIssueSummary", () => {
 	const baseIssue = {
 		identifier: "DEV-123",

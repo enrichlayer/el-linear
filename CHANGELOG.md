@@ -6,6 +6,24 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`--format summary` strips terminal control sequences** before
+  rendering issue / comment / project text. ANSI/OSC/CSI byte
+  injection in titles or descriptions no longer hijacks the user's
+  terminal — anyone with workspace write access used to be able to
+  emit `\x1b]8;;https://evil/\x07Click\x1b]8;;\x07` in an issue title
+  and have it render as a misleading clickable hyperlink. Newlines and
+  tabs are preserved; everything else in C0/C1 + DEL is dropped.
+- **`clipDescription` now enforces a 4096-char cap** in addition to
+  the existing 10-line cap. A single-line 5MB description previously
+  passed the line check and was dumped verbatim to stdout.
+- **`truncate(s, 0)` returns the empty string** instead of `s.slice(0,
+  -1) + "…"` (which silently produced a 5-char output for a request of
+  0). `truncate(s, 1)` returns `"…"` explicitly. No production caller
+  hits these boundaries today; the helper is now contract-correct
+  for future reuse. Closes ALL-934.
+
 ### Security
 
 - **Atomic writes for `profile migrate-legacy`.** The migrate-legacy
