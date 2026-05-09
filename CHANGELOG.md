@@ -6,6 +6,18 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Centralized list-table renderer in the summary formatter.** The
+  13 `formatXList` functions in `src/utils/formatters/summary.ts`
+  used to inline their own column-width math, header/separator
+  wiring, and footer pluralization. They now declare a `ColumnDef[]`
+  and delegate to one shared `renderTable<T>` helper. Output is
+  byte-identical (1200 tests still pass), but adding a new
+  resource's table or adjusting an existing one is now a column
+  declaration instead of 25 lines of width-math boilerplate. Refs
+  ALL-938.
+
 ### Removed
 
 - **Dead `outputSuccessAs` export** and the companion `meta.kind`
