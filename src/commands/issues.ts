@@ -13,24 +13,16 @@ import {
 } from "../config/resolver.js";
 import { resolveDefaultStatus } from "../config/status-defaults.js";
 import { enforceTerms } from "../config/term-enforcer.js";
-import { LIST_COMMENTS_QUERY } from "../queries/comments.js";
 import {
 	GET_ISSUE_RELATIONS_QUERY,
 	GET_ISSUE_STATE_HISTORY_QUERY,
-	ISSUE_RELATION_CREATE_MUTATION,
-	SCAN_ISSUES_QUERY,
 } from "../queries/issues.js";
 import type {
 	GraphQLResponseData,
 	IssueStateSpan,
 	LinearAttachment,
 	LinearIssue,
-	LinearIssueRelation,
 } from "../types/linear.js";
-import {
-	type AutoLinkResult,
-	autoLinkReferences,
-} from "../utils/auto-link-references.js";
 import { createFileService } from "../utils/file-service.js";
 import { applyFooter } from "../utils/footer.js";
 import { createGraphQLAttachmentsService } from "../utils/graphql-attachments-service.js";
@@ -39,14 +31,8 @@ import {
 	type SearchIssueArgs,
 	type UpdateIssueArgs,
 } from "../utils/graphql-issues-service.js";
-import {
-	createGraphQLService,
-	type GraphQLService,
-} from "../utils/graphql-service.js";
-import {
-	createLinearService,
-	type LinearService,
-} from "../utils/linear-service.js";
+import { createGraphQLService } from "../utils/graphql-service.js";
+import { createLinearService } from "../utils/linear-service.js";
 import { logger } from "../utils/logger.js";
 import {
 	handleAsyncCommand,
@@ -68,11 +54,16 @@ import { gitCheckoutBranch, toBranchName } from "./issues/branch.js";
 import {
 	maybeAutoLink,
 	prepareAutoLinkedDescription,
-	prepareDescriptionRewrite,
-	pushDescriptionUpdate,
 	readDescriptionFile,
 	resolveDescription,
 } from "./issues/description.js";
+import { handleLinkReferencesIssue } from "./issues/link-references.js";
+import {
+	buildRelationEntries,
+	createRelations,
+	normalizeInverseType,
+	type RelatedIssueEntry,
+} from "./issues/relations.js";
 import { readIssues } from "./read-shortcut.js";
 
 const IMAGE_EXTENSIONS = new Set([
@@ -90,66 +81,6 @@ const COMMIT_HASH_PREFIX_REGEX = /^[a-f0-9]+ /;
 function isImageFile(filename: string): boolean {
 	const ext = filename.lastIndexOf(".");
 	return ext !== -1 && IMAGE_EXTENSIONS.has(filename.slice(ext).toLowerCase());
-}
-
-function transformIssueRelation(rel: GraphQLResponseData): LinearIssueRelation {
-	const issue = rel.issue as GraphQLResponseData;
-	const relatedIssue = rel.relatedIssue as GraphQLResponseData;
-	return {
-		id: rel.id as string,
-		type: rel.type as string,
-		issue: {
-			id: issue.id as string,
-			identifier: issue.identifier as string,
-			title: issue.title as string,
-		},
-		relatedIssue: {
-			id: relatedIssue.id as string,
-			identifier: relatedIssue.identifier as string,
-			title: relatedIssue.title as string,
-		},
-	};
-}
-
-async function createRelations(
-	sourceId: string,
-	options: Record<string, unknown>,
-	graphQLService: GraphQLService,
-	linearService: LinearService,
-): Promise<LinearIssueRelation[]> {
-	const relations: LinearIssueRelation[] = [];
-
-	const relationSpecs: { option: string; type: string; reverse?: boolean }[] = [
-		{ option: "relatedTo", type: "related" },
-		{ option: "blocks", type: "blocks" },
-		{ option: "blockedBy", type: "blocks", reverse: true },
-		{ option: "duplicateOf", type: "duplicate" },
-	];
-
-	for (const spec of relationSpecs) {
-		const value = options[spec.option] as string | undefined;
-		if (!value) {
-			continue;
-		}
-		for (const id of splitList(value)) {
-			const targetId = await linearService.resolveIssueId(id);
-			const rel = await graphQLService.rawRequest(
-				ISSUE_RELATION_CREATE_MUTATION,
-				{
-					input: {
-						issueId: spec.reverse ? targetId : sourceId,
-						relatedIssueId: spec.reverse ? sourceId : targetId,
-						type: spec.type,
-					},
-				},
-			);
-			const create = rel.issueRelationCreate as GraphQLResponseData | undefined;
-			const issueRelation = create?.issueRelation as GraphQLResponseData;
-			relations.push(transformIssueRelation(issueRelation));
-		}
-	}
-
-	return relations;
 }
 
 function validateUpdateOptions(options: OptionValues): void {
@@ -728,90 +659,6 @@ async function handleRelateIssue(
 	});
 }
 
-interface RelatedIssueEntry {
-	direction: "outgoing" | "incoming";
-	id: string;
-	issue: {
-		id: string;
-		identifier: string;
-		title: string;
-		state?: { id: string; name: string };
-		priority?: number;
-		assignee?: { id: string; name: string };
-		team?: { id: string; key: string; name: string };
-	};
-	type: string;
-}
-
-/**
- * Invert relation type for incoming (inverse) relations so the output
- * reads naturally from the perspective of the queried issue.
- * e.g. if DEV-100 "blocks" DEV-200, and we query DEV-200,
- * the inverse relation type is "blocks" but direction is incoming → "blockedBy".
- */
-function normalizeInverseType(type: string): string {
-	if (type === "blocks") {
-		return "blockedBy";
-	}
-	return type;
-}
-
-function buildRelatedIssueSummary(
-	peer: GraphQLResponseData,
-): RelatedIssueEntry["issue"] {
-	const state = peer.state as GraphQLResponseData | undefined;
-	const assignee = peer.assignee as GraphQLResponseData | undefined;
-	const team = peer.team as GraphQLResponseData | undefined;
-	return {
-		id: peer.id as string,
-		identifier: peer.identifier as string,
-		title: peer.title as string,
-		...(state
-			? { state: { id: state.id as string, name: state.name as string } }
-			: {}),
-		...(peer.priority == null ? {} : { priority: peer.priority as number }),
-		...(assignee
-			? {
-					assignee: {
-						id: assignee.id as string,
-						name: assignee.name as string,
-					},
-				}
-			: {}),
-		...(team
-			? {
-					team: {
-						id: team.id as string,
-						key: team.key as string,
-						name: team.name as string,
-					},
-				}
-			: {}),
-	};
-}
-
-function buildRelationEntries(
-	nodes: GraphQLResponseData[] | undefined,
-	peerKey: "relatedIssue" | "issue",
-	direction: "outgoing" | "incoming",
-	normalizeType: (raw: string) => string,
-): RelatedIssueEntry[] {
-	const entries: RelatedIssueEntry[] = [];
-	for (const rel of nodes ?? []) {
-		const peer = rel[peerKey] as GraphQLResponseData | undefined;
-		if (!peer) {
-			continue;
-		}
-		entries.push({
-			id: rel.id as string,
-			type: normalizeType(rel.type as string),
-			direction,
-			issue: buildRelatedIssueSummary(peer),
-		});
-	}
-	return entries;
-}
-
 async function handleRelatedIssues(
 	issueId: string,
 	_options: OptionValues,
@@ -858,243 +705,6 @@ async function handleRelatedIssues(
 		data: entries,
 		meta: { count: entries.length },
 	});
-}
-
-async function fetchCommentBodies(
-	issueUuid: string,
-	graphQLService: GraphQLService,
-): Promise<string[]> {
-	const result = await graphQLService.rawRequest(LIST_COMMENTS_QUERY, {
-		issueId: issueUuid,
-		first: 250,
-	});
-	const issue = result.issue as GraphQLResponseData | undefined;
-	const comments = issue?.comments as GraphQLResponseData | undefined;
-	const nodes = (comments?.nodes as GraphQLResponseData[] | undefined) ?? [];
-	return nodes
-		.map((c) => c.body as string | null | undefined)
-		.filter((b): b is string => typeof b === "string" && b.length > 0);
-}
-
-async function linkReferencesForIssue(args: {
-	issueUuid: string;
-	identifier: string;
-	description: string;
-	includeComments: boolean;
-	dryRun: boolean;
-	graphQLService: GraphQLService;
-	linearService: LinearService;
-	preResolved?: Map<string, string>;
-}): Promise<AutoLinkResult> {
-	const comments = args.includeComments
-		? await fetchCommentBodies(args.issueUuid, args.graphQLService)
-		: undefined;
-	return autoLinkReferences({
-		issueId: args.issueUuid,
-		identifier: args.identifier,
-		description: args.description,
-		comments,
-		dryRun: args.dryRun,
-		graphQLService: args.graphQLService,
-		linearService: args.linearService,
-		preResolved: args.preResolved,
-	});
-}
-
-async function handleLinkReferencesSingle(
-	issueId: string,
-	options: OptionValues,
-	graphQLService: GraphQLService,
-	linearService: LinearService,
-): Promise<void> {
-	const resolvedId = await linearService.resolveIssueId(issueId);
-	// GET_ISSUE_RELATIONS_QUERY also returns description, so this single call gives us everything
-	// we need for the description-only path. Comments are fetched separately on demand.
-	const issueResult = await graphQLService.rawRequest(
-		GET_ISSUE_RELATIONS_QUERY,
-		{
-			id: resolvedId,
-		},
-	);
-	if (!issueResult.issue) {
-		throw new Error(`Issue "${issueId}" not found`);
-	}
-	const issue = issueResult.issue as GraphQLResponseData;
-	const identifier = issue.identifier as string;
-	const description = (issue.description as string | null | undefined) ?? "";
-
-	const dryRun = Boolean(options.dryRun);
-	const includeComments = Boolean(options.includeComments);
-	const rewriteDescription = Boolean(options.rewriteDescription);
-
-	// If rewriting, validate refs once up front so we can both wrap the description and
-	// pass the resolved map down to autoLink — avoids a second resolve round trip.
-	const rewrite = rewriteDescription
-		? await prepareDescriptionRewrite(
-				description,
-				identifier,
-				linearService,
-				graphQLService,
-			)
-		: { preResolved: undefined, wrapped: undefined };
-
-	const autoLinked = await linkReferencesForIssue({
-		issueUuid: resolvedId,
-		identifier,
-		description,
-		includeComments,
-		dryRun,
-		graphQLService,
-		linearService,
-		preResolved: rewrite.preResolved,
-	});
-
-	let descriptionRewritten = false;
-	if (rewriteDescription && rewrite.wrapped && !dryRun) {
-		await pushDescriptionUpdate(resolvedId, rewrite.wrapped, graphQLService);
-		descriptionRewritten = true;
-	}
-
-	outputSuccess({
-		id: resolvedId,
-		identifier,
-		title: issue.title as string,
-		autoLinked,
-		...(rewriteDescription
-			? {
-					descriptionRewritten,
-					...(dryRun && rewrite.wrapped
-						? { descriptionPreview: rewrite.wrapped }
-						: {}),
-				}
-			: {}),
-		meta: {
-			dryRun,
-			includeComments,
-			...(rewriteDescription ? { rewriteDescription: true } : {}),
-		},
-	});
-}
-
-interface BatchEntry {
-	autoLinked: AutoLinkResult;
-	identifier: string;
-}
-
-async function handleLinkReferencesBatch(
-	teamInput: string,
-	options: OptionValues,
-	graphQLService: GraphQLService,
-	linearService: LinearService,
-): Promise<void> {
-	const teamId = resolveTeam(teamInput);
-	const limit = options.limit
-		? Number.parseInt(options.limit as string, 10)
-		: 100;
-	if (!Number.isFinite(limit) || limit <= 0) {
-		throw new Error(
-			`--limit must be a positive integer, got: ${options.limit}`,
-		);
-	}
-
-	const dryRun = Boolean(options.dryRun);
-	const includeComments = Boolean(options.includeComments);
-
-	const scan = await graphQLService.rawRequest(SCAN_ISSUES_QUERY, {
-		filter: { team: { id: { eq: teamId } } },
-		first: limit,
-	});
-	const issues = (scan.issues as GraphQLResponseData | undefined)?.nodes as
-		| GraphQLResponseData[]
-		| undefined;
-	const nodes = issues ?? [];
-
-	const entries: BatchEntry[] = [];
-	for (const node of nodes) {
-		const issueUuid = node.id as string;
-		const identifier = node.identifier as string;
-		const description = (node.description as string | null | undefined) ?? "";
-		const autoLinked = await linkReferencesForIssue({
-			issueUuid,
-			identifier,
-			description,
-			includeComments,
-			dryRun,
-			graphQLService,
-			linearService,
-		});
-		entries.push({ identifier, autoLinked });
-	}
-
-	// Summary counts across the batch
-	const totalLinked = entries.reduce(
-		(n, e) => n + e.autoLinked.linked.length,
-		0,
-	);
-	const totalSkipped = entries.reduce(
-		(n, e) => n + e.autoLinked.skipped.length,
-		0,
-	);
-	const totalFailed = entries.reduce(
-		(n, e) => n + e.autoLinked.failed.length,
-		0,
-	);
-
-	outputSuccess({
-		data: entries,
-		meta: {
-			count: entries.length,
-			team: teamInput,
-			dryRun,
-			includeComments,
-			totals: {
-				linked: totalLinked,
-				skipped: totalSkipped,
-				failed: totalFailed,
-			},
-		},
-	});
-}
-
-async function handleLinkReferencesIssue(
-	issueIdOrTeamFlag: string | undefined,
-	options: OptionValues,
-	command: Command,
-): Promise<void> {
-	const rootOpts = getRootOpts(command);
-	const graphQLService = await createGraphQLService(rootOpts);
-	const linearService = await createLinearService(rootOpts);
-
-	if (options.team) {
-		if (issueIdOrTeamFlag) {
-			throw new Error(
-				"Provide either an issueId positional argument OR --team, not both. With --team, omit the issueId.",
-			);
-		}
-		if (options.rewriteDescription) {
-			throw new Error(
-				"--rewrite-description is single-issue only. Use it case by case (one issueId per invocation) — bulk description rewrites bot-author the whole team's history.",
-			);
-		}
-		return handleLinkReferencesBatch(
-			options.team as string,
-			options,
-			graphQLService,
-			linearService,
-		);
-	}
-
-	if (!issueIdOrTeamFlag) {
-		throw new Error(
-			"issueId is required (or use --team <key> to scan a whole team)",
-		);
-	}
-	return handleLinkReferencesSingle(
-		issueIdOrTeamFlag,
-		options,
-		graphQLService,
-		linearService,
-	);
 }
 
 async function handleUpdateIssue(
