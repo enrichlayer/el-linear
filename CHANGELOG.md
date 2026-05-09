@@ -8,6 +8,16 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **`extractIssueReferences` honors the wrapper's protected ranges.**
+  Previously the extractor only stripped fenced code blocks; identifiers
+  inside markdown links (`[label](https://x/DEV-100)`), bare URLs
+  (`https://github.com/org/repo/DEV-100.md`), inline backticks, Slack
+  links, and angle-bracket autolinks were extracted as phantom
+  relations. Now the extractor uses the same protection scanner as
+  `wrapIssueReferencesAsLinks`, so the wrap→extract composition is
+  symmetric and the DEV-3606 bug class (transform/consumer disagreement)
+  is closed at the source. Shared scanner lives at
+  `src/utils/protected-ranges.ts`. Closes ALL-933.
 - **`--format summary` strips terminal control sequences** before
   rendering issue / comment / project text. ANSI/OSC/CSI byte
   injection in titles or descriptions no longer hijacks the user's

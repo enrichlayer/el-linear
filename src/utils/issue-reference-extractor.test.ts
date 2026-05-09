@@ -81,10 +81,12 @@ describe("extractIssueReferences", () => {
 		]);
 	});
 
-	it("matches identifiers inside inline backticks", () => {
-		expect(extractIssueReferences("see `EMW-258` for context")).toEqual([
-			related("EMW-258"),
-		]);
+	it("does NOT match identifiers inside inline backticks (protected range)", () => {
+		// Inline code is protected — extractor matches the wrapper's
+		// protection set so the wrap-then-extract composition stays
+		// symmetric. Pre-fix behaviour was to extract; that produced
+		// phantom relations from pasted log lines.
+		expect(extractIssueReferences("see `EMW-258` for context")).toEqual([]);
 	});
 
 	it("does not match lowercase team keys", () => {
@@ -93,12 +95,36 @@ describe("extractIssueReferences", () => {
 		);
 	});
 
-	it("matches identifiers embedded in URLs", () => {
+	it("does NOT match identifiers embedded in bare URLs (protected range)", () => {
+		// Bare URLs are protected — `https://github.com/foo/DEV-100.md`
+		// no longer creates a phantom DEV-100 relation just because
+		// the path component happens to look like a Linear identifier.
 		expect(
 			extractIssueReferences(
 				"https://linear.app/foo/issue/DEV-3592/title-slug",
 			),
-		).toEqual([related("DEV-3592")]);
+		).toEqual([]);
+	});
+
+	it("does NOT match identifiers inside markdown links (protected range)", () => {
+		// `[label](https://x/DEV-100)` — neither the label nor the URL
+		// path counts. Mirrors the wrapper's protection so the two
+		// stay symmetric and the wrap→extract composition is safe.
+		expect(
+			extractIssueReferences("see [click here](https://x/DEV-100) instead"),
+		).toEqual([]);
+	});
+
+	it("does NOT match identifiers inside Slack mrkdwn links", () => {
+		expect(
+			extractIssueReferences("see <https://x/DEV-100|click here> instead"),
+		).toEqual([]);
+	});
+
+	it("does NOT match identifiers inside angle-bracket autolinks", () => {
+		expect(
+			extractIssueReferences("see <https://x/DEV-100> for context"),
+		).toEqual([]);
 	});
 
 	it("matches alphanumeric team keys", () => {
@@ -220,32 +246,37 @@ describe("extractIssueReferences", () => {
 		expect(extractIssueReferences(text)).toEqual([related("DEV-100")]);
 	});
 
-	// Regression guard for the bug Nico flagged on MR !428: when the identifier is already
-	// wrapped as a markdown link, the inserted `[` between the keyword and the identifier
-	// breaks the trailing-whitespace anchor in the keyword regex, and inference falls back
-	// to "related". Callers MUST pass the pre-wrap text to keep type inference correct.
-	it("does NOT infer relation type when identifier is already markdown-wrapped (caller must pass pre-wrap text)", () => {
+	// Pre-fix behaviour (kept here as historical context — fixed in
+	// ALL-933): the wrapper inserted `[` between the keyword and the
+	// identifier, breaking the trailing-whitespace anchor in the
+	// keyword regex; inference silently degraded from `blocks` to
+	// `related`. Post-fix: identifiers inside markdown links sit in a
+	// protected range and are skipped entirely, so the wrap→extract
+	// composition produces no phantom relations.
+	it("skips identifiers inside markdown links entirely (no phantom relations)", () => {
 		expect(
 			extractIssueReferences(
 				"blocked by [DEV-100](https://linear.app/x/issue/DEV-100/)",
 			),
-		).toEqual([related("DEV-100")]);
+		).toEqual([]);
 		expect(
 			extractIssueReferences(
 				"this duplicates [DEV-50](https://linear.app/x/issue/DEV-50/)",
 			),
-		).toEqual([related("DEV-50")]);
+		).toEqual([]);
 	});
 });
 
 describe("composition: wrap → extract pipeline (DEV-3606 regression guard)", () => {
-	// Documents the contract that callers MUST pass the pre-wrap description
-	// to extractIssueReferences/autoLinkReferences. The wrap step inserts `[`
-	// before the identifier, which breaks the prose-keyword regex anchor
-	// (e.g. /\bblocked by\s*$/). If a future refactor accidentally swaps the
-	// order — passing the wrapped form into extract — the inferred relation
-	// type silently degrades from `blocks` to `related`. These tests lock the
-	// existing workaround so that regression is caught immediately.
+	// Locks in the symmetry between wrapper and extractor protection
+	// sets (ALL-933). Callers historically had to pass the pre-wrap
+	// description to extractIssueReferences because the wrap step's
+	// `[` broke the prose-keyword regex anchor. Post-ALL-933, the
+	// extractor also protects markdown links, so the wrap→extract
+	// composition is now a no-op (no phantom relations) instead of
+	// a silent type degradation from `blocks` to `related`. The
+	// pre-wrap path remains the recommended call order for correct
+	// type inference.
 
 	const cases = [
 		{
@@ -281,14 +312,17 @@ describe("composition: wrap → extract pipeline (DEV-3606 regression guard)", (
 		expect(refs[0].type).toBe(expectedType);
 	});
 
-	it("post-wrap text degrades to 'related' (the bug we work around)", () => {
-		// This test exists to document the pitfall: if you wrap first and
-		// extract second, you get the wrong relation type. Callers must call
-		// extract on the raw description and wrap on the way out.
+	it("post-wrap text yields no extraction at all (markdown links are protected)", () => {
+		// Pre-fix behaviour: the wrap step inserted `[` before the
+		// identifier, which broke the prose-keyword regex anchor and
+		// silently degraded the relation type from `blocks` to `related`.
+		// Post-fix: identifiers inside markdown links are skipped
+		// entirely, so wrap→extract returns no references at all. The
+		// "callers must pass the PRE-wrap description" contract still
+		// holds — but a regression where the wrap+extract order flips
+		// is now a no-op rather than a silent type degradation.
 		const wrapped =
 			"this is blocked by [DEV-100](https://example.com/issue/DEV-100/)";
-		const refs = extractIssueReferences(wrapped);
-		expect(refs).toHaveLength(1);
-		expect(refs[0].type).toBe("related"); // ← this would be `blocks` if we hadn't wrapped first
+		expect(extractIssueReferences(wrapped)).toEqual([]);
 	});
 });
