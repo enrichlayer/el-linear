@@ -8,6 +8,19 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Typed `CreateIssueArgs` for `GraphQLIssuesService.createIssue`.**
+  The method (and its private helpers `resolveCreateFields`,
+  `buildCreateInput`, `buildCreateResolveVariables`) used to accept
+  `Record<string, unknown>` and re-cast every property internally
+  (`args.assigneeId as string`, `args.labelIds as string[]`, etc.).
+  A typo in a caller — `assigeeId` vs `assigneeId` — compiled
+  cleanly and silently dropped the field. Now the args take a
+  typed interface, the casts inside are gone, and the typo
+  becomes a `tsc` error. First slice of the ALL-937 type-design
+  refactor; `updateIssue` and `searchIssues` follow. Refs ALL-937.
+
+### Changed
+
 - **`splitList` accepts `string | undefined | null | false`** and
   returns `[]` for any falsy value, including commander's `false`
   (which is what `--no-foo` produces). Removes the per-callsite
