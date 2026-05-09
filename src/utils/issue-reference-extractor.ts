@@ -1,3 +1,9 @@
+import {
+	findProtectedRanges,
+	IDENTIFIER_REGEX,
+	isProtected,
+} from "./protected-ranges.js";
+
 export type IssueRelationType = "related" | "blocks" | "duplicate";
 
 export interface IssueReference {
@@ -6,10 +12,6 @@ export interface IssueReference {
 	reverse: boolean;
 	type: IssueRelationType;
 }
-
-const IDENTIFIER_REGEX = /\b([A-Z][A-Z0-9]*-\d+)\b/g;
-const FENCED_CODE_BLOCK_REGEX =
-	/(?:^|\n)([ \t]*)(?:```|~~~)[^\n]*\n[\s\S]*?\n\1?(?:```|~~~)(?=\n|$)/g;
 
 /**
  * Window of text immediately before an identifier where we look for relation keywords.
@@ -53,10 +55,6 @@ const PHRASE_PATTERNS: Array<{
 	},
 ];
 
-function stripFencedCodeBlocks(text: string): string {
-	return text.replace(FENCED_CODE_BLOCK_REGEX, "");
-}
-
 function inferRelation(textBefore: string): {
 	type: IssueRelationType;
 	reverse: boolean;
@@ -86,7 +84,15 @@ function specificity(ref: IssueReference): number {
 
 /**
  * Extract issue identifiers from text along with the inferred relation type.
- * Strips fenced code blocks before scanning to avoid false positives in pasted logs.
+ *
+ * Identifiers inside protected ranges are skipped — fenced code blocks,
+ * inline backticks, existing markdown links, Slack links, angle-bracket
+ * autolinks, and bare URLs. This is the same protection set used by
+ * `wrapIssueReferencesAsLinks`, so the two stay symmetric: a wrapped
+ * `[label](https://x/DEV-100)` won't have DEV-100 re-extracted as a
+ * phantom reference, and a bare URL like
+ * `https://github.com/org/repo/DEV-100.md` won't either. (See
+ * `protected-ranges.ts` for the shared scanner.)
  *
  * The relation type is inferred from prose keywords immediately before the identifier
  * (e.g. "blocked by DEV-100" → blocks/reverse=true). Default is `related`.
@@ -101,16 +107,19 @@ export function extractIssueReferences(
 	if (!text) {
 		return [];
 	}
-	const stripped = stripFencedCodeBlocks(text);
+	const ranges = findProtectedRanges(text);
 	const byIdentifier = new Map<string, IssueReference>();
 
-	for (const match of stripped.matchAll(IDENTIFIER_REGEX)) {
+	for (const match of text.matchAll(IDENTIFIER_REGEX)) {
 		const id = match[1];
 		if (selfIdentifier && id === selfIdentifier) {
 			continue;
 		}
 		const matchIndex = match.index ?? 0;
-		const textBefore = stripped.slice(0, matchIndex);
+		if (isProtected(matchIndex, ranges)) {
+			continue;
+		}
+		const textBefore = text.slice(0, matchIndex);
 		const { type, reverse } = inferRelation(textBefore);
 		const candidate: IssueReference = { identifier: id, type, reverse };
 
