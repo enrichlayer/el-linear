@@ -157,3 +157,66 @@ export interface GetIssueTeamResponse {
 		team: { id: string } | null;
 	} | null;
 }
+
+/**
+ * Issue summary returned by `GET_ISSUE_RELATIONS_QUERY` on the
+ * `relatedIssue` / `issue` peer of each relation. Smaller than
+ * `IssueNode` — just enough to display a sidebar entry.
+ */
+export interface RelationPeerNode {
+	id: string;
+	identifier: string;
+	title: string;
+	state: { id: string; name: string } | null;
+	priority: number | null;
+	assignee: { id: string; name: string } | null;
+	team: { id: string; key: string; name: string } | null;
+}
+
+export interface RelationOutgoingNode {
+	id: string;
+	type: string;
+	relatedIssue: RelationPeerNode | null;
+}
+
+export interface RelationIncomingNode {
+	id: string;
+	type: string;
+	issue: RelationPeerNode | null;
+}
+
+/** Response shape for `GET_ISSUE_RELATIONS_QUERY`. */
+export interface GetIssueRelationsResponse {
+	issue: {
+		id: string;
+		identifier: string;
+		title: string;
+		description: string | null;
+		relations: { nodes: RelationOutgoingNode[] };
+		inverseRelations: { nodes: RelationIncomingNode[] };
+	} | null;
+}
+
+/**
+ * Response shape for `ISSUE_RELATION_CREATE_MUTATION`. The relation
+ * carries both `issue` and `relatedIssue` peers because the caller
+ * decides which side to display based on `reverse`.
+ */
+export interface IssueRelationCreateResponse {
+	issueRelationCreate: {
+		success: boolean;
+		issueRelation: {
+			id: string;
+			type: string;
+			issue: { id: string; identifier: string; title: string };
+			relatedIssue: { id: string; identifier: string; title: string };
+		} | null;
+	};
+}
+
+/** Response shape for `SCAN_ISSUES_QUERY`. */
+export interface ScanIssuesResponse {
+	issues: {
+		nodes: { id: string; identifier: string; description: string | null }[];
+	};
+}

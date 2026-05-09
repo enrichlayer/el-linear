@@ -2,7 +2,12 @@ import {
 	GET_ISSUE_RELATIONS_QUERY,
 	ISSUE_RELATION_CREATE_MUTATION,
 } from "../queries/issues.js";
-import type { GraphQLResponseData } from "../types/linear.js";
+import type {
+	GetIssueRelationsResponse,
+	IssueRelationCreateResponse,
+	RelationIncomingNode,
+	RelationOutgoingNode,
+} from "../queries/issues-types.js";
 import type { GraphQLService } from "./graphql-service.js";
 import {
 	extractIssueReferences,
@@ -93,25 +98,40 @@ function mergeCandidates(...sources: IssueReference[][]): IssueReference[] {
 	return [...byId.values()];
 }
 
-function mergeRelationNodes(
-	nodes: GraphQLResponseData[] | undefined,
-	peerKey: "relatedIssue" | "issue",
-	normalizeType: (raw: string) => string,
+function mergeOutgoingRelations(
+	nodes: RelationOutgoingNode[],
 	out: ExistingRelations,
 ): void {
-	for (const rel of nodes ?? []) {
-		const peer = rel[peerKey] as GraphQLResponseData | undefined;
+	for (const rel of nodes) {
+		const peer = rel.relatedIssue;
 		if (!peer) {
 			continue;
 		}
-		const id = peer.identifier as string | undefined;
-		const uuid = peer.id as string | undefined;
-		const type = normalizeType(rel.type as string);
-		if (id && !out.byIdentifier.has(id)) {
-			out.byIdentifier.set(id, type);
+		if (!out.byIdentifier.has(peer.identifier)) {
+			out.byIdentifier.set(peer.identifier, rel.type);
 		}
-		if (uuid && !out.byUuid.has(uuid)) {
-			out.byUuid.set(uuid, type);
+		if (!out.byUuid.has(peer.id)) {
+			out.byUuid.set(peer.id, rel.type);
+		}
+	}
+}
+
+function mergeIncomingRelations(
+	nodes: RelationIncomingNode[],
+	out: ExistingRelations,
+): void {
+	for (const rel of nodes) {
+		const peer = rel.issue;
+		if (!peer) {
+			continue;
+		}
+		// Normalize incoming "blocks" → "blockedBy" so the reported type reads naturally
+		const type = rel.type === "blocks" ? "blockedBy" : rel.type;
+		if (!out.byIdentifier.has(peer.identifier)) {
+			out.byIdentifier.set(peer.identifier, type);
+		}
+		if (!out.byUuid.has(peer.id)) {
+			out.byUuid.set(peer.id, type);
 		}
 	}
 }
@@ -120,32 +140,16 @@ async function fetchExistingRelations(
 	issueId: string,
 	graphQLService: GraphQLService,
 ): Promise<ExistingRelations> {
-	const result = await graphQLService.rawRequest(GET_ISSUE_RELATIONS_QUERY, {
-		id: issueId,
-	});
-	const issue = result.issue as GraphQLResponseData | undefined;
+	const result = await graphQLService.rawRequest<GetIssueRelationsResponse>(
+		GET_ISSUE_RELATIONS_QUERY,
+		{ id: issueId },
+	);
 	const out: ExistingRelations = { byIdentifier: new Map(), byUuid: new Map() };
-	if (!issue) {
+	if (!result.issue) {
 		return out;
 	}
-
-	const outgoing = issue.relations as GraphQLResponseData | undefined;
-	mergeRelationNodes(
-		outgoing?.nodes as GraphQLResponseData[] | undefined,
-		"relatedIssue",
-		(raw) => raw,
-		out,
-	);
-
-	const incoming = issue.inverseRelations as GraphQLResponseData | undefined;
-	// Normalize incoming "blocks" → "blockedBy" so the reported type reads naturally
-	mergeRelationNodes(
-		incoming?.nodes as GraphQLResponseData[] | undefined,
-		"issue",
-		(raw) => (raw === "blocks" ? "blockedBy" : raw),
-		out,
-	);
-
+	mergeOutgoingRelations(result.issue.relations.nodes, out);
+	mergeIncomingRelations(result.issue.inverseRelations.nodes, out);
 	return out;
 }
 
@@ -165,7 +169,7 @@ async function createTypedRelation(
 	resolvedId: string,
 	graphQLService: GraphQLService,
 ): Promise<AutoLinkLinked> {
-	const result = await graphQLService.rawRequest(
+	const result = await graphQLService.rawRequest<IssueRelationCreateResponse>(
 		ISSUE_RELATION_CREATE_MUTATION,
 		{
 			input: {
@@ -175,16 +179,12 @@ async function createTypedRelation(
 			},
 		},
 	);
-	const create = result.issueRelationCreate as GraphQLResponseData | undefined;
-	const issueRelation = create?.issueRelation as
-		| GraphQLResponseData
-		| undefined;
+	const issueRelation = result.issueRelationCreate.issueRelation;
 	// The peer (the issue NOT identified by `sourceId`) is whichever side wasn't the source
-	const peerKey = ref.reverse ? "issue" : "relatedIssue";
-	const peer = issueRelation?.[peerKey] as GraphQLResponseData | undefined;
+	const peer = ref.reverse ? issueRelation?.issue : issueRelation?.relatedIssue;
 	return {
-		identifier: (peer?.identifier as string) ?? ref.identifier,
-		title: (peer?.title as string) ?? "",
+		identifier: peer?.identifier ?? ref.identifier,
+		title: peer?.title ?? "",
 		type: ref.type,
 		reverse: ref.reverse,
 	};
