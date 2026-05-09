@@ -36,7 +36,10 @@ import {
 import { createFileService } from "../utils/file-service.js";
 import { applyFooter } from "../utils/footer.js";
 import { createGraphQLAttachmentsService } from "../utils/graphql-attachments-service.js";
-import { GraphQLIssuesService } from "../utils/graphql-issues-service.js";
+import {
+	GraphQLIssuesService,
+	type UpdateIssueArgs,
+} from "../utils/graphql-issues-service.js";
 import {
 	createGraphQLService,
 	type GraphQLService,
@@ -412,7 +415,7 @@ function buildUpdateArgs(
 	issueId: string,
 	options: OptionValues,
 	assigneeId?: string,
-): Record<string, unknown> {
+): UpdateIssueArgs {
 	let labelIds: string[] | undefined;
 	if (options.clearLabels) {
 		labelIds = [];

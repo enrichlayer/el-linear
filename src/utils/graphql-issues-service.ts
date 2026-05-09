@@ -30,6 +30,35 @@ import { isUuid } from "./uuid.js";
 const TEAM_KEY_REGEX = /^[A-Z0-9]+$/i;
 
 /**
+ * Arguments accepted by `GraphQLIssuesService.updateIssue`. Same
+ * field shapes as `CreateIssueArgs` (UUID-or-name where applicable),
+ * but with `id` required (the issue to update) and `subscriberIds` /
+ * `templateId` omitted (not valid on update).
+ */
+export interface UpdateIssueArgs {
+	/** Issue identifier (e.g. `DEV-3592`) or UUID. Required. */
+	id: string;
+	title?: string;
+	description?: string;
+	/** Assignee name, email, alias, or UUID. */
+	assigneeId?: string;
+	priority?: number;
+	projectId?: string;
+	statusId?: string;
+	/**
+	 * Hint for the team-aware label resolver when the issue is being
+	 * moved between teams.
+	 */
+	teamId?: string;
+	labelIds?: string[];
+	parentId?: string;
+	milestoneId?: string;
+	cycleId?: string | null;
+	dueDate?: string;
+	estimate?: number;
+}
+
+/**
  * Arguments accepted by `GraphQLIssuesService.createIssue`. Most fields
  * may be passed as a Linear UUID OR a name/identifier — the service
  * resolves names to UUIDs against the workspace before issuing the
@@ -147,7 +176,7 @@ export class GraphQLIssuesService {
 	}
 
 	async updateIssue(
-		args: Record<string, unknown>,
+		args: UpdateIssueArgs,
 		labelMode = "overwriting",
 	): Promise<LinearIssue> {
 		const { resolvedIssueId, issueTeamId, currentIssueLabels, resolveResult } =
@@ -159,23 +188,23 @@ export class GraphQLIssuesService {
 		}
 
 		const finalLabelIds = await this.resolveLabelsWithMode(
-			args.labelIds as string[] | undefined,
+			args.labelIds,
 			resolveResult,
 			labelMode,
 			currentIssueLabels,
 			teamIdForLabels,
-			args.teamId as string | undefined,
+			args.teamId,
 		);
 
 		const finalProjectId = args.projectId
-			? this.resolveProjectId(args.projectId as string, resolveResult)
-			: args.projectId;
+			? this.resolveProjectId(args.projectId, resolveResult)
+			: undefined;
 
 		const { projectMilestoneNodes, issueProjectMilestoneNodes } =
 			this.extractMilestoneNodes(args, resolveResult);
 
 		const finalMilestoneId = this.resolveMilestoneId(
-			args.milestoneId as string | undefined,
+			args.milestoneId,
 			resolveResult,
 			projectMilestoneNodes,
 			issueProjectMilestoneNodes,
@@ -191,29 +220,29 @@ export class GraphQLIssuesService {
 			resolvedIssueId,
 		);
 
-		if (args.assigneeId && !isUuid(args.assigneeId as string)) {
-			args.assigneeId = await this.linearService.resolveUserId(
-				args.assigneeId as string,
-			);
+		// Resolve assignee in place — `buildUpdateInput` reads it
+		// directly. Match the createIssue pattern.
+		let assigneeId = args.assigneeId;
+		if (assigneeId && !isUuid(assigneeId)) {
+			assigneeId = await this.linearService.resolveUserId(assigneeId);
 		}
 
-		const updateInput = this.buildUpdateInput(args, {
-			statusId: resolvedStatusId,
-			projectId: finalProjectId,
-			labelIds: finalLabelIds,
-			milestoneId: finalMilestoneId,
-			cycleId: finalCycleId,
-		});
-
-		return this.executeUpdateMutation(
-			resolvedIssueId,
-			args.id as string,
-			updateInput,
+		const updateInput = this.buildUpdateInput(
+			{ ...args, assigneeId },
+			{
+				statusId: resolvedStatusId,
+				projectId: finalProjectId,
+				labelIds: finalLabelIds,
+				milestoneId: finalMilestoneId,
+				cycleId: finalCycleId,
+			},
 		);
+
+		return this.executeUpdateMutation(resolvedIssueId, args.id, updateInput);
 	}
 
 	private extractMilestoneNodes(
-		args: Record<string, unknown>,
+		args: UpdateIssueArgs,
 		resolveResult: GraphQLResponseData,
 	): {
 		projectMilestoneNodes: GraphQLResponseData[] | undefined;
@@ -951,13 +980,13 @@ export class GraphQLIssuesService {
 	}
 
 	private buildUpdateInput(
-		args: Record<string, unknown>,
+		args: UpdateIssueArgs,
 		resolved: {
-			statusId?: unknown;
-			projectId?: unknown;
-			labelIds?: unknown;
-			milestoneId?: unknown;
-			cycleId?: unknown;
+			statusId: string | undefined;
+			projectId: string | undefined;
+			labelIds: string[] | undefined;
+			milestoneId: string | undefined;
+			cycleId: string | null | undefined;
 		},
 	): Record<string, unknown> {
 		const input: Record<string, unknown> = {};
@@ -1117,41 +1146,35 @@ export class GraphQLIssuesService {
 		return userNodes[0].id as string;
 	}
 
-	private async resolveUpdateContext(args: Record<string, unknown>): Promise<{
+	private async resolveUpdateContext(args: UpdateIssueArgs): Promise<{
 		resolvedIssueId: string;
 		issueTeamId: string | undefined;
 		currentIssueLabels: string[];
 		resolveResult: GraphQLResponseData;
 	}> {
-		let resolvedIssueId = args.id as string;
+		let resolvedIssueId = args.id;
 		let issueTeamId: string | undefined;
 		let currentIssueLabels: string[] = [];
 		const resolveVariables: Record<string, unknown> = {};
 
-		if (!isUuid(args.id as string)) {
-			const { teamKey, issueNumber } = parseIssueIdentifier(args.id as string);
+		if (!isUuid(args.id)) {
+			const { teamKey, issueNumber } = parseIssueIdentifier(args.id);
 			resolveVariables.teamKey = teamKey;
 			resolveVariables.issueNumber = issueNumber;
 		}
 
-		if (args.labelIds && Array.isArray(args.labelIds)) {
-			const nonUuidLabels = (args.labelIds as string[]).filter(
-				(id: string) => !isUuid(id),
-			);
+		if (args.labelIds && args.labelIds.length > 0) {
+			const nonUuidLabels = args.labelIds.filter((id) => !isUuid(id));
 			if (nonUuidLabels.length > 0) {
 				resolveVariables.__labelNames = nonUuidLabels;
 			}
 		}
 
-		if (args.projectId && !isUuid(args.projectId as string)) {
+		if (args.projectId && !isUuid(args.projectId)) {
 			resolveVariables.projectName = args.projectId;
 		}
 
-		if (
-			args.milestoneId &&
-			typeof args.milestoneId === "string" &&
-			!isUuid(args.milestoneId)
-		) {
+		if (args.milestoneId && !isUuid(args.milestoneId)) {
 			resolveVariables.milestoneName = args.milestoneId;
 		}
 
@@ -1176,11 +1199,11 @@ export class GraphQLIssuesService {
 			resolveResult.labels = results[1].labels;
 		}
 
-		if (!isUuid(args.id as string)) {
+		if (!isUuid(args.id)) {
 			const resolvedIssues = resolveResult.issues as GraphQLResponseData;
 			const resolvedIssueNodes = resolvedIssues.nodes as GraphQLResponseData[];
 			if (!resolvedIssueNodes.length) {
-				throw notFoundError("Issue", args.id as string);
+				throw notFoundError("Issue", args.id);
 			}
 			resolvedIssueId = resolvedIssueNodes[0].id as string;
 			const team = resolvedIssueNodes[0].team as
@@ -1197,15 +1220,15 @@ export class GraphQLIssuesService {
 	}
 
 	private async resolveCycleIdForUpdate(
-		args: Record<string, unknown>,
+		args: UpdateIssueArgs,
 		resolveResult: GraphQLResponseData,
 		resolvedIssueId: string,
 	): Promise<string | null | undefined> {
 		if (args.cycleId === undefined || args.cycleId === null) {
-			return args.cycleId as string | null | undefined;
+			return args.cycleId;
 		}
-		if (typeof args.cycleId !== "string" || isUuid(args.cycleId)) {
-			return args.cycleId as string;
+		if (isUuid(args.cycleId)) {
+			return args.cycleId;
 		}
 		let teamIdForCycle = (
 			(
@@ -1221,17 +1244,17 @@ export class GraphQLIssuesService {
 	}
 
 	private async resolveStatusIdForUpdate(
-		args: Record<string, unknown>,
+		args: UpdateIssueArgs,
 		resolvedIssueId: string,
 	): Promise<string | undefined> {
-		if (!args.statusId || isUuid(args.statusId as string)) {
-			return args.statusId as string | undefined;
+		if (!args.statusId || isUuid(args.statusId)) {
+			return args.statusId;
 		}
 		let teamId: string | undefined;
 		if (resolvedIssueId && isUuid(resolvedIssueId)) {
 			teamId = await this.fetchIssueTeamId(resolvedIssueId);
 		}
-		return this.linearService.resolveStatusId(args.statusId as string, teamId);
+		return this.linearService.resolveStatusId(args.statusId, teamId);
 	}
 
 	private buildCreateResolveVariables(
