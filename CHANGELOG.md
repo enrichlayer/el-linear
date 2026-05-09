@@ -6,6 +6,25 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- **OAuth read-modify-write now snapshots the target path.** Pre-fix,
+  `readOAuthState` and `writeOAuthState` each called `oauthStatePath()`
+  independently — if `setActiveProfileForSession()` ran between them
+  (no current code path triggers this; defense in depth), the read
+  and write would target different profiles. Post-fix, both helpers
+  accept an explicit `targetPath` and `ensureFreshAccessToken` resolves
+  the path once at the top of the lock-protected critical section.
+  ALL-935 deferred fix.
+- **`loadConfig` cache is now profile-keyed.** Pre-fix, switching the
+  active profile mid-process and calling `loadConfig` again returned
+  the OLD profile's config until `_resetConfigCacheForTests` ran.
+  Post-fix, each profile (and the legacy single-file layout, keyed
+  as `null`) gets its own cache slot. Today's CLI always sets the
+  profile in `preAction` before any command body runs, so this is
+  latent — but the keyed cache makes the behavior future-proof and
+  removes a test-isolation footgun. ALL-935 deferred fix.
+
 ### Changed
 
 - **Typed `SearchIssueArgs` for `GraphQLIssuesService.searchIssues`.**
