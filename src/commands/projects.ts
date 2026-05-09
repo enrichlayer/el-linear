@@ -9,7 +9,15 @@ import {
 	SEARCH_PROJECTS_BY_NAME_QUERY,
 	UPDATE_PROJECT_MUTATION,
 } from "../queries/projects.js";
-import type { GraphQLResponseData, LinearProject } from "../types/linear.js";
+import type {
+	CreateProjectResponse,
+	GetProjectResponse,
+	GetProjectTeamIssuesResponse,
+	ProjectByIdResponse,
+	SearchProjectsByNameResponse,
+	UpdateProjectResponse,
+} from "../queries/projects-types.js";
+import type { LinearProject } from "../types/linear.js";
 import { cached, resolveCacheTTL } from "../utils/disk-cache.js";
 import type { GraphQLService } from "../utils/graphql-service.js";
 import { createGraphQLService } from "../utils/graphql-service.js";
@@ -188,64 +196,58 @@ async function resolveProjectWithTeams(
 	projectNameOrId: string,
 ): Promise<ProjectTeamInfo> {
 	if (isUuid(projectNameOrId)) {
-		const result = await graphQLService.rawRequest(PROJECT_BY_ID_QUERY, {
-			id: projectNameOrId,
-		});
-		const project = result.project as GraphQLResponseData | undefined;
-		if (!project) {
+		const result = await graphQLService.rawRequest<ProjectByIdResponse>(
+			PROJECT_BY_ID_QUERY,
+			{ id: projectNameOrId },
+		);
+		if (!result.project) {
 			throw new Error(`Project "${projectNameOrId}" not found`);
 		}
-		const teams = project.teams as GraphQLResponseData | undefined;
 		return {
-			projectId: project.id as string,
-			projectName: project.name as string,
-			currentTeams: ((teams?.nodes as GraphQLResponseData[]) || []).map(
-				(t: GraphQLResponseData) => ({
-					id: t.id as string,
-					key: t.key as string,
-					name: t.name as string,
-				}),
-			),
-		};
-	}
-
-	const result = await graphQLService.rawRequest(GET_PROJECT_QUERY, {
-		name: projectNameOrId,
-	});
-	const projectNodes = (result.projects as GraphQLResponseData)?.nodes as
-		| GraphQLResponseData[]
-		| undefined;
-	if (!projectNodes?.length) {
-		throw new Error(`Project "${projectNameOrId}" not found`);
-	}
-	const project = projectNodes[0];
-	const teams = project.teams as GraphQLResponseData | undefined;
-	return {
-		projectId: project.id as string,
-		projectName: project.name as string,
-		currentTeams: ((teams?.nodes as GraphQLResponseData[]) || []).map(
-			(t: GraphQLResponseData) => ({
-				id: t.id as string,
-				key: t.key as string,
-				name: t.name as string,
-			}),
-		),
-	};
-}
-
-function formatTeamsOutput(projectUpdate: GraphQLResponseData) {
-	const updatedProject = projectUpdate.project as GraphQLResponseData;
-	const updatedTeams = updatedProject.teams as GraphQLResponseData;
-	return {
-		id: updatedProject.id,
-		name: updatedProject.name,
-		teams: ((updatedTeams.nodes as GraphQLResponseData[]) || []).map(
-			(t: GraphQLResponseData) => ({
+			projectId: result.project.id,
+			projectName: result.project.name,
+			currentTeams: result.project.teams.nodes.map((t) => ({
 				id: t.id,
 				key: t.key,
 				name: t.name,
-			}),
-		),
+			})),
+		};
+	}
+
+	const result = await graphQLService.rawRequest<GetProjectResponse>(
+		GET_PROJECT_QUERY,
+		{ name: projectNameOrId },
+	);
+	const project = result.projects.nodes[0];
+	if (!project) {
+		throw new Error(`Project "${projectNameOrId}" not found`);
+	}
+	return {
+		projectId: project.id,
+		projectName: project.name,
+		currentTeams: project.teams.nodes.map((t) => ({
+			id: t.id,
+			key: t.key,
+			name: t.name,
+		})),
+	};
+}
+
+function formatTeamsOutput(
+	projectUpdate: UpdateProjectResponse["projectUpdate"],
+) {
+	if (!projectUpdate.project) {
+		throw new Error("Failed to update project");
+	}
+	const updatedProject = projectUpdate.project;
+	return {
+		id: updatedProject.id,
+		name: updatedProject.name,
+		teams: updatedProject.teams.nodes.map((t) => ({
+			id: t.id,
+			key: t.key,
+			name: t.name,
+		})),
 	};
 }
 
@@ -274,7 +276,7 @@ async function handleAddTeam(
 		return;
 	}
 
-	const updateResult = await graphQLService.rawRequest(
+	const updateResult = await graphQLService.rawRequest<UpdateProjectResponse>(
 		UPDATE_PROJECT_MUTATION,
 		{
 			id: projectId,
@@ -282,7 +284,7 @@ async function handleAddTeam(
 		},
 	);
 
-	const projectUpdate = updateResult.projectUpdate as GraphQLResponseData;
+	const projectUpdate = updateResult.projectUpdate;
 	if (!projectUpdate.success) {
 		throw new Error("Failed to update project");
 	}
@@ -325,7 +327,7 @@ async function handleAddTeams(
 	}
 
 	const mergedTeamIds = [...currentTeamIds, ...newTeamIds];
-	const updateResult = await graphQLService.rawRequest(
+	const updateResult = await graphQLService.rawRequest<UpdateProjectResponse>(
 		UPDATE_PROJECT_MUTATION,
 		{
 			id: projectId,
@@ -333,7 +335,7 @@ async function handleAddTeams(
 		},
 	);
 
-	const projectUpdate = updateResult.projectUpdate as GraphQLResponseData;
+	const projectUpdate = updateResult.projectUpdate;
 	if (!projectUpdate.success) {
 		throw new Error("Failed to update project");
 	}
@@ -368,21 +370,20 @@ async function handleRemoveTeam(
 	}
 
 	if (!options.force) {
-		const issueCheck = await graphQLService.rawRequest(
-			GET_PROJECT_TEAM_ISSUES_QUERY,
-			{
-				projectId,
-				teamId: finalTeamId,
-			},
-		);
-		const project = issueCheck.project as GraphQLResponseData;
-		const issues = project.issues as GraphQLResponseData;
-		const issueNodes = (issues.nodes as GraphQLResponseData[]) || [];
+		const issueCheck =
+			await graphQLService.rawRequest<GetProjectTeamIssuesResponse>(
+				GET_PROJECT_TEAM_ISSUES_QUERY,
+				{
+					projectId,
+					teamId: finalTeamId,
+				},
+			);
+		const issueNodes = issueCheck.project?.issues.nodes ?? [];
 
 		if (issueNodes.length > 0) {
 			const examples = issueNodes
 				.slice(0, 5)
-				.map((i: GraphQLResponseData) => `${i.identifier}: ${i.title}`)
+				.map((i) => `${i.identifier}: ${i.title}`)
 				.join("\n  ");
 			throw new Error(
 				`Cannot remove team "${teamInput}" — it has ${issueNodes.length}${issueNodes.length >= 50 ? "+" : ""} issues in project "${projectName}". Reassign or remove those issues first.\n  ${examples}${issueNodes.length > 5 ? "\n  ..." : ""}\n\nUse --force to bypass this check.`,
@@ -391,7 +392,7 @@ async function handleRemoveTeam(
 	}
 
 	const updatedTeamIds = currentTeamIds.filter((id) => id !== finalTeamId);
-	const updateResult = await graphQLService.rawRequest(
+	const updateResult = await graphQLService.rawRequest<UpdateProjectResponse>(
 		UPDATE_PROJECT_MUTATION,
 		{
 			id: projectId,
@@ -399,7 +400,7 @@ async function handleRemoveTeam(
 		},
 	);
 
-	const projectUpdate = updateResult.projectUpdate as GraphQLResponseData;
+	const projectUpdate = updateResult.projectUpdate;
 	if (!projectUpdate.success) {
 		throw new Error("Failed to update project");
 	}
@@ -418,26 +419,18 @@ async function handleCreateProject(
 	const graphQLService = await createGraphQLService(rootOpts);
 
 	// Step 1: Check for duplicate projects (case-insensitive)
-	const searchResult = await graphQLService.rawRequest(
-		SEARCH_PROJECTS_BY_NAME_QUERY,
-		{ name },
-	);
-	const existing = (
-		((searchResult.projects as GraphQLResponseData)
-			?.nodes as GraphQLResponseData[]) ?? []
-	).filter(
-		(p: GraphQLResponseData) =>
-			(p.name as string).toLowerCase() === name.toLowerCase(),
+	const searchResult =
+		await graphQLService.rawRequest<SearchProjectsByNameResponse>(
+			SEARCH_PROJECTS_BY_NAME_QUERY,
+			{ name },
+		);
+	const existing = searchResult.projects.nodes.filter(
+		(p) => p.name.toLowerCase() === name.toLowerCase(),
 	);
 
 	if (existing.length > 0 && !options.force) {
 		const match = existing[0];
-		const teams = (
-			((match.teams as GraphQLResponseData)?.nodes as GraphQLResponseData[]) ??
-			[]
-		)
-			.map((t: GraphQLResponseData) => t.key)
-			.join(", ");
+		const teams = match.teams.nodes.map((t) => t.key).join(", ");
 		throw new Error(
 			`Project "${match.name}" already exists (state: ${match.state}, teams: ${teams}). ` +
 				`Use --force to create anyway, or use the existing project.`,
@@ -459,16 +452,18 @@ async function handleCreateProject(
 		...(teamIds.length > 0 ? { teamIds } : {}),
 	};
 
-	const createResult = await graphQLService.rawRequest(
+	const createResult = await graphQLService.rawRequest<CreateProjectResponse>(
 		CREATE_PROJECT_MUTATION,
 		{ input },
 	);
-	const created = createResult.projectCreate as GraphQLResponseData;
-	if (!created?.success) {
+	if (
+		!createResult.projectCreate.success ||
+		!createResult.projectCreate.project
+	) {
 		throw new Error("Failed to create project");
 	}
 
-	const project = created.project as GraphQLResponseData;
+	const project = createResult.projectCreate.project;
 
 	// Step 4: Set content if provided (separate mutation — Linear API quirk)
 	if (options.content) {
@@ -478,12 +473,7 @@ async function handleCreateProject(
 		});
 	}
 
-	const teamList = (
-		((project.teams as GraphQLResponseData)?.nodes as GraphQLResponseData[]) ??
-		[]
-	)
-		.map((t: GraphQLResponseData) => t.key)
-		.join(", ");
+	const teamList = project.teams.nodes.map((t) => t.key).join(", ");
 
 	outputSuccess({
 		id: project.id,
