@@ -36,7 +36,7 @@ describe("users commands", () => {
 			setupUsersCommands(program);
 			await runCommand(program, ["users", "list"]);
 
-			expect(mockGetUsers).toHaveBeenCalledWith(undefined, 100);
+			expect(mockGetUsers).toHaveBeenCalledWith(undefined, 100, undefined);
 		});
 
 		it("passes --active flag correctly", async () => {
@@ -44,7 +44,7 @@ describe("users commands", () => {
 			setupUsersCommands(program);
 			await runCommand(program, ["users", "list", "--active"]);
 
-			expect(mockGetUsers).toHaveBeenCalledWith(true, 100);
+			expect(mockGetUsers).toHaveBeenCalledWith(true, 100, undefined);
 		});
 
 		it("passes custom limit", async () => {
@@ -52,7 +52,15 @@ describe("users commands", () => {
 			setupUsersCommands(program);
 			await runCommand(program, ["users", "list", "--limit", "50"]);
 
-			expect(mockGetUsers).toHaveBeenCalledWith(undefined, 50);
+			expect(mockGetUsers).toHaveBeenCalledWith(undefined, 50, undefined);
+		});
+
+		it("passes --name as third arg", async () => {
+			const program = createTestProgram();
+			setupUsersCommands(program);
+			await runCommand(program, ["users", "list", "--name", "yury"]);
+
+			expect(mockGetUsers).toHaveBeenCalledWith(undefined, 100, "yury");
 		});
 
 		it("outputs result via outputSuccess", async () => {

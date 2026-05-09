@@ -11,6 +11,10 @@ export function setupUsersCommands(program: Command): void {
 		.command("list")
 		.description("List all users")
 		.option("--active", "Only show active users")
+		.option(
+			"--name <substring>",
+			"filter by case-insensitive substring on user name",
+		)
 		.option("-l, --limit <number>", "limit results", "100")
 		.action(
 			handleAsyncCommand(async (options: OptionValues, command: Command) => {
@@ -19,6 +23,7 @@ export function setupUsersCommands(program: Command): void {
 				const result = await service.getUsers(
 					options.active,
 					Number.parseInt(options.limit, 10),
+					options.name as string | undefined,
 				);
 				outputSuccess({ data: result, meta: { count: result.length } });
 			}),

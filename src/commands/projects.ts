@@ -20,6 +20,56 @@ import { getRootOpts } from "../utils/root-opts.js";
 import { isUuid } from "../utils/uuid.js";
 import { splitList } from "../utils/validators.js";
 
+const VALID_PROJECT_STATES: ReadonlySet<string> = new Set([
+	"backlog",
+	"planned",
+	"started",
+	"paused",
+	"completed",
+	"canceled",
+]);
+
+function parseStateList(value: string, flagName: string): string[] {
+	const states = splitList(value).map((s) => s.toLowerCase());
+	for (const s of states) {
+		if (!VALID_PROJECT_STATES.has(s)) {
+			throw new Error(
+				`Invalid state "${s}" for ${flagName}. Valid: ${[...VALID_PROJECT_STATES].join(", ")}.`,
+			);
+		}
+	}
+	return states;
+}
+
+export function resolveProjectStateFilter(options: OptionValues): {
+	states?: string[];
+	excludeStates?: string[];
+} {
+	const flags = [options.state, options.excludeState, options.active].filter(
+		Boolean,
+	).length;
+	if (flags > 1) {
+		throw new Error(
+			"--state, --exclude-state, and --active are mutually exclusive.",
+		);
+	}
+	if (options.active) {
+		return { excludeStates: ["completed", "canceled"] };
+	}
+	if (options.state) {
+		return { states: parseStateList(options.state as string, "--state") };
+	}
+	if (options.excludeState) {
+		return {
+			excludeStates: parseStateList(
+				options.excludeState as string,
+				"--exclude-state",
+			),
+		};
+	}
+	return {};
+}
+
 function formatProjectsOutput(
 	projects: LinearProject[],
 	format: string,
@@ -461,22 +511,47 @@ export function setupProjectsCommands(program: Command): void {
 			"--fields <fields>",
 			"columns for table/csv (comma-separated: name,state,progress,teams,lead,targetDate)",
 		)
+		.option(
+			"--name <substring>",
+			"filter by case-insensitive substring on project name",
+		)
+		.option(
+			"--state <names>",
+			"include only projects in these states (comma-separated: backlog, planned, started, paused, completed, canceled)",
+		)
+		.option(
+			"--exclude-state <names>",
+			"exclude projects in these states (comma-separated). Mutually exclusive with --state.",
+		)
+		.option(
+			"--active",
+			"shorthand for --exclude-state completed,canceled (mutually exclusive with --state / --exclude-state)",
+		)
 		.action(
 			handleAsyncCommand(async (options: OptionValues, command: Command) => {
 				const rootOpts = getRootOpts(command);
 				const limit = Number.parseInt(options.limit, 10);
+				const nameFilter = options.name as string | undefined;
+				const stateFilter = resolveProjectStateFilter(options);
 				const ttl = resolveCacheTTL({
 					configTTL: loadConfig().cacheTTLSeconds,
 					noCacheFlag: rootOpts.cache === false,
 				});
-				const result = await cached(
-					`projects-list-limit:${limit}`,
-					ttl,
-					async () => {
-						const service = await createLinearService(rootOpts);
-						return service.getProjects(limit);
-					},
-				);
+				// Cache key includes filter inputs so different filter combinations
+				// don't collide.
+				const cacheKey =
+					`projects-list-limit:${limit}` +
+					`-name:${nameFilter ?? "_all"}` +
+					`-states:${stateFilter.states?.join(",") ?? "_any"}` +
+					`-excl:${stateFilter.excludeStates?.join(",") ?? "_none"}`;
+				const result = await cached(cacheKey, ttl, async () => {
+					const service = await createLinearService(rootOpts);
+					return service.getProjects(limit, {
+						nameFilter,
+						states: stateFilter.states,
+						excludeStates: stateFilter.excludeStates,
+					});
+				});
 				const format = options.format as string;
 				if (
 					format === "table" ||
