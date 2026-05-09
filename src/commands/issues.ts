@@ -33,7 +33,6 @@ import {
 	type AutoLinkResult,
 	autoLinkReferences,
 } from "../utils/auto-link-references.js";
-import { downloadLinearUploads } from "../utils/download-uploads.js";
 import { createFileService } from "../utils/file-service.js";
 import { applyFooter } from "../utils/footer.js";
 import { createGraphQLAttachmentsService } from "../utils/graphql-attachments-service.js";
@@ -67,6 +66,7 @@ import {
 	validatePriority,
 } from "../utils/validators.js";
 import { getWorkspaceUrlKey } from "../utils/workspace-url.js";
+import { readIssues } from "./read-shortcut.js";
 
 const IMAGE_EXTENSIONS = new Set([
 	".png",
@@ -1340,31 +1340,6 @@ async function handleLinkReferencesIssue(
 	);
 }
 
-async function handleReadIssue(
-	issueIds: string[],
-	_options: OptionValues,
-	command: Command,
-): Promise<void> {
-	const rootOpts = getRootOpts(command);
-	const graphQLService = await createGraphQLService(rootOpts);
-	const linearService = await createLinearService(rootOpts);
-	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
-	const fileService = await createFileService(rootOpts);
-	if (issueIds.length === 1) {
-		const issue = await issuesService.getIssueById(issueIds[0]);
-		const resolved = await downloadLinearUploads(issue, fileService);
-		outputSuccess(resolved);
-	} else {
-		const results = await Promise.all(
-			issueIds.map(async (id) => {
-				const issue = await issuesService.getIssueById(id);
-				return downloadLinearUploads(issue, fileService);
-			}),
-		);
-		outputSuccess(results);
-	}
-}
-
 async function handleUpdateIssue(
 	issueId: string,
 	options: OptionValues,
@@ -1731,7 +1706,7 @@ export function setupIssuesCommands(program: Command): void {
 			"after",
 			"\nBoth UUID and identifiers like ABC-123 are supported.\nMultiple IDs: el-linear issue get DEV-123 DEV-456 DEV-789",
 		)
-		.action(handleAsyncCommand(handleReadIssue));
+		.action(handleAsyncCommand(readIssues));
 
 	issues
 		.command("update <issueId>")

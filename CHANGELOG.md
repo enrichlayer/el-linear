@@ -6,6 +6,30 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Removed
+
+- **Dead `outputSuccessAs` export** and the companion `meta.kind`
+  inference path (`mapHint` table + `inferListKind` envelope hint
+  lookup). `outputSuccessAs` had zero callers outside its own
+  definition; no `outputSuccess({...})` site set `meta.kind`. Net
+  ~50 lines deleted across `src/utils/output.ts` and
+  `src/utils/formatters/summary.ts`. If a future caller needs
+  shape-pinning, the right move is to wire the explicit kind into
+  the existing dispatch instead of resurrecting the dead path.
+  Refs ALL-938.
+- **Double `--raw` unwrap in `emitSummary`.** `outputSuccess` already
+  unwraps `{ data: [...] }` envelopes on the rawMode path; the second
+  unwrap inside `emitSummary` was dead defensive code that obscured
+  data flow. Refs ALL-938.
+
+### Changed
+
+- **`handleReadIssue` and `readIssues` consolidated.** Both functions
+  were byte-equivalent; `commands/issues.ts` now imports `readIssues`
+  from `commands/read-shortcut.ts` so the `issues read` subcommand
+  and the top-level `read` shortcut go through one implementation.
+  Refs ALL-938.
+
 ### Security
 
 - **OAuth callback page no longer reflects attacker-controlled prose.**

@@ -69,11 +69,16 @@ export function setupReadShortcut(program: Command): void {
 	};
 }
 
-async function readIssues(
+/**
+ * Shared `issues read` body — exported so the top-level shortcut and
+ * `issues read` (in `commands/issues.ts`) both call one implementation
+ * instead of carrying byte-equivalent duplicates. ALL-938 cleanup.
+ */
+export async function readIssues(
 	issueIds: string[],
 	_options: Record<string, unknown>,
 	command: Command,
-) {
+): Promise<void> {
 	const rootOpts = getRootOpts(command);
 	const graphQLService = await createGraphQLService(rootOpts);
 	const linearService = await createLinearService(rootOpts);
