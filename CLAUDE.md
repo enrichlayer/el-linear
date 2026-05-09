@@ -81,6 +81,7 @@ behavior change — multi-profile is purely opt-in.
 - **One setup function per command file** named `setup<Resource>Commands(program)`, imported by `main.ts`.
 - **Output is JSON by default.** Use `outputSuccess(...)` / `outputWarning(...)` / `handleAsyncCommand(...)` from `utils/output.ts`. Never `console.log`.
 - **Always lint before push**: `pnpm exec biome check --fix src/`.
+- **American English** in code, comments, docstrings, CHANGELOG, README, and commit messages. `behavior`, `honor`, `color`, `serialize`, `recognize` — not `behaviour`, `honour`, `colour`, `serialise`, `recognise`. The package is published on npm under an American audience and the Linear API uses American spellings; staying consistent avoids the mixed-spelling drift that `git grep` reveals every few months.
 
 ## Common tasks
 

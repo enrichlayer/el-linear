@@ -80,7 +80,7 @@ program.hook("preAction", (_thisCommand: Command, actionCommand: Command) => {
 	// subcommand value when one is set. We accept any of the per-command
 	// formats (table/md/csv) silently — those take a different code path
 	// inside the handler and never reach outputSuccess. The global
-	// behaviour only triggers for `summary`.
+	// behavior only triggers for `summary`.
 	const fmt =
 		typeof rootOpts.format === "string"
 			? rootOpts.format.toLowerCase()
