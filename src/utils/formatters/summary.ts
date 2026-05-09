@@ -761,7 +761,7 @@ export function inferKindFromPayload(value: unknown): ResourceKind {
 
 	// list envelope: { data: [...], meta: {...} }
 	if (Array.isArray(obj.data)) {
-		return inferListKind(obj.data, obj);
+		return inferListKind(obj.data);
 	}
 
 	// single resource
@@ -793,17 +793,12 @@ export function inferKindFromPayload(value: unknown): ResourceKind {
 	return "generic";
 }
 
-function inferListKind(
-	items: unknown[],
-	envelope?: Record<string, unknown>,
-): ResourceKind {
+function inferListKind(items: unknown[]): ResourceKind {
 	if (items.length === 0) {
-		// empty list — try to infer from meta hints, else render a
-		// generic "(no results)" marker. We avoid falling through to
-		// "generic" because that renders the envelope keys (data, meta)
-		// rather than treating the payload as the empty list it is.
-		const hint = asObj(envelope?.meta)?.kind;
-		if (typeof hint === "string") return mapHint(hint);
+		// Empty list — render a generic "(no results)" marker. We avoid
+		// falling through to "generic" because that renders envelope
+		// keys (data, meta) rather than treating the payload as the
+		// empty list it is.
 		return "empty-list";
 	}
 	const sample = asObj(items[0]) ?? {};
@@ -842,36 +837,6 @@ function inferListKind(
 	if ("color" in sample && "scope" in sample) return "label-list";
 	if ("displayName" in sample && "email" in sample) return "user-list";
 	return "generic";
-}
-
-function mapHint(kind: string): ResourceKind {
-	const known: Record<string, ResourceKind> = {
-		issue: "issue-list",
-		issues: "issue-list",
-		project: "project-list",
-		projects: "project-list",
-		cycle: "cycle-list",
-		cycles: "cycle-list",
-		milestone: "milestone-list",
-		milestones: "milestone-list",
-		team: "team-list",
-		teams: "team-list",
-		label: "label-list",
-		labels: "label-list",
-		user: "user-list",
-		users: "user-list",
-		comment: "comment-list",
-		comments: "comment-list",
-		document: "document-list",
-		documents: "document-list",
-		template: "template-list",
-		templates: "template-list",
-		attachment: "attachment-list",
-		attachments: "attachment-list",
-		release: "release-list",
-		releases: "release-list",
-	};
-	return known[kind.toLowerCase()] ?? "generic";
 }
 
 /**

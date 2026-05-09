@@ -2,7 +2,6 @@ import { execFileSync } from "node:child_process";
 import {
 	dispatch as dispatchSummary,
 	inferKindFromPayload,
-	type ResourceKind,
 } from "./formatters/summary.js";
 import { logger } from "./logger.js";
 
@@ -52,43 +51,13 @@ function filterFields(obj: unknown, fields: string[]): unknown {
 }
 
 /**
- * Emit a summary-format render to stdout for the given payload. Honours
- * the same `--raw` unwrap behavior as JSON output (so a list envelope
- * with `--raw` is treated as a bare array). Adds a trailing newline.
- *
- * Optionally takes an explicit `kind` — used by command handlers that
- * know the resource type (e.g. `issues read` always passes "issue") to
- * avoid the shape-based heuristic. When omitted, `inferKindFromPayload`
- * picks the formatter from the data shape.
+ * Emit a summary-format render to stdout for the given payload. The
+ * caller (`outputSuccess`) has already applied `--raw` and `--fields`,
+ * so the value here is post-filter — no need to unwrap again.
  */
-function emitSummary(payload: unknown, kind?: ResourceKind): void {
-	let value = payload;
-	if (
-		rawMode &&
-		value !== null &&
-		typeof value === "object" &&
-		!Array.isArray(value)
-	) {
-		const obj = value as Record<string, unknown>;
-		if (Array.isArray(obj.data)) value = obj.data;
-	}
-	const resolved = kind ?? inferKindFromPayload(value);
-	const rendered = dispatchSummary(resolved, value);
-	logger.info(rendered);
-}
-
-/**
- * Per-call override: when a command knows what it returns it can pass an
- * explicit `kind` so we don't have to fall back on shape inference. Pure
- * sugar over `outputSuccess` — handlers can keep calling `outputSuccess`
- * directly if they don't care.
- */
-export function outputSuccessAs(kind: ResourceKind, data: unknown): void {
-	if (outputFormat === "summary") {
-		emitSummary(data, kind);
-		return;
-	}
-	outputSuccess(data);
+function emitSummary(payload: unknown): void {
+	const kind = inferKindFromPayload(payload);
+	logger.info(dispatchSummary(kind, payload));
 }
 
 export function outputSuccess(data: unknown): void {
