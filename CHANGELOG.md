@@ -8,6 +8,12 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Typed `SearchIssueArgs` for `GraphQLIssuesService.searchIssues`.**
+  Same treatment as `CreateIssueArgs` and `UpdateIssueArgs` — typed
+  shape covers the two search modes (full-text query + structured
+  filter) with appropriate fields for each. Caller sites in
+  `commands/issues.ts` (`handleListIssues` and `handleSearchIssues`)
+  now construct the typed args directly. Refs ALL-937.
 - **Typed `UpdateIssueArgs` for `GraphQLIssuesService.updateIssue`.**
   Same treatment as `CreateIssueArgs` — `id` is required, the helper
   pipeline (`resolveUpdateContext`, `extractMilestoneNodes`,

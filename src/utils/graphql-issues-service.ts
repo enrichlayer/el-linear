@@ -30,6 +30,38 @@ import { isUuid } from "./uuid.js";
 const TEAM_KEY_REGEX = /^[A-Z0-9]+$/i;
 
 /**
+ * Arguments accepted by `GraphQLIssuesService.searchIssues`. Two
+ * modes:
+ *   - When `query` is set, runs Linear's full-text search and
+ *     post-filters the results with the structured filters below.
+ *   - When `query` is unset, runs a structured filter directly.
+ */
+export interface SearchIssueArgs {
+	/** Free-text search term. When set, `searchIssues` uses Linear's
+	 * native full-text search. */
+	query?: string;
+	/** Team key, name, or UUID. */
+	teamId?: string;
+	/** Project name or UUID. */
+	projectId?: string;
+	/** Set true to match only issues with NO project. Mutually
+	 * exclusive with `projectId`. */
+	noProject?: boolean;
+	/** Assignee name, email, alias, or UUID. */
+	assigneeId?: string;
+	/** Issue states to include (e.g. `["Todo", "In Progress"]`). */
+	status?: string[];
+	/** Label names to require (intersection). */
+	labelNames?: string[];
+	/** Priority values (0-4) to include. */
+	priority?: number[];
+	/** Result cap; defaults to 10 when not set. */
+	limit?: number;
+	/** Linear orderBy enum (`createdAt` / `updatedAt`). */
+	orderBy?: string;
+}
+
+/**
  * Arguments accepted by `GraphQLIssuesService.updateIssue`. Same
  * field shapes as `CreateIssueArgs` (UUID-or-name where applicable),
  * but with `id` required (the issue to update) and `subscriberIds` /
@@ -434,22 +466,22 @@ export class GraphQLIssuesService {
 		return this.transformIssueData(issueCreate.issue as GraphQLResponseData);
 	}
 
-	async searchIssues(args: Record<string, unknown>): Promise<LinearIssue[]> {
+	async searchIssues(args: SearchIssueArgs): Promise<LinearIssue[]> {
 		const resolveVariables: Record<string, unknown> = {};
 
-		if (args.teamId && !isUuid(args.teamId as string)) {
+		if (args.teamId && !isUuid(args.teamId)) {
 			Object.assign(
 				resolveVariables,
-				this.buildResolveVariablesForTeam(args.teamId as string),
+				this.buildResolveVariablesForTeam(args.teamId),
 			);
 		}
-		if (args.projectId && !isUuid(args.projectId as string)) {
+		if (args.projectId && !isUuid(args.projectId)) {
 			resolveVariables.projectName = args.projectId;
 		}
 		if (
 			args.assigneeId &&
-			!isUuid(args.assigneeId as string) &&
-			(args.assigneeId as string).includes("@")
+			!isUuid(args.assigneeId) &&
+			args.assigneeId.includes("@")
 		) {
 			resolveVariables.assigneeEmail = args.assigneeId;
 		}
@@ -462,25 +494,27 @@ export class GraphQLIssuesService {
 			);
 		}
 
-		const finalTeamId = args.teamId
-			? await this.resolveTeamId(args.teamId as string, resolveResult)
-			: args.teamId;
+		const finalTeamId: string | undefined = args.teamId
+			? await this.resolveTeamId(args.teamId, resolveResult)
+			: undefined;
 
-		const finalProjectId = args.projectId
-			? this.resolveProjectId(args.projectId as string, resolveResult)
-			: args.projectId;
+		const finalProjectId: string | undefined = args.projectId
+			? this.resolveProjectId(args.projectId, resolveResult)
+			: undefined;
 
 		const finalAssigneeId = this.resolveAssigneeId(
-			args.assigneeId as string | undefined,
+			args.assigneeId,
 			resolveResult,
 		);
+
+		const limit = args.limit ?? 10;
 
 		if (args.query) {
 			const searchResult = await this.graphQLService.rawRequest(
 				SEARCH_ISSUES_QUERY,
 				{
 					term: args.query,
-					first: (args.limit as number) || 10,
+					first: limit,
 				},
 			);
 			const searchIssues = searchResult.searchIssues as
@@ -493,29 +527,29 @@ export class GraphQLIssuesService {
 				(issue: GraphQLResponseData) => this.transformIssueData(issue),
 			);
 			return this.applySearchFilters(results, {
-				teamId: finalTeamId as string | undefined,
-				assigneeId: finalAssigneeId as string | undefined,
-				projectId: finalProjectId as string | undefined,
-				status: args.status as string[] | undefined,
-				labelNames: args.labelNames as string[] | undefined,
-				priority: args.priority as number[] | undefined,
+				teamId: finalTeamId,
+				assigneeId: finalAssigneeId,
+				projectId: finalProjectId,
+				status: args.status,
+				labelNames: args.labelNames,
+				priority: args.priority,
 			});
 		}
 		const filter = this.buildSearchFilter({
-			teamId: finalTeamId as string | undefined,
-			assigneeId: finalAssigneeId as string | undefined,
-			projectId: finalProjectId as string | undefined,
-			noProject: args.noProject as boolean | undefined,
-			status: args.status as string[] | undefined,
-			labelNames: args.labelNames as string[] | undefined,
-			priority: args.priority as number[] | undefined,
+			teamId: finalTeamId,
+			assigneeId: finalAssigneeId,
+			projectId: finalProjectId,
+			noProject: args.noProject,
+			status: args.status,
+			labelNames: args.labelNames,
+			priority: args.priority,
 		});
 		const searchResult = await this.graphQLService.rawRequest(
 			FILTERED_SEARCH_ISSUES_QUERY,
 			{
-				first: (args.limit as number) || 10,
+				first: limit,
 				filter: Object.keys(filter).length > 0 ? filter : undefined,
-				orderBy: (args.orderBy as string) || "updatedAt",
+				orderBy: args.orderBy ?? "updatedAt",
 			},
 		);
 		const filteredIssues = searchResult.issues as
