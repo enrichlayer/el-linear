@@ -862,7 +862,14 @@ export class GraphQLIssuesService {
 			cycleId?: unknown;
 		},
 	): Record<string, unknown> {
-		const input: Record<string, unknown> = { title: args.title };
+		const input: Record<string, unknown> = {};
+		// Title is required by Linear's API unless --from-template is set,
+		// in which case Linear copies the template's title. We only include
+		// the field when explicitly set so a missing title with templateId
+		// works as the API documents.
+		if (args.title) {
+			input.title = args.title;
+		}
 		if (resolved.teamId) {
 			input.teamId = resolved.teamId;
 		}

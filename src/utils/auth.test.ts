@@ -92,17 +92,20 @@ describe("getApiToken", () => {
 		}
 	});
 
-	it("falls back to legacy ~/.config/el-linear/token when the profile token is missing", async () => {
+	it("refuses to fall back to legacy ~/.config/el-linear/token when a profile is active but its token is missing", async () => {
 		const { setActiveProfileForSession } = await import("../config/paths.js");
 		setActiveProfileForSession("forage");
 		try {
-			// Profile token absent; legacy token present.
+			// Profile token absent; legacy token present — the legacy fallback
+			// is intentionally disabled to avoid posting writes to the wrong
+			// workspace when the user explicitly selected a profile.
 			existsSyncMock.mockImplementation((p) =>
 				(p as string).endsWith(".config/el-linear/token"),
 			);
 			readFileSyncMock.mockReturnValue("legacy-token\n");
-			const result = getApiToken({});
-			expect(result).toBe("legacy-token");
+			expect(() => getApiToken({})).toThrow(
+				/No token for active profile.*forage/,
+			);
 		} finally {
 			setActiveProfileForSession(null);
 		}

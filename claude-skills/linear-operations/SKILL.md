@@ -36,7 +36,36 @@ el-linear issues search "auth" --format summary
 
 Use `--format json` (the default — pass nothing) **only** when you genuinely need the full envelope: writing scripts that parse the response, mutating with `--jq`, or chaining into another tool that expects structured data. Default to summary; reach for JSON when the task warrants it.
 
-Coverage: `--format summary` is implemented for `issues read|list|search`, `projects read|list`, `comments list`, `cycles read|list`, `project-milestones read|list`, `labels list`, `teams list`, `users list`, and the cross-resource `search` command. Other commands fall back to a generic key/value rendering of their JSON payload.
+### Anti-patterns to avoid
+
+If you find yourself writing any of these, you are reaching for the wrong tool:
+
+```bash
+# ❌ Don't do this — pipe through python to extract a few fields
+el-linear issues search "..." --limit 10 2>&1 | python3 -c "import json,sys; d=json.load(sys.stdin); ..."
+
+# ❌ Don't do this either — head the JSON to make it manageable
+el-linear projects list --limit 50 2>&1 | head -100
+
+# ❌ Don't reach for jq just to print title + state
+el-linear issues read DEV-123 --jq '.title + " " + .state.name' 2>&1
+
+# ✅ Just use --format summary
+el-linear issues search "..." --limit 10 --format summary 2>&1
+el-linear projects list --limit 50 --format summary 2>&1
+el-linear issues read DEV-123 --format summary 2>&1
+```
+
+The summary formatter exists exactly because every consumer (humans and LLMs) was reinventing the same `python -c` / `jq` extraction in shell. Pick the canonical path; the per-resource format is a stable contract.
+
+### Coverage
+
+`--format summary` is implemented for:
+
+- **Single resources:** `issues read`, `projects read`, `cycles read`, `project-milestones read`, `documents read`, `templates read`, releases (`graphql` query results), `users read`
+- **Lists:** `issues list`, `issues search`, `projects list`, `comments list`, `cycles list`, `project-milestones list`, `labels list`, `teams list`, `users list`, `documents list`, `templates list`, `attachments list`, `releases list`, and the cross-resource `search` command
+
+Commands without a dedicated formatter (e.g. `config show`, custom `graphql` queries) fall back to a generic key/value rendering of their JSON payload.
 
 ---
 
