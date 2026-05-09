@@ -122,3 +122,38 @@ export interface GetIssueByIdentifierResponse {
 export interface GetIssuesResponse {
 	issues: { nodes: IssueNode[] };
 }
+
+/** Response shape for `SEARCH_ISSUES_QUERY` (full-text). */
+export interface SearchIssuesResponse {
+	searchIssues: { nodes: IssueNode[] };
+}
+
+/**
+ * Response shape for `FILTERED_SEARCH_ISSUES_QUERY`. Same shape as
+ * `GetIssuesResponse` (both return `issues.nodes`) but kept as a
+ * named alias so the call site documents intent.
+ */
+export type FilteredSearchIssuesResponse = GetIssuesResponse;
+
+/** Response shape for `CREATE_ISSUE_MUTATION`. */
+export interface CreateIssueResponse {
+	issueCreate: {
+		success: boolean;
+		issue: IssueNode | null;
+	};
+}
+
+/** Response shape for `UPDATE_ISSUE_MUTATION`. */
+export interface UpdateIssueResponse {
+	issueUpdate: {
+		success: boolean;
+		issue: IssueNode | null;
+	};
+}
+
+/** Response shape for `GET_ISSUE_TEAM_QUERY`. */
+export interface GetIssueTeamResponse {
+	issue: {
+		team: { id: string } | null;
+	} | null;
+}

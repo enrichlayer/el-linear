@@ -14,10 +14,15 @@ import {
 	UPDATE_ISSUE_MUTATION,
 } from "../queries/issues.js";
 import type {
+	CreateIssueResponse,
+	FilteredSearchIssuesResponse,
 	GetIssueByIdentifierResponse,
 	GetIssueByIdResponse,
 	GetIssuesResponse,
+	GetIssueTeamResponse,
 	IssueWithCommentsNode,
+	SearchIssuesResponse,
+	UpdateIssueResponse,
 } from "../queries/issues-types.js";
 import { CREATE_LABEL_MUTATION } from "../queries/labels.js";
 import type { GraphQLResponseData, LinearIssue } from "../types/linear.js";
@@ -316,9 +321,9 @@ export class GraphQLIssuesService {
 		originalId: string,
 		updateInput: Record<string, unknown>,
 	): Promise<LinearIssue> {
-		let updateResult: GraphQLResponseData;
+		let updateResult: UpdateIssueResponse;
 		try {
-			updateResult = await this.graphQLService.rawRequest(
+			updateResult = await this.graphQLService.rawRequest<UpdateIssueResponse>(
 				UPDATE_ISSUE_MUTATION,
 				{
 					id: resolvedIssueId,
@@ -335,14 +340,16 @@ export class GraphQLIssuesService {
 			}
 			throw new Error(`Failed to update issue ${originalId}: ${msg}`);
 		}
-		const issueUpdate = updateResult.issueUpdate as GraphQLResponseData;
+		const issueUpdate = updateResult.issueUpdate;
 		if (!issueUpdate.success) {
 			throw new Error(`Failed to update issue ${originalId}`);
 		}
 		if (!issueUpdate.issue) {
 			throw new Error("Failed to retrieve updated issue");
 		}
-		return this.transformIssueData(issueUpdate.issue as GraphQLResponseData);
+		return this.transformIssueData(
+			issueUpdate.issue as unknown as GraphQLResponseData,
+		);
 	}
 
 	async createIssue(args: CreateIssueArgs): Promise<LinearIssue> {
@@ -454,9 +461,9 @@ export class GraphQLIssuesService {
 	private async executeCreateMutation(
 		createInput: Record<string, unknown>,
 	): Promise<LinearIssue> {
-		let createResult: GraphQLResponseData;
+		let createResult: CreateIssueResponse;
 		try {
-			createResult = await this.graphQLService.rawRequest(
+			createResult = await this.graphQLService.rawRequest<CreateIssueResponse>(
 				CREATE_ISSUE_MUTATION,
 				{
 					input: createInput,
@@ -466,14 +473,16 @@ export class GraphQLIssuesService {
 			const msg = error instanceof Error ? error.message : String(error);
 			throw new Error(`Failed to create issue: ${msg}`);
 		}
-		const issueCreate = createResult.issueCreate as GraphQLResponseData;
+		const issueCreate = createResult.issueCreate;
 		if (!issueCreate.success) {
 			throw new Error("Failed to create issue: the API reported failure.");
 		}
 		if (!issueCreate.issue) {
 			throw new Error("Failed to retrieve created issue");
 		}
-		return this.transformIssueData(issueCreate.issue as GraphQLResponseData);
+		return this.transformIssueData(
+			issueCreate.issue as unknown as GraphQLResponseData,
+		);
 	}
 
 	async searchIssues(args: SearchIssueArgs): Promise<LinearIssue[]> {
@@ -520,21 +529,20 @@ export class GraphQLIssuesService {
 		const limit = args.limit ?? 10;
 
 		if (args.query) {
-			const searchResult = await this.graphQLService.rawRequest(
-				SEARCH_ISSUES_QUERY,
-				{
-					term: args.query,
-					first: limit,
-				},
-			);
-			const searchIssues = searchResult.searchIssues as
-				| GraphQLResponseData
-				| undefined;
-			if (!searchIssues?.nodes) {
+			const searchResult =
+				await this.graphQLService.rawRequest<SearchIssuesResponse>(
+					SEARCH_ISSUES_QUERY,
+					{
+						term: args.query,
+						first: limit,
+					},
+				);
+			const nodes = searchResult.searchIssues?.nodes;
+			if (!nodes?.length) {
 				return [];
 			}
-			const results = (searchIssues.nodes as GraphQLResponseData[]).map(
-				(issue: GraphQLResponseData) => this.transformIssueData(issue),
+			const results = nodes.map((issue) =>
+				this.transformIssueData(issue as unknown as GraphQLResponseData),
 			);
 			return this.applySearchFilters(results, {
 				teamId: finalTeamId,
@@ -554,22 +562,21 @@ export class GraphQLIssuesService {
 			labelNames: args.labelNames,
 			priority: args.priority,
 		});
-		const searchResult = await this.graphQLService.rawRequest(
-			FILTERED_SEARCH_ISSUES_QUERY,
-			{
-				first: limit,
-				filter: Object.keys(filter).length > 0 ? filter : undefined,
-				orderBy: args.orderBy ?? "updatedAt",
-			},
-		);
-		const filteredIssues = searchResult.issues as
-			| GraphQLResponseData
-			| undefined;
+		const searchResult =
+			await this.graphQLService.rawRequest<FilteredSearchIssuesResponse>(
+				FILTERED_SEARCH_ISSUES_QUERY,
+				{
+					first: limit,
+					filter: Object.keys(filter).length > 0 ? filter : undefined,
+					orderBy: args.orderBy ?? "updatedAt",
+				},
+			);
+		const filteredIssues = searchResult.issues;
 		if (!filteredIssues?.nodes) {
 			return [];
 		}
-		return (filteredIssues.nodes as GraphQLResponseData[]).map(
-			(issue: GraphQLResponseData) => this.transformIssueData(issue),
+		return filteredIssues.nodes.map((issue) =>
+			this.transformIssueData(issue as unknown as GraphQLResponseData),
 		);
 	}
 
@@ -947,12 +954,11 @@ export class GraphQLIssuesService {
 	}
 
 	private async fetchIssueTeamId(issueId: string): Promise<string | undefined> {
-		const result = await this.graphQLService.rawRequest(GET_ISSUE_TEAM_QUERY, {
-			issueId,
-		});
-		const fetchedIssue = result.issue as GraphQLResponseData | undefined;
-		const fetchedTeam = fetchedIssue?.team as GraphQLResponseData | undefined;
-		return fetchedTeam?.id as string | undefined;
+		const result = await this.graphQLService.rawRequest<GetIssueTeamResponse>(
+			GET_ISSUE_TEAM_QUERY,
+			{ issueId },
+		);
+		return result.issue?.team?.id;
 	}
 
 	private buildCreateInput(
