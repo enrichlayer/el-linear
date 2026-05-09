@@ -169,11 +169,7 @@ export function setupTemplatesCommands(program: Command): void {
 		.option("--team-id <id>", "move the template to a different team")
 		.action(
 			handleAsyncCommand(
-				async (
-					templateId: string,
-					options: OptionValues,
-					command: Command,
-				) => {
+				async (templateId: string, options: OptionValues, command: Command) => {
 					const rootOpts = getRootOpts(command);
 					const graphQLService = await createGraphQLService(rootOpts);
 
@@ -226,7 +222,9 @@ export function setupTemplatesCommands(program: Command): void {
 						TEMPLATE_DELETE_MUTATION,
 						{ id: templateId },
 					);
-					const payload = result.templateDelete as unknown as { success: boolean };
+					const payload = result.templateDelete as unknown as {
+						success: boolean;
+					};
 					if (!payload?.success) {
 						throw new Error("templateDelete returned success=false");
 					}
@@ -243,9 +241,7 @@ export function setupTemplatesCommands(program: Command): void {
  */
 function parseTemplateData(options: OptionValues): unknown {
 	if (options.data && options.dataFile) {
-		throw new Error(
-			"Pass either --data or --data-file, not both",
-		);
+		throw new Error("Pass either --data or --data-file, not both");
 	}
 	if (options.data) {
 		try {

@@ -302,7 +302,52 @@ el-linear <command> --help       # detailed help for one command
 | Config | `config show`, `users list`, `teams list`, `templates list` |
 
 All `list` subcommands support `-l, --limit <n>`. All commands accept the
-top-level filters: `--raw`, `--jq <expr>`, `--fields <list>`.
+top-level filters: `--format <json|summary>`, `--raw`, `--jq <expr>`, `--fields <list>`.
+
+## Output formats
+
+Every command accepts `--format <kind>` at the root:
+
+- `--format json` (default) — emits the full structured envelope. Stable
+  shape across releases. Composes with `--jq`, `--fields`, and `--raw`.
+- `--format summary` — emits a fixed human-readable rendering. Stable
+  field set per resource (identifier, title, state, assignee, project,
+  labels, URL for issues; analogous fields for projects, comments,
+  cycles, milestones, teams, labels, users). Use this for terminals,
+  agents, or anywhere you'd otherwise pipe through `jq` / `python -c`
+  to extract a few fields.
+
+```bash
+el-linear issues read DEV-123 --format summary
+# DEV-123  Fix login flicker on Safari 17
+# State:    In Progress
+# Assignee: Alice
+# Project:  Auth Refactor
+# Labels:   Feature, tool
+# URL:      https://linear.app/acme/issue/DEV-123/...
+#
+#   Login button briefly disappears when the form first loads.
+#   Repro on Safari 17 / iOS 17. Chrome / Firefox unaffected.
+#   ... (truncated; --format json for full body)
+
+el-linear issues search "auth" --format summary
+# ID        TITLE                                                    STATE        ASSIGNEE
+# ---------------------------------------------------------------------------------------
+# DEV-100   Migrate auth middleware to new session store             In Progress  Alice
+# DEV-104   Auth callback returns 502 under load                     Todo         Bob
+#
+# 2 issues
+```
+
+Existing `issues list`, `issues search`, and `projects list` commands
+continue to accept their per-command formats too: `table`, `md`,
+`markdown`, `csv` — those go to the per-command rendering path. The
+global `summary` value works on every read/list command.
+
+`--format summary` does not compose with `--jq` (jq is JSON-only) or
+`--fields` (fields filter the JSON shape, not the rendered text). Use
+`--raw` together with `--format summary` to render a list envelope as a
+bare item-list rather than an envelope.
 
 ## Wrapping Linear references in arbitrary text
 

@@ -1567,7 +1567,11 @@ export function setupIssuesCommands(program: Command): void {
 			"--sort <field>",
 			"sort results (priority, status, created, updated)",
 		)
-		.option("--format <format>", "output format (json, table, md, csv)", "json")
+		.option(
+			"--format <format>",
+			"output format (json, summary, table, md, csv)",
+			"json",
+		)
 		.option(
 			"--fields <fields>",
 			"columns for table/csv (comma-separated: identifier,title,status,priority,assignee,project,team,labels,updated)",
@@ -1592,7 +1596,11 @@ export function setupIssuesCommands(program: Command): void {
 			"--sort <field>",
 			"sort results (priority, status, created, updated)",
 		)
-		.option("--format <format>", "output format (json, table, md, csv)", "json")
+		.option(
+			"--format <format>",
+			"output format (json, summary, table, md, csv)",
+			"json",
+		)
 		.option("--fields <fields>", "columns for table/csv output")
 		.option("-l, --limit <number>", "limit results", "10")
 		.action(handleAsyncCommand(handleSearchIssues));

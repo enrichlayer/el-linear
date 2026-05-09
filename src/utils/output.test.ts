@@ -340,3 +340,113 @@ describe("handleAsyncCommand", () => {
 		expect(JSON.parse(allStdout).error).toBe("broken");
 	});
 });
+
+describe("--format summary", () => {
+	let stdoutSpy: ReturnType<typeof vi.spyOn>;
+
+	beforeEach(async () => {
+		const mod = await import("./output.js");
+		mod.resetWarnings();
+		mod.setRawMode(false);
+		mod.setFieldsFilter(null);
+		mod.setOutputFormat("summary");
+		stdoutSpy = vi
+			.spyOn(process.stdout, "write")
+			.mockImplementation(() => true);
+	});
+
+	afterEach(async () => {
+		const mod = await import("./output.js");
+		mod.setOutputFormat("json");
+		mod.setRawMode(false);
+		mod.setFieldsFilter(null);
+		stdoutSpy.mockRestore();
+	});
+
+	it("emits a human-readable summary instead of JSON", async () => {
+		const { outputSuccess } = await import("./output.js");
+		outputSuccess({
+			identifier: "DEV-1",
+			title: "Fix bug",
+			state: { name: "Todo" },
+			assignee: { name: "Alice" },
+			url: "https://linear.app/acme/issue/DEV-1",
+		});
+		const written = stdoutSpy.mock.calls.map((c) => c[0] as string).join("");
+		expect(written).toContain("DEV-1");
+		expect(written).toContain("Fix bug");
+		expect(written).toContain("Todo");
+		expect(written).toContain("Alice");
+		// Must not be valid JSON
+		expect(() => JSON.parse(written)).toThrow();
+	});
+
+	it("renders a list envelope as a table", async () => {
+		const { outputSuccess } = await import("./output.js");
+		outputSuccess({
+			data: [
+				{
+					identifier: "DEV-1",
+					title: "First",
+					state: { name: "Todo" },
+					assignee: { name: "Alice" },
+				},
+				{
+					identifier: "DEV-2",
+					title: "Second",
+					state: { name: "Done" },
+					assignee: { name: "Bob" },
+				},
+			],
+			meta: { count: 2 },
+		});
+		const written = stdoutSpy.mock.calls.map((c) => c[0] as string).join("");
+		expect(written).toMatch(/ID\s+TITLE\s+STATE\s+ASSIGNEE/);
+		expect(written).toContain("2 issues");
+	});
+
+	it("composes with --raw to render bare-array list", async () => {
+		const { outputSuccess, setRawMode } = await import("./output.js");
+		setRawMode(true);
+		outputSuccess({
+			data: [
+				{
+					identifier: "DEV-1",
+					title: "x",
+					state: { name: "Todo" },
+					assignee: null,
+				},
+			],
+			meta: { count: 1 },
+		});
+		const written = stdoutSpy.mock.calls.map((c) => c[0] as string).join("");
+		expect(written).toContain("DEV-1");
+		expect(written).toContain("1 issue");
+	});
+
+	it("falls back to generic key/value rendering for unknown shapes", async () => {
+		const { outputSuccess } = await import("./output.js");
+		outputSuccess({ foo: "bar", baz: 123 });
+		const written = stdoutSpy.mock.calls.map((c) => c[0] as string).join("");
+		expect(written).toContain("foo:");
+		expect(written).toContain("bar");
+		expect(written).toContain("baz:");
+	});
+
+	it("includes a trailing newline", async () => {
+		const { outputSuccess } = await import("./output.js");
+		outputSuccess({ foo: "bar" });
+		const written = stdoutSpy.mock.calls.map((c) => c[0] as string).join("");
+		expect(written.endsWith("\n")).toBe(true);
+	});
+});
+
+describe("setOutputFormat", () => {
+	it("toggles between json and summary", async () => {
+		const { setOutputFormat, getOutputFormat } = await import("./output.js");
+		setOutputFormat("summary");
+		expect(getOutputFormat()).toBe("summary");
+		setOutputFormat("json");
+		expect(getOutputFormat()).toBe("json");
+	});
+});
