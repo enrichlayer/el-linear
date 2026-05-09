@@ -21,7 +21,7 @@ export async function atomicWrite(
 	const tmpPath = `${targetPath}.tmp-${randomBytes(8).toString("hex")}`;
 	try {
 		await fs.writeFile(tmpPath, data, { encoding: "utf8", mode });
-		// fs.writeFile only honours `mode` when the file is newly created.
+		// fs.writeFile only honors `mode` when the file is newly created.
 		// Tmp paths are always new, but be explicit to make this airtight if
 		// the random suffix ever collides with a stale tmp.
 		await fs.chmod(tmpPath, mode);

@@ -53,7 +53,7 @@ function filterFields(obj: unknown, fields: string[]): unknown {
 
 /**
  * Emit a summary-format render to stdout for the given payload. Honours
- * the same `--raw` unwrap behaviour as JSON output (so a list envelope
+ * the same `--raw` unwrap behavior as JSON output (so a list envelope
  * with `--raw` is treated as a bare array). Adds a trailing newline.
  *
  * Optionally takes an explicit `kind` — used by command handlers that
