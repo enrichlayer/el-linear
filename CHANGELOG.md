@@ -8,6 +8,16 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Generic `table-formatter.ts` shared between issues and projects.**
+  `commands/projects.ts` carried an 80-line `formatProjectsOutput`
+  that reinvented column-width math, table padding, CSV quoting, and
+  markdown pipe syntax — duplicating the renderers in
+  `utils/table-formatter.ts` (which were hardcoded to `LinearIssue`).
+  The renderers now take generic `ColumnDef<T>` /
+  `MarkdownColumnDef<T>` and `commands/projects.ts` declares its
+  own column definitions and calls the same
+  `renderFixedWidthTable` / `renderCsv` / `renderMarkdownTable`
+  helpers. Output is byte-equivalent. Refs ALL-938.
 - **Typed `SearchIssueArgs` for `GraphQLIssuesService.searchIssues`.**
   Same treatment as `CreateIssueArgs` and `UpdateIssueArgs` — typed
   shape covers the two search modes (full-text query + structured

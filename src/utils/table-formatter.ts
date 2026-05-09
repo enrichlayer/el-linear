@@ -2,9 +2,17 @@ import pc from "picocolors";
 import type { LinearIssue } from "../types/linear.js";
 import { PRIORITY_LABELS } from "./validators.js";
 
-interface ColumnDef {
-	colorize?: (value: string, issue: LinearIssue) => string;
-	extract: (issue: LinearIssue) => string;
+/**
+ * Column definition for the fixed-width text and CSV renderers.
+ * Generic over the row type `T` so the same renderers serve issues,
+ * projects, and any future resource that wants table output. The
+ * `colorize` hook receives the row so it can branch on entity-
+ * specific fields (e.g. the issue's priority or status); pass
+ * undefined to skip color.
+ */
+export interface ColumnDef<T> {
+	colorize?: (value: string, row: T) => string;
+	extract: (row: T) => string;
 	header: string;
 	key: string;
 	width: number;
@@ -66,7 +74,7 @@ function hyperlink(text: string, url: string): string {
 
 // ── Column definitions ─────────────────────────────────────────
 
-const ALL_COLUMNS: Record<string, ColumnDef> = {
+const ALL_COLUMNS: Record<string, ColumnDef<LinearIssue>> = {
 	identifier: {
 		key: "identifier",
 		header: "ID",
@@ -154,15 +162,15 @@ function pad(str: string, width: number): string {
 	return truncated + " ".repeat(Math.max(0, width - truncated.length));
 }
 
-export function formatTable(
-	issues: LinearIssue[],
-	fieldNames?: string[],
+/**
+ * Render `rows` as a fixed-width text table using `columns`. Generic
+ * over the row type `T` so issues, projects, and other resources
+ * share the same width-padding + colorize machinery.
+ */
+export function renderFixedWidthTable<T>(
+	rows: T[],
+	columns: ColumnDef<T>[],
 ): string {
-	const columnKeys = fieldNames ?? DEFAULT_COLUMNS;
-	const columns = columnKeys
-		.map((key) => ALL_COLUMNS[key])
-		.filter((col): col is ColumnDef => col !== undefined);
-
 	if (columns.length === 0) {
 		return "No valid columns specified.";
 	}
@@ -170,16 +178,47 @@ export function formatTable(
 	const header = columns.map((col) => pad(col.header, col.width)).join("  ");
 	const separator = columns.map((col) => "─".repeat(col.width)).join("──");
 
-	const rows = issues.map((issue) =>
+	const body = rows.map((row) =>
 		columns
 			.map((col) => {
-				const padded = pad(col.extract(issue), col.width);
-				return col.colorize ? col.colorize(padded, issue) : padded;
+				const padded = pad(col.extract(row), col.width);
+				return col.colorize ? col.colorize(padded, row) : padded;
 			})
 			.join("  "),
 	);
 
-	return [header, separator, ...rows].join("\n");
+	return [header, separator, ...body].join("\n");
+}
+
+/**
+ * Render `rows` as CSV using `columns`. Quotes any value containing
+ * `,` or `"` (RFC 4180-style escaping). Generic over the row type.
+ */
+export function renderCsv<T>(rows: T[], columns: ColumnDef<T>[]): string {
+	const header = columns.map((col) => col.header).join(",");
+	const body = rows.map((row) =>
+		columns
+			.map((col) => {
+				const value = col.extract(row);
+				return value.includes(",") || value.includes('"')
+					? `"${value.replace(/"/g, '""')}"`
+					: value;
+			})
+			.join(","),
+	);
+
+	return [header, ...body].join("\n");
+}
+
+export function formatTable(
+	issues: LinearIssue[],
+	fieldNames?: string[],
+): string {
+	const columnKeys = fieldNames ?? DEFAULT_COLUMNS;
+	const columns = columnKeys
+		.map((key) => ALL_COLUMNS[key])
+		.filter((col): col is ColumnDef<LinearIssue> => col !== undefined);
+	return renderFixedWidthTable(issues, columns);
 }
 
 export function formatCsv(
@@ -189,21 +228,8 @@ export function formatCsv(
 	const columnKeys = fieldNames ?? DEFAULT_COLUMNS;
 	const columns = columnKeys
 		.map((key) => ALL_COLUMNS[key])
-		.filter((col): col is ColumnDef => col !== undefined);
-
-	const header = columns.map((col) => col.header).join(",");
-	const rows = issues.map((issue) =>
-		columns
-			.map((col) => {
-				const value = col.extract(issue);
-				return value.includes(",") || value.includes('"')
-					? `"${value.replace(/"/g, '""')}"`
-					: value;
-			})
-			.join(","),
-	);
-
-	return [header, ...rows].join("\n");
+		.filter((col): col is ColumnDef<LinearIssue> => col !== undefined);
+	return renderCsv(issues, columns);
 }
 
 // ── Markdown formatting ────────────────────────────────────────
@@ -228,13 +254,13 @@ const PRIORITY_MD: Record<number, string> = {
 	4: "Low",
 };
 
-interface MarkdownColumnDef {
+export interface MarkdownColumnDef<T> {
 	align?: "left" | "right";
-	extract: (issue: LinearIssue) => string;
+	extract: (row: T) => string;
 	header: string;
 }
 
-const MD_COLUMNS: Record<string, MarkdownColumnDef> = {
+const MD_COLUMNS: Record<string, MarkdownColumnDef<LinearIssue>> = {
 	identifier: {
 		header: "Issue",
 		extract: (i) => `[${i.identifier}](${i.url})`,
@@ -288,6 +314,28 @@ function escapeMarkdownCell(str: string): string {
 	return str.replace(/\|/g, "\\|").replace(/\n/g, " ");
 }
 
+/**
+ * Render `rows` as a markdown table using `columns`. Generic over
+ * the row type. Escapes `|` and newlines in cell values.
+ */
+export function renderMarkdownTable<T>(
+	rows: T[],
+	columns: MarkdownColumnDef<T>[],
+): string {
+	if (columns.length === 0) {
+		return "No valid columns specified.";
+	}
+
+	const header = `| ${columns.map((col) => col.header).join(" | ")} |`;
+	const divider = `| ${columns.map((col) => (col.align === "right" ? "---:" : "---")).join(" | ")} |`;
+	const body = rows.map(
+		(row) =>
+			`| ${columns.map((col) => escapeMarkdownCell(col.extract(row))).join(" | ")} |`,
+	);
+
+	return [header, divider, ...body].join("\n");
+}
+
 export function formatMarkdown(
 	issues: LinearIssue[],
 	fieldNames?: string[],
@@ -295,18 +343,6 @@ export function formatMarkdown(
 	const columnKeys = fieldNames ?? DEFAULT_COLUMNS;
 	const columns = columnKeys
 		.map((key) => MD_COLUMNS[key])
-		.filter((col): col is MarkdownColumnDef => col !== undefined);
-
-	if (columns.length === 0) {
-		return "No valid columns specified.";
-	}
-
-	const header = `| ${columns.map((col) => col.header).join(" | ")} |`;
-	const divider = `| ${columns.map((col) => (col.align === "right" ? "---:" : "---")).join(" | ")} |`;
-	const rows = issues.map(
-		(issue) =>
-			`| ${columns.map((col) => escapeMarkdownCell(col.extract(issue))).join(" | ")} |`,
-	);
-
-	return [header, divider, ...rows].join("\n");
+		.filter((col): col is MarkdownColumnDef<LinearIssue> => col !== undefined);
+	return renderMarkdownTable(issues, columns);
 }

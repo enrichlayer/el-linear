@@ -17,6 +17,13 @@ import { createLinearService } from "../utils/linear-service.js";
 import { logger } from "../utils/logger.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
 import { getRootOpts } from "../utils/root-opts.js";
+import {
+	type ColumnDef,
+	type MarkdownColumnDef,
+	renderCsv,
+	renderFixedWidthTable,
+	renderMarkdownTable,
+} from "../utils/table-formatter.js";
 import { isUuid } from "../utils/uuid.js";
 import { splitList } from "../utils/validators.js";
 
@@ -70,87 +77,104 @@ export function resolveProjectStateFilter(options: OptionValues): {
 	return {};
 }
 
+// ── Project column definitions ────────────────────────────────
+//
+// Pre-fix this file inlined an 80-line `formatProjectsOutput`
+// function that hand-rolled column width math, table padding, CSV
+// quoting, and markdown pipe syntax — all duplicating
+// `utils/table-formatter.ts`. Now we declare `ColumnDef<LinearProject>`
+// arrays and let the shared renderers do the work. ALL-938 cleanup.
+
+const PROJECT_COLUMNS: Record<string, ColumnDef<LinearProject>> = {
+	name: { key: "name", header: "Name", width: 32, extract: (p) => p.name },
+	state: {
+		key: "state",
+		header: "State",
+		width: 10,
+		extract: (p) => p.state ?? "",
+	},
+	progress: {
+		key: "progress",
+		header: "Progress",
+		width: 10,
+		extract: (p) =>
+			p.progress !== undefined ? `${Math.round(p.progress * 100)}%` : "",
+	},
+	teams: {
+		key: "teams",
+		header: "Teams",
+		width: 18,
+		extract: (p) => p.teams?.map((t) => t.key).join(", ") ?? "",
+	},
+	lead: {
+		key: "lead",
+		header: "Lead",
+		width: 18,
+		extract: (p) => p.lead?.name ?? "",
+	},
+	targetDate: {
+		key: "targetDate",
+		header: "Target",
+		width: 12,
+		extract: (p) => p.targetDate ?? "",
+	},
+	id: { key: "id", header: "ID", width: 38, extract: (p) => p.id },
+};
+
+const PROJECT_MD_COLUMNS: Record<string, MarkdownColumnDef<LinearProject>> = {
+	name: { header: "Name", extract: (p) => p.name },
+	state: { header: "State", extract: (p) => p.state ?? "" },
+	progress: {
+		header: "Progress",
+		extract: (p) =>
+			p.progress !== undefined ? `${Math.round(p.progress * 100)}%` : "",
+	},
+	teams: {
+		header: "Teams",
+		extract: (p) => p.teams?.map((t) => t.key).join(", ") ?? "",
+	},
+	lead: { header: "Lead", extract: (p) => p.lead?.name ?? "" },
+	targetDate: { header: "Target", extract: (p) => p.targetDate ?? "" },
+	id: { header: "ID", extract: (p) => p.id },
+};
+
+const DEFAULT_PROJECT_COLUMNS = [
+	"name",
+	"state",
+	"progress",
+	"teams",
+	"lead",
+	"targetDate",
+];
+
 function formatProjectsOutput(
 	projects: LinearProject[],
 	format: string,
 	fieldNames?: string[],
 ): void {
-	const fields = fieldNames ?? [
-		"name",
-		"state",
-		"progress",
-		"teams",
-		"lead",
-		"targetDate",
-	];
-	const rows = projects.map((p) => {
-		const row: Record<string, string> = {};
-		for (const f of fields) {
-			switch (f) {
-				case "name":
-					row[f] = p.name;
-					break;
-				case "state":
-					row[f] = p.state ?? "";
-					break;
-				case "progress":
-					row[f] =
-						p.progress !== undefined ? `${Math.round(p.progress * 100)}%` : "";
-					break;
-				case "teams":
-					row[f] = p.teams?.map((t) => t.key).join(", ") ?? "";
-					break;
-				case "lead":
-					row[f] = p.lead?.name ?? "";
-					break;
-				case "targetDate":
-					row[f] = p.targetDate ?? "";
-					break;
-				case "id":
-					row[f] = p.id;
-					break;
-				default:
-					row[f] = String((p as unknown as Record<string, unknown>)[f] ?? "");
-			}
-		}
-		return row;
-	});
+	const keys = fieldNames ?? DEFAULT_PROJECT_COLUMNS;
 
 	if (format === "csv") {
-		logger.info(fields.join(","));
-		for (const row of rows) {
-			logger.info(
-				fields.map((f) => `"${(row[f] ?? "").replace(/"/g, '""')}"`).join(","),
-			);
-		}
+		const columns = keys
+			.map((k) => PROJECT_COLUMNS[k])
+			.filter((c): c is ColumnDef<LinearProject> => c !== undefined);
+		logger.info(renderCsv(projects, columns));
 		return;
 	}
 
-	// table and md formats
-	const widths = fields.map((f) =>
-		Math.max(f.length, ...rows.map((r) => (r[f] ?? "").length)),
-	);
-
-	const separator =
-		format === "md"
-			? `| ${widths.map((w) => "-".repeat(w)).join(" | ")} |`
-			: widths.map((w) => "-".repeat(w + 2)).join("+");
-	const header =
-		format === "md"
-			? `| ${fields.map((f, i) => f.padEnd(widths[i])).join(" | ")} |`
-			: fields.map((f, i) => ` ${f.padEnd(widths[i])} `).join("|");
-
-	logger.info(header);
-	logger.info(separator);
-	for (const row of rows) {
-		const line =
-			format === "md"
-				? `| ${fields.map((f, i) => (row[f] ?? "").padEnd(widths[i])).join(" | ")} |`
-				: fields
-						.map((f, i) => ` ${(row[f] ?? "").padEnd(widths[i])} `)
-						.join("|");
-		logger.info(line);
+	if (format === "md") {
+		const columns = keys
+			.map((k) => PROJECT_MD_COLUMNS[k])
+			.filter((c): c is MarkdownColumnDef<LinearProject> => c !== undefined);
+		logger.info(renderMarkdownTable(projects, columns));
+		return;
 	}
+
+	// Default: fixed-width text table.
+	const columns = keys
+		.map((k) => PROJECT_COLUMNS[k])
+		.filter((c): c is ColumnDef<LinearProject> => c !== undefined);
+	logger.info(renderFixedWidthTable(projects, columns));
 }
 
 interface ProjectTeamInfo {
