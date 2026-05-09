@@ -6,6 +6,20 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- **Atomic writes for `profile migrate-legacy`.** The migrate-legacy
+  command's config / token / active-profile writes now go through the
+  existing `atomicWrite` helper (write-tmp + rename) instead of raw
+  `fs.writeFile`. Closes two failure modes: (a) partial writes on SIGINT
+  / OOM / power loss, which previously left a corrupt config or token
+  file; (b) a TOCTOU window when overwriting a pre-existing token file
+  at mode `0o644` — the freshly-written token sat at the looser mode
+  until a follow-up `chmod` ran, and a concurrent reader could grab it
+  during that window. atomicWrite creates the tmp file at the requested
+  mode and renames into place, so the destination atomically transitions
+  from old-content-old-mode to new-content-new-mode. Closes ALL-932.
+
 ### Added
 
 - **`--format summary` coverage** for `documents list/read`, `templates

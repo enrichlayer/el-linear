@@ -41,6 +41,7 @@ import path from "node:path";
 import { confirm, input, password } from "@inquirer/prompts";
 import type { Command } from "commander";
 
+import { atomicWrite } from "../../auth/oauth-fs.js";
 import {
 	ACTIVE_PROFILE_FILE,
 	CONFIG_DIR,
@@ -277,10 +278,7 @@ async function copyConfigIntoProfile(
 	const sourceContent = await fsp.readFile(CONFIG_PATH, "utf8");
 
 	if (!(await pathExists(destConfigPath))) {
-		await fsp.writeFile(destConfigPath, sourceContent, {
-			mode: 0o644,
-			encoding: "utf8",
-		});
+		await atomicWrite(destConfigPath, sourceContent, 0o644);
 		return;
 	}
 
@@ -310,10 +308,7 @@ async function copyConfigIntoProfile(
 		}
 	}
 
-	await fsp.writeFile(destConfigPath, sourceContent, {
-		mode: 0o644,
-		encoding: "utf8",
-	});
+	await atomicWrite(destConfigPath, sourceContent, 0o644);
 }
 
 async function writeProfileToken(
@@ -325,13 +320,10 @@ async function writeProfileToken(
 	const newline = `${token}\n`;
 
 	if (!(await pathExists(destTokenPath))) {
-		await fsp.writeFile(destTokenPath, newline, {
-			mode: 0o600,
-			encoding: "utf8",
-		});
-		// fs.writeFile mode is only honored on file creation; chmod defensively
-		// in case a parent process pre-created the file with permissive perms.
-		await fsp.chmod(destTokenPath, 0o600);
+		// atomicWrite creates the tmp file with the requested mode and
+		// renames into place, so there is no window where the token is
+		// readable at a looser mode than 0o600.
+		await atomicWrite(destTokenPath, newline, 0o600);
 		return;
 	}
 
@@ -361,11 +353,7 @@ async function writeProfileToken(
 		}
 	}
 
-	await fsp.writeFile(destTokenPath, newline, {
-		mode: 0o600,
-		encoding: "utf8",
-	});
-	await fsp.chmod(destTokenPath, 0o600);
+	await atomicWrite(destTokenPath, newline, 0o600);
 }
 
 async function ensureActiveProfile(name: string): Promise<void> {
@@ -375,10 +363,7 @@ async function ensureActiveProfile(name: string): Promise<void> {
 		current = (await fsp.readFile(ACTIVE_PROFILE_FILE, "utf8")).trim();
 	}
 	if (current === name) return;
-	await fsp.writeFile(ACTIVE_PROFILE_FILE, `${name}\n`, {
-		mode: 0o644,
-		encoding: "utf8",
-	});
+	await atomicWrite(ACTIVE_PROFILE_FILE, `${name}\n`, 0o644);
 }
 
 async function pathExists(p: string): Promise<boolean> {

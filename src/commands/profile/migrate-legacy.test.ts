@@ -316,6 +316,55 @@ describe("migrate-legacy: differing config refuses without --force", () => {
 			"utf8",
 		);
 		expect(after).toBe(newLegacy);
+
+		// atomicWrite must clean up: no .tmp-<hex> sibling left behind in the
+		// profile dir or the legacy config dir. Catches a regression where
+		// the rename failed silently and the helper leaked artefacts.
+		const profileEntries = await fsp.readdir(profileDir);
+		expect(profileEntries.filter((n) => n.includes(".tmp-"))).toEqual([]);
+		const configEntries = await fsp.readdir(
+			path.join(TEST_HOME, ".config", "el-linear"),
+		);
+		expect(configEntries.filter((n) => n.includes(".tmp-"))).toEqual([]);
+	});
+
+	it("token write produces mode 0o600 even when the destination pre-existed at 0o644", async () => {
+		// This is the security-relevant scenario: a stale token file with
+		// looser perms gets overwritten. Without atomicWrite, fs.writeFile
+		// would land the new content at the OLD mode (0o644) and a
+		// concurrent reader could grab it before the chmod-after-write
+		// fired. atomicWrite creates the tmp file at 0o600, chmods it, and
+		// renames into place — no widened-perm window.
+		vi.resetModules();
+		const { runMigrateLegacy } = await import("./migrate-legacy.js");
+		await planLegacyConfig('{"defaultTeam":"ENG"}');
+
+		const profileDir = path.join(
+			TEST_HOME,
+			".config",
+			"el-linear",
+			"profiles",
+			"default",
+		);
+		await fsp.mkdir(profileDir, { recursive: true });
+		const tokenPath = path.join(profileDir, "token");
+		// Pre-create token at 0o644 (looser than required) with a different value.
+		await fsp.writeFile(tokenPath, "lin_api_old_value\n", { mode: 0o644 });
+		await fsp.chmod(tokenPath, 0o644);
+
+		process.env.EL_LINEAR_TOKEN = "lin_api_test_overwrite_perms";
+
+		const { deps } = makeDeps();
+		await runMigrateLegacy(
+			{ skipPrompt: true, name: "default", force: true, yes: true },
+			deps,
+		);
+
+		const finalContent = (await fsp.readFile(tokenPath, "utf8")).trim();
+		expect(finalContent).toBe("lin_api_test_overwrite_perms");
+
+		const finalStat = await fsp.stat(tokenPath);
+		expect(finalStat.mode & 0o777).toBe(0o600);
 	});
 });
 
