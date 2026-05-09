@@ -42,20 +42,27 @@ const SUCCESS_HTML = `<!doctype html>
 </body>
 </html>`;
 
-function errorHtml(message: string): string {
-	const safe = message.replace(/[<>&]/g, "");
-	return `<!doctype html>
+// Fixed error page — never interpolates attacker-controlled prose.
+//
+// Pre-fix: the upstream `error_description` from the redirect URL was
+// embedded into the HTML response (with `<>&` stripped). An attacker
+// who knew the local listener port could fire
+// `http://localhost:<port>/oauth/callback?error=phish&error_description=Your+account+is+compromised…`
+// and have arbitrary phishing prose render in the user's browser
+// before the legitimate redirect arrived. Now we render a fixed
+// string and log the upstream detail to the terminal where the user
+// can compare it to expected output.
+const ERROR_HTML = `<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><title>el-linear · authorization error</title>
 <style>body{font-family:system-ui,sans-serif;max-width:560px;margin:64px auto;padding:0 16px;color:#1a1a1a}h1{font-size:18px;margin:0 0 12px}p{margin:8px 0}.bad{color:#a30000}code{background:#f4f4f4;padding:2px 4px;border-radius:3px}</style>
 </head>
 <body>
 <h1 class="bad">el-linear · authorization error</h1>
-<p>${safe}</p>
+<p>Authorization failed. Return to your terminal — the CLI has the details.</p>
 <p>You can close this tab. Re-run <code>el-linear init oauth</code> to retry.</p>
 </body>
 </html>`;
-}
 
 /**
  * Spin up a one-shot HTTP server on `127.0.0.1:<port>`, accept the OAuth
@@ -115,7 +122,7 @@ export async function runLocalhostCallback(
 					const message = err instanceof Error ? err.message : String(err);
 					res.statusCode = 400;
 					res.setHeader("content-type", "text/html; charset=utf-8");
-					res.end(errorHtml(message));
+					res.end(ERROR_HTML);
 					settle(() => reject(new Error(message)));
 					return;
 				}
@@ -125,7 +132,7 @@ export async function runLocalhostCallback(
 						"State mismatch — the OAuth callback's `state` parameter doesn't match what we sent. This could indicate a CSRF attempt; aborting.";
 					res.statusCode = 400;
 					res.setHeader("content-type", "text/html; charset=utf-8");
-					res.end(errorHtml(message));
+					res.end(ERROR_HTML);
 					settle(() => reject(new Error(message)));
 					return;
 				}

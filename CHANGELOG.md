@@ -8,6 +8,38 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+- **OAuth callback page no longer reflects attacker-controlled prose.**
+  Previously the `error_description` from the redirect URL was
+  embedded into the local listener's HTML response (with `<>&`
+  stripped). An attacker who knew the local listener port could fire
+  `http://localhost:<port>/oauth/callback?error=phish&error_description=Your+account+is+compromised…`
+  and have arbitrary phishing prose render in the user's browser
+  before the legitimate redirect arrived. Now the page renders a
+  fixed string ("Authorization failed. Return to your terminal —
+  the CLI has the details."); the upstream detail is logged to the
+  CLI where it belongs. Refs ALL-935.
+- **`init oauth` headless flow rejects bare-code pastes by default.**
+  Pre-fix, pasting just the authorization code (no surrounding URL)
+  silently fabricated `state = expectedState`, defeating the OAuth
+  CSRF check entirely. Post-fix, the prompt requires the FULL
+  callback URL — paste it as-is and the resolver verifies `state`
+  matches. Bare-code paste is still available behind
+  `--unsafe-bare-code` for SSH / restricted-container scenarios where
+  the user genuinely can't copy the URL, but the flag's name + help
+  text now tell them what they're trading away. Refs ALL-935.
+- **`templates --data-file` rejects absolute / `..`-traversing paths
+  by default.** Pre-fix, a CI invocation or scripted caller passing
+  an attacker-controlled `--data-file` could read any file (e.g.
+  `~/.aws/credentials.json`, `/etc/passwd`) and ship its contents
+  into Linear's API via the `templateData` field. Post-fix, the
+  resolver rejects paths starting with `/`, `../`, or `..\`; opt in
+  with `--allow-absolute` if you really need it. Refs ALL-935.
+- **Auto-link reference resolution caps candidates at 50 per call.**
+  A description containing hundreds of fake identifiers (`AAA-1, …,
+  AAA-999`) used to trigger one GraphQL roundtrip per identifier
+  before deciding none resolved — a foot-gun DoS-for-self vector.
+  Now the resolver processes the first 50 candidates and reports
+  the overflow as a single synthetic `failed` entry. Refs ALL-935.
 - **`sanitizeForLog` now also redacts OAuth tokens.** Previously the
   redaction regex only matched the `lin_api_…` prefix; OAuth access
   and refresh tokens (`lin_oauth_…`) were left visible. A

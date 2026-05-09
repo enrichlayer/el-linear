@@ -94,6 +94,10 @@ export function setupInitCommands(program: Command): void {
 			"localhost callback port (default 8765)",
 			(value) => Number.parseInt(value, 10),
 		)
+		.option(
+			"--unsafe-bare-code",
+			"allow pasting a bare authorization code in the headless flow (skips the OAuth `state` CSRF check; opt-in only)",
+		)
 		.action(
 			withCleanExit(
 				async (options: {
@@ -101,6 +105,7 @@ export function setupInitCommands(program: Command): void {
 					revoke?: boolean;
 					browser?: boolean;
 					port?: number;
+					unsafeBareCode?: boolean;
 				}) => {
 					printStep("oauth", "Linear OAuth (PKCE)");
 					if (options.revoke) {
@@ -113,6 +118,7 @@ export function setupInitCommands(program: Command): void {
 						// commander's `--no-browser` produces `browser: false`.
 						noBrowser: options.browser === false,
 						port: options.port,
+						unsafeBareCode: options.unsafeBareCode === true,
 					});
 				},
 			),

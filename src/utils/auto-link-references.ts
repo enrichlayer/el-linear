@@ -294,7 +294,21 @@ export async function autoLinkReferences(
 	const commentRefs = (comments ?? []).flatMap((body) =>
 		extractIssueReferences(body, identifier),
 	);
-	const candidates = mergeCandidates(descriptionRefs, commentRefs);
+	const merged = mergeCandidates(descriptionRefs, commentRefs);
+	// Cap the number of candidates we'll resolve per call. A malicious
+	// (or merely careless) issue body containing hundreds of fake
+	// identifiers — `AAA-1, AAA-2, …, AAA-999` — would otherwise trigger
+	// 999 GraphQL roundtrips before deciding none resolve. Realistic
+	// human-authored bodies stay well under this cap.
+	const MAX_CANDIDATES_PER_CALL = 50;
+	const candidates = merged.slice(0, MAX_CANDIDATES_PER_CALL);
+	if (merged.length > MAX_CANDIDATES_PER_CALL) {
+		const overflow = merged.length - MAX_CANDIDATES_PER_CALL;
+		failed.push({
+			identifier: `+${overflow} more`,
+			reason: `Too many candidate references (${merged.length}); only the first ${MAX_CANDIDATES_PER_CALL} are processed.`,
+		});
+	}
 	if (candidates.length === 0) {
 		return { linked, skipped, failed };
 	}
