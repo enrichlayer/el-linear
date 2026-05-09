@@ -13,6 +13,12 @@ import {
 	SEARCH_ISSUES_QUERY,
 	UPDATE_ISSUE_MUTATION,
 } from "../queries/issues.js";
+import type {
+	GetIssueByIdentifierResponse,
+	GetIssueByIdResponse,
+	GetIssuesResponse,
+	IssueWithCommentsNode,
+} from "../queries/issues-types.js";
 import { CREATE_LABEL_MUTATION } from "../queries/labels.js";
 import type { GraphQLResponseData, LinearIssue } from "../types/linear.js";
 import { toISOStringOrNow } from "./date-format.js";
@@ -164,47 +170,51 @@ export class GraphQLIssuesService {
 	}
 
 	async getIssues(limit = 25): Promise<LinearIssue[]> {
-		const result = await this.graphQLService.rawRequest(GET_ISSUES_QUERY, {
-			first: limit,
-			orderBy: "updatedAt",
-		});
-		const issues = result.issues as GraphQLResponseData | undefined;
-		if (!issues?.nodes) {
+		// First slice of the per-query response typing pass (ALL-937):
+		// the rawRequest call binds to `GetIssuesResponse` so the
+		// consumer can read `.issues.nodes` without a cast, and a
+		// renamed Linear field becomes a `tsc` error instead of a
+		// silent `undefined`. The transformer still takes
+		// `GraphQLResponseData` — typing it requires reshaping ~100
+		// lines of internal field reads, scoped to a follow-up.
+		const result = await this.graphQLService.rawRequest<GetIssuesResponse>(
+			GET_ISSUES_QUERY,
+			{ first: limit, orderBy: "updatedAt" },
+		);
+		const nodes = result.issues?.nodes;
+		if (!nodes?.length) {
 			return [];
 		}
-		return (issues.nodes as GraphQLResponseData[]).map(
-			(issue: GraphQLResponseData) => this.transformIssueData(issue),
+		return nodes.map((issue) =>
+			this.transformIssueData(issue as unknown as GraphQLResponseData),
 		);
 	}
 
 	async getIssueById(issueId: string): Promise<LinearIssue> {
-		let issueData: GraphQLResponseData;
+		let issueData: IssueWithCommentsNode;
 		if (isUuid(issueId)) {
-			const result = await this.graphQLService.rawRequest(
+			const result = await this.graphQLService.rawRequest<GetIssueByIdResponse>(
 				GET_ISSUE_BY_ID_QUERY,
 				{ id: issueId },
 			);
 			if (!result.issue) {
 				throw notFoundError("Issue", issueId);
 			}
-			issueData = result.issue as GraphQLResponseData;
+			issueData = result.issue;
 		} else {
 			const { teamKey, issueNumber } = parseIssueIdentifier(issueId);
-			const result = await this.graphQLService.rawRequest(
-				GET_ISSUE_BY_IDENTIFIER_QUERY,
-				{
-					teamKey,
-					number: issueNumber,
-				},
-			);
-			const issues = result.issues as GraphQLResponseData | undefined;
-			const nodes = issues?.nodes as GraphQLResponseData[] | undefined;
+			const result =
+				await this.graphQLService.rawRequest<GetIssueByIdentifierResponse>(
+					GET_ISSUE_BY_IDENTIFIER_QUERY,
+					{ teamKey, number: issueNumber },
+				);
+			const nodes = result.issues?.nodes;
 			if (!nodes?.length) {
 				throw notFoundError("Issue", issueId);
 			}
 			issueData = nodes[0];
 		}
-		return this.transformIssueData(issueData);
+		return this.transformIssueData(issueData as unknown as GraphQLResponseData);
 	}
 
 	async updateIssue(
