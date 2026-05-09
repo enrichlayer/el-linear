@@ -220,3 +220,19 @@ export interface ScanIssuesResponse {
 		nodes: { id: string; identifier: string; description: string | null }[];
 	};
 }
+
+export interface IssueStateSpanNode {
+	state: { id: string; name: string; type: string };
+	startedAt: string;
+	endedAt: string | null;
+}
+
+/** Response shape for `GET_ISSUE_STATE_HISTORY_QUERY`. */
+export interface GetIssueStateHistoryResponse {
+	issue: {
+		id: string;
+		identifier: string;
+		title: string;
+		stateHistory: { nodes: IssueStateSpanNode[] };
+	} | null;
+}

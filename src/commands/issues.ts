@@ -17,9 +17,11 @@ import {
 	GET_ISSUE_RELATIONS_QUERY,
 	GET_ISSUE_STATE_HISTORY_QUERY,
 } from "../queries/issues.js";
-import type { GetIssueRelationsResponse } from "../queries/issues-types.js";
 import type {
-	GraphQLResponseData,
+	GetIssueRelationsResponse,
+	GetIssueStateHistoryResponse,
+} from "../queries/issues-types.js";
+import type {
 	IssueStateSpan,
 	LinearAttachment,
 	LinearIssue,
@@ -597,35 +599,30 @@ async function handleHistoryIssue(
 	const linearService = await createLinearService(rootOpts);
 
 	const resolvedId = await linearService.resolveIssueId(issueId);
-	const result = await graphQLService.rawRequest(
+	const result = await graphQLService.rawRequest<GetIssueStateHistoryResponse>(
 		GET_ISSUE_STATE_HISTORY_QUERY,
-		{
-			id: resolvedId,
-		},
+		{ id: resolvedId },
 	);
 
 	if (!result.issue) {
 		throw new Error(`Issue "${issueId}" not found`);
 	}
 
-	const issue = result.issue as GraphQLResponseData;
-	const stateHistory = issue.stateHistory as GraphQLResponseData | undefined;
-	const spans: IssueStateSpan[] = (
-		(stateHistory?.nodes as GraphQLResponseData[] | undefined) ?? []
-	).map((span: GraphQLResponseData) => ({
+	const issue = result.issue;
+	const spans: IssueStateSpan[] = issue.stateHistory.nodes.map((span) => ({
 		state: {
-			id: (span.state as GraphQLResponseData).id as string,
-			name: (span.state as GraphQLResponseData).name as string,
-			type: (span.state as GraphQLResponseData).type as string,
+			id: span.state.id,
+			name: span.state.name,
+			type: span.state.type,
 		},
-		startedAt: span.startedAt as string,
-		endedAt: (span.endedAt as string) || undefined,
+		startedAt: span.startedAt,
+		endedAt: span.endedAt ?? undefined,
 	}));
 
 	outputSuccess({
-		id: issue.id as string,
-		identifier: issue.identifier as string,
-		title: issue.title as string,
+		id: issue.id,
+		identifier: issue.identifier,
+		title: issue.title,
 		stateHistory: spans,
 		meta: { count: spans.length },
 	});
@@ -718,12 +715,12 @@ async function handleUpdateIssue(
 
 	if (options.appendDescription) {
 		const resolved = await linearService.resolveIssueId(issueId);
-		const current = await graphQLService.rawRequest(
-			"query($id: String!) { issue(id: $id) { description } }",
-			{ id: resolved },
-		);
-		const issue = current.issue as GraphQLResponseData | undefined;
-		const existing = (issue?.description as string) ?? "";
+		const current = await graphQLService.rawRequest<{
+			issue: { description: string | null } | null;
+		}>("query($id: String!) { issue(id: $id) { description } }", {
+			id: resolved,
+		});
+		const existing = current.issue?.description ?? "";
 		options.description = `${existing}\n${options.appendDescription}`;
 	}
 
