@@ -22,19 +22,31 @@ describe("promptForPastedCode", () => {
 		).rejects.toThrow(/State mismatch/);
 	});
 
-	it("accepts a bare code string and trusts the expected state", async () => {
+	it("rejects a bare code string by default (CSRF state check) — ALL-935", async () => {
+		const prompt = vi.fn(async () => "  abcd-1234-efgh  ");
+		await expect(
+			promptForPastedCode({ expectedState: "EXPECTED", prompt }),
+		).rejects.toThrow(/--unsafe-bare-code|bypass.*CSRF/);
+	});
+
+	it("accepts a bare code string when --unsafe-bare-code is set (opt-in)", async () => {
 		const prompt = vi.fn(async () => "  abcd-1234-efgh  ");
 		const result = await promptForPastedCode({
 			expectedState: "EXPECTED",
 			prompt,
+			unsafeBareCode: true,
 		});
 		expect(result).toEqual({ code: "abcd-1234-efgh", state: "EXPECTED" });
 	});
 
-	it("rejects a malformed paste with `=` or `?`", async () => {
+	it("rejects a malformed paste with `=` or `?` (even with --unsafe-bare-code)", async () => {
 		const prompt = vi.fn(async () => "code=foo");
 		await expect(
-			promptForPastedCode({ expectedState: "EXPECTED", prompt }),
+			promptForPastedCode({
+				expectedState: "EXPECTED",
+				prompt,
+				unsafeBareCode: true,
+			}),
 		).rejects.toThrow(/malformed/);
 	});
 

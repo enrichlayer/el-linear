@@ -120,7 +120,11 @@ export function setupTemplatesCommands(program: Command): void {
 		)
 		.option(
 			"--data-file <path>",
-			"templateData read from a JSON file. Mutually exclusive with --data",
+			"templateData read from a JSON file (relative path). Mutually exclusive with --data",
+		)
+		.option(
+			"--allow-absolute",
+			"allow --data-file to read absolute or `..`-traversing paths (file contents are sent to Linear's API)",
 		)
 		.option("--icon <name>", "Lucide icon name shown in the picker")
 		.option("--color <hex>", "color (hex) for the template badge")
@@ -163,7 +167,14 @@ export function setupTemplatesCommands(program: Command): void {
 		.option("--name <name>", "new display name")
 		.option("--description <text>", "new description")
 		.option("--data <json>", "new templateData as a JSON string")
-		.option("--data-file <path>", "new templateData read from a JSON file")
+		.option(
+			"--data-file <path>",
+			"new templateData read from a JSON file (relative path)",
+		)
+		.option(
+			"--allow-absolute",
+			"allow --data-file to read absolute or `..`-traversing paths",
+		)
 		.option("--icon <name>", "Lucide icon name")
 		.option("--color <hex>", "color (hex)")
 		.option("--team-id <id>", "move the template to a different team")
@@ -253,12 +264,23 @@ function parseTemplateData(options: OptionValues): unknown {
 		}
 	}
 	if (options.dataFile) {
-		const raw = readFileSync(options.dataFile as string, "utf8");
+		const dataFile = String(options.dataFile);
+		// Reject absolute paths and `..` traversal unless explicitly
+		// allowed. CI invocations or scripted callers can pass an
+		// attacker-controlled path otherwise (e.g. `~/.aws/credentials.json`,
+		// `/etc/passwd`) and have its contents flow into Linear's API
+		// via the `templateData` field.
+		if (!options.allowAbsolute && /^(\/|\.\.\/|\.\.\\)/.test(dataFile)) {
+			throw new Error(
+				`--data-file ${dataFile} resolves outside the current directory. Pass --allow-absolute to opt in (sends file contents to Linear's API).`,
+			);
+		}
+		const raw = readFileSync(dataFile, "utf8");
 		try {
 			return JSON.parse(raw);
 		} catch (err) {
 			throw new Error(
-				`--data-file ${String(options.dataFile)} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+				`--data-file ${dataFile} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
 			);
 		}
 	}

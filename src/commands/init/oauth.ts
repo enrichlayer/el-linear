@@ -86,6 +86,12 @@ export interface OAuthStepOptions {
 	noBrowser?: boolean;
 	/** Override the localhost port. Default 8765. */
 	port?: number;
+	/**
+	 * Allow pasting a bare authorization code (no surrounding URL) in
+	 * the headless flow. Bypasses the OAuth `state` CSRF check, so
+	 * opt-in only — see `oauth-headless.ts` for the rationale.
+	 */
+	unsafeBareCode?: boolean;
 	/** Test seam for the OAuth token endpoint. */
 	fetchImpl?: FetchLike;
 	/**
@@ -414,10 +420,16 @@ export async function runOAuthStep(
 					`Localhost listener failed (${sanitizeForLog(raw)}). Falling back to manual paste.`,
 				),
 			);
-			callback = await promptForPastedCode({ expectedState: state });
+			callback = await promptForPastedCode({
+				expectedState: state,
+				unsafeBareCode: options.unsafeBareCode,
+			});
 		}
 	} else {
-		callback = await promptForPastedCode({ expectedState: state });
+		callback = await promptForPastedCode({
+			expectedState: state,
+			unsafeBareCode: options.unsafeBareCode,
+		});
 	}
 
 	logLine(TS("Exchanging authorization code for tokens…"));

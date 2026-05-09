@@ -595,4 +595,36 @@ describe("autoLinkReferences", () => {
 			{ identifier: "DEV-3592", reason: "rate limited" },
 		]);
 	});
+
+	it("caps the number of candidates at 50 per call (ALL-935 DoS guard)", async () => {
+		// A description with 200 unique fake identifiers — pre-fix, this
+		// would fire 200 resolveIssueId calls before deciding none
+		// resolved. Post-fix, only the first 50 are processed and the
+		// overflow is reported as a single synthetic failure entry.
+		const { rawRequest, resolveIssueId, graphQLService, linearService } =
+			makeServices();
+		rawRequest.mockResolvedValueOnce(makeRelationsResponse({}));
+		// Every resolution fails with "not found" — none of the fake IDs exist.
+		resolveIssueId.mockRejectedValue(new Error("not found"));
+
+		const lots = Array.from({ length: 200 }, (_, i) => `AAA-${i + 1}`).join(
+			", ",
+		);
+		const result = await autoLinkReferences({
+			issueId: "uuid-source",
+			identifier: "EMW-258",
+			description: `see ${lots}`,
+			graphQLService,
+			linearService,
+		});
+
+		// 1 overflow entry (pushed first) + 50 real resolution attempts = 51 failed.
+		expect(result.failed).toHaveLength(51);
+		expect(result.failed[0]).toEqual({
+			identifier: "+150 more",
+			reason: expect.stringContaining("Too many candidate references"),
+		});
+		// And exactly 50 resolveIssueId calls — one per processed candidate.
+		expect(resolveIssueId).toHaveBeenCalledTimes(50);
+	});
 });

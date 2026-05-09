@@ -309,9 +309,34 @@ describe("runOAuthStep — headless paths", () => {
 
 		const result = await runOAuthStep({
 			noBrowser: true,
+			// Bare-code paste is opt-in (ALL-935 CSRF guard) — explicitly
+			// allow it in the test so the prompt doesn't reject it.
+			unsafeBareCode: true,
 			fetchImpl,
 		});
 		expect(result.state.accessToken).toBe("tok-h");
+	});
+
+	it("rejects bare-code paste without --unsafe-bare-code (ALL-935 CSRF guard)", async () => {
+		vi.mocked(input)
+			.mockResolvedValueOnce("8765")
+			.mockResolvedValueOnce("client-no-flag")
+			.mockResolvedValueOnce("BARECODE-NO-FLAG");
+		vi.mocked(password).mockResolvedValueOnce("");
+		vi.mocked(checkbox).mockResolvedValueOnce(["read"]);
+
+		const fetchImpl = vi.fn<FetchLike>(async () => {
+			throw new Error("token endpoint should not be reached");
+		});
+
+		await expect(
+			runOAuthStep({
+				noBrowser: true,
+				// unsafeBareCode NOT set — the prompt rejects the bare paste
+				// before any token exchange happens.
+				fetchImpl,
+			}),
+		).rejects.toThrow(/--unsafe-bare-code|bypass.*CSRF/);
 	});
 
 	it("falls back to paste when openBrowser throws", async () => {
@@ -334,6 +359,7 @@ describe("runOAuthStep — headless paths", () => {
 
 		const result = await runOAuthStep({
 			fetchImpl,
+			unsafeBareCode: true,
 			openBrowser: async () => {
 				throw new Error("xdg-open not found");
 			},
@@ -361,6 +387,7 @@ describe("runOAuthStep — headless paths", () => {
 
 		const result = await runOAuthStep({
 			fetchImpl,
+			unsafeBareCode: true,
 			openBrowser: async () => undefined,
 			runLocalhostCallbackImpl: async () => {
 				throw new Error("EADDRINUSE 8765");
