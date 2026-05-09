@@ -4,6 +4,34 @@ All notable changes to `@enrichlayer/el-linear` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.9.0](https://github.com/enrichlayer/el-linear/compare/v1.8.1...v1.9.0) (2026-05-09)
+
+
+### Features
+
+* **auth:** add OAuth 2.0 (PKCE) authentication ([#18](https://github.com/enrichlayer/el-linear/issues/18)) ([4e3b59f](https://github.com/enrichlayer/el-linear/commit/4e3b59f501e975b7b291d6926dba16a7d5a4bd0d))
+* **auth:** migrate command call sites to OAuth-aware getActiveAuth ([#19](https://github.com/enrichlayer/el-linear/issues/19)) ([76c7e8d](https://github.com/enrichlayer/el-linear/commit/76c7e8d70527644c4661f7805a02b7792a2922e1))
+* **auth:** wire OAuth into FileService (last unmigrated auth path) ([#20](https://github.com/enrichlayer/el-linear/issues/20)) ([57a3d59](https://github.com/enrichlayer/el-linear/commit/57a3d59f2fa623de95a066eaad1f9cb1301d6eba))
+* defaults (assignee, priority), disk cache, wizard prompts, team OAuth config ([#22](https://github.com/enrichlayer/el-linear/issues/22)) ([0525c2f](https://github.com/enrichlayer/el-linear/commit/0525c2f8a96c584f09ef900b6b307201888addea))
+* **filters:** add --name to users/labels/projects list, --state/--exclude-state/--active to projects list ([#36](https://github.com/enrichlayer/el-linear/issues/36)) ([a52f005](https://github.com/enrichlayer/el-linear/commit/a52f005ea049038ea16fecd600d57dda9dd9b162))
+* **format:** add --format summary for human-readable output ([#28](https://github.com/enrichlayer/el-linear/issues/28)) ([2bdf3d2](https://github.com/enrichlayer/el-linear/commit/2bdf3d24107b5d996738b54fbac07930c8fff5ae))
+* **init:** interactive setup wizard (linctl init) ([#7](https://github.com/enrichlayer/el-linear/issues/7)) ([23c62f8](https://github.com/enrichlayer/el-linear/commit/23c62f8b7e7a72b57ea5c99e3d6711dfba3cc469))
+* **profiles:** legacy config detection + migrate-legacy command [ALL-922,ALL-923] ([#17](https://github.com/enrichlayer/el-linear/issues/17)) ([4536396](https://github.com/enrichlayer/el-linear/commit/45363962c905f35a0a3f7928561a93518e540c86))
+* **profiles:** switch between multiple Linear workspaces ([#15](https://github.com/enrichlayer/el-linear/issues/15)) ([0bd6c37](https://github.com/enrichlayer/el-linear/commit/0bd6c3742e2e74b4a72197818d594d47a9f725a7))
+* **refs:** add wrap subcommand with markdown + slack emitters [ALL-917] ([#10](https://github.com/enrichlayer/el-linear/issues/10)) ([16ceea9](https://github.com/enrichlayer/el-linear/commit/16ceea954fbaef14ee2562234a3f9c215f44553c))
+
+
+### Bug Fixes
+
+* **auth:** serialize OAuth refresh against concurrent CLIs (ALL-931) ([#32](https://github.com/enrichlayer/el-linear/issues/32)) ([f569221](https://github.com/enrichlayer/el-linear/commit/f569221e7f490d549876800cf91cec2ed388b832))
+* bump CLI version string to 1.4.0 (matching package.json + tag) ([#16](https://github.com/enrichlayer/el-linear/issues/16)) ([77e7c16](https://github.com/enrichlayer/el-linear/commit/77e7c169e67f2ff698539f0a6355ab3288843217))
+* **profile:** atomic writes for migrate-legacy (ALL-932) ([#30](https://github.com/enrichlayer/el-linear/issues/30)) ([01131d1](https://github.com/enrichlayer/el-linear/commit/01131d10fc98822a1c6fb7a9fb783be6d0199ccb))
+* **refs:** share protected-range scanner between wrap + extract (ALL-933) ([#33](https://github.com/enrichlayer/el-linear/issues/33)) ([9405eca](https://github.com/enrichlayer/el-linear/commit/9405eca427d2d7bd5c15d92cf20e49f187572832))
+* **security:** OAuth callback + headless paste + data-file allowlist + rate limit (ALL-935 batch 2) ([#37](https://github.com/enrichlayer/el-linear/issues/37)) ([403a38a](https://github.com/enrichlayer/el-linear/commit/403a38abec6d3e792939b72cd0f041430c29c92f))
+* **security:** redaction + scheme allowlist + unicode mentions (ALL-935) ([#35](https://github.com/enrichlayer/el-linear/issues/35)) ([5c344e9](https://github.com/enrichlayer/el-linear/commit/5c344e9e3ab8805cbdbf0d9aba8ad1741887aeff))
+* **security:** snapshot oauthStatePath + profile-keyed loadConfig cache (ALL-935 deferred) ([#46](https://github.com/enrichlayer/el-linear/issues/46)) ([e614bff](https://github.com/enrichlayer/el-linear/commit/e614bffc852402813c75e51ecaf0b411f57431da))
+* **summary:** sanitize terminal output + harden numeric edges (ALL-934) ([#31](https://github.com/enrichlayer/el-linear/issues/31)) ([3d1535a](https://github.com/enrichlayer/el-linear/commit/3d1535a5af7fd95ef7666e0c1ff97131a767ed8f))
+
 ## [Unreleased]
 
 ### Changed
