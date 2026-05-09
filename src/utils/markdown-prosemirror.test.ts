@@ -153,6 +153,44 @@ describe("parseInline", () => {
 		});
 	});
 
+	it("drops the link mark when the href uses an unsafe scheme", () => {
+		// javascript: / data: / vbscript: hrefs are silently dropped — the
+		// label remains as plain text but the link mark is gone, so we never
+		// ship XSS-shaped ProseMirror docs into Linear comments.
+		for (const href of [
+			"javascript:alert(1)",
+			"data:text/html,<script>x</script>",
+			"vbscript:msgbox()",
+			"file:///etc/passwd",
+		]) {
+			const nodes = parseInline(`see [click](${href})`);
+			const linked = nodes.find((n) => n.marks?.some((m) => m.type === "link"));
+			expect(linked).toBeUndefined();
+			// The plain text rendering should still include the original
+			// brackets / parens because we never matched the link.
+			const combined = nodes.map((n) => n.text ?? "").join("");
+			expect(combined).toContain("click");
+		}
+	});
+
+	it("keeps mailto: and linear: as safe schemes", () => {
+		for (const href of ["mailto:hi@example.com", "linear:DEV-1"]) {
+			const nodes = parseInline(`see [contact](${href})`);
+			const linked = nodes.find((n) => n.marks?.some((m) => m.type === "link"));
+			expect(linked?.marks?.[0]?.attrs?.href).toBe(href);
+		}
+	});
+
+	it("keeps schemeless / relative links as safe", () => {
+		// Relative paths and fragment-only hrefs pass through; the renderer
+		// resolves them against the document base.
+		for (const href of ["/docs", "../page", "#anchor"]) {
+			const nodes = parseInline(`see [link](${href})`);
+			const linked = nodes.find((n) => n.marks?.some((m) => m.type === "link"));
+			expect(linked?.marks?.[0]?.attrs?.href).toBe(href);
+		}
+	});
+
 	it("parses multiple inline marks in sequence", () => {
 		const nodes = parseInline("**bold** then `code`");
 		expect(nodes).toHaveLength(3);

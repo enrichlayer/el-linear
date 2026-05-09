@@ -50,8 +50,24 @@ export interface TokenStepResult {
  * write `Bearer lin_api_…` into stdout / shell history / CI logs. The regex
  * also catches token shapes that may show up in custom error wrappers.
  */
+// Personal-API tokens (`lin_api_…`) and OAuth access/refresh tokens
+// (`lin_oauth_…`). Pre-fix the regex only matched personal tokens.
+const TOKEN_PREFIX_RE = /lin_(api|oauth)_[A-Za-z0-9_-]{16,}/g;
+// High-entropy bearer payload fallback: catches generic Bearer-style
+// strings adjacent to Authorization / Bearer keywords. Useful for
+// future SDK error wrappers that might leak headers without the
+// `lin_` prefix.
+const BEARER_PAYLOAD_RE =
+	/(\b(?:Authorization|Bearer)\b[:\s]*)([A-Za-z0-9_\-/+=]{40,})/gi;
+
 export function sanitizeForLog(text: string): string {
-	return text.replace(/lin_api_[A-Za-z0-9_-]{16,}/g, "lin_api_***REDACTED***");
+	return text
+		.replace(TOKEN_PREFIX_RE, (m) =>
+			m.startsWith("lin_oauth_")
+				? "lin_oauth_***REDACTED***"
+				: "lin_api_***REDACTED***",
+		)
+		.replace(BEARER_PAYLOAD_RE, "$1***REDACTED***");
 }
 
 /**

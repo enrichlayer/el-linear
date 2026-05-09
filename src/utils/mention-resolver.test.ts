@@ -4,6 +4,7 @@ import { resolveMentions } from "./mention-resolver.js";
 const UUID_BOB = "a1a780e3-a411-466e-b6c8-0fe04ff355fa";
 const UUID_DAVID = "b2b890f4-b522-477f-a7d9-1af15aa466ab";
 const UUID_ERIN = "d4d012b6-d744-499b-c9fb-3fb37ff688fd";
+const UUID_YURY = "e5e123c7-e855-4aac-d0fc-4fc48ff799fe";
 
 vi.mock("../config/resolver.js", () => ({
 	resolveMember: vi.fn((name: string) => {
@@ -18,6 +19,8 @@ vi.mock("../config/resolver.js", () => ({
 			erin: UUID_ERIN,
 			rae: UUID_ERIN,
 			smith: UUID_ERIN,
+			юрий: UUID_YURY,
+			tsukerman: UUID_YURY,
 		};
 		return known[name.toLowerCase()] ?? name;
 	}),
@@ -26,12 +29,18 @@ vi.mock("../config/resolver.js", () => ({
 vi.mock("../config/config.js", () => ({
 	loadConfig: vi.fn(() => ({
 		members: {
-			aliases: { bob: "Bob", rae: "Erin" },
-			uuids: { Bob: UUID_BOB, David: UUID_DAVID, Erin: UUID_ERIN },
+			aliases: { bob: "Bob", rae: "Erin", юрий: "Юрий" },
+			uuids: {
+				Bob: UUID_BOB,
+				David: UUID_DAVID,
+				Erin: UUID_ERIN,
+				Юрий: UUID_YURY,
+			},
 			fullNames: {
 				[UUID_BOB]: "Bob Marley",
 				[UUID_DAVID]: "David Doe",
 				[UUID_ERIN]: "Erin Smith",
+				[UUID_YURY]: "Юрий Tsukerman",
 			},
 			handles: {},
 		},
@@ -58,6 +67,30 @@ describe("resolveMentions", () => {
 			mockLinearService(),
 		);
 		expect(result).toBeNull();
+	});
+
+	it("resolves explicit mentions with non-Latin (Cyrillic) names (ALL-935)", async () => {
+		// Pre-fix: `@(\w+)` was ASCII-only, so `@Юрий` matched `@`
+		// followed by zero word chars and produced no useful name.
+		const result = await resolveMentions("cc @Юрий", mockLinearService());
+		expect(result).not.toBeNull();
+		const nodes = result!.bodyData.content![0].content!;
+		const mention = nodes.find((n) => n.type === "suggestion_userMentions");
+		expect(mention?.attrs?.id).toBe(UUID_YURY);
+	});
+
+	it("resolves bare-name mentions for Cyrillic names (ALL-935)", async () => {
+		// Bare-name detection used `\b...\b` which is ASCII-only.
+		// Cyrillic chars don't sit on `\b` boundaries, so `Юрий` would
+		// silently fail to match. The unicode-aware lookarounds fix this.
+		const result = await resolveMentions(
+			"Юрий please take a look",
+			mockLinearService(),
+		);
+		expect(result).not.toBeNull();
+		const nodes = result!.bodyData.content![0].content!;
+		const mention = nodes.find((n) => n.type === "suggestion_userMentions");
+		expect(mention?.attrs?.id).toBe(UUID_YURY);
 	});
 
 	it("resolves config-based mentions", async () => {
