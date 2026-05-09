@@ -1,7 +1,12 @@
 import type { Command, OptionValues } from "commander";
 import { resolveTeam, resolveUserDisplayName } from "../config/resolver.js";
 import { SEMANTIC_SEARCH_QUERY } from "../queries/search.js";
-import type { GraphQLResponseData } from "../types/linear.js";
+import type {
+	SearchTemplateNode,
+	SearchTemplatesResponse,
+	SemanticSearchResponse,
+	SemanticSearchResult,
+} from "../queries/search-types.js";
 import type { GraphQLService } from "../utils/graphql-service.js";
 import { createGraphQLService } from "../utils/graphql-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
@@ -30,74 +35,53 @@ const VALID_TYPES = new Set([
 const WHITESPACE_RE = /\s+/;
 
 function transformSearchResult(
-	r: GraphQLResponseData,
+	r: SemanticSearchResult,
 ): Record<string, unknown> {
-	const rType = r.type as string;
-	switch (rType) {
+	switch (r.type) {
 		case "issue": {
-			const issue = r.issue as GraphQLResponseData | undefined;
-			const state = issue?.state as GraphQLResponseData | undefined;
-			const team = issue?.team as GraphQLResponseData | undefined;
-			const assignee = issue?.assignee as GraphQLResponseData | undefined;
-			const project = issue?.project as GraphQLResponseData | undefined;
+			const issue = r.issue;
 			return {
 				type: "issue",
-				identifier: issue?.identifier as string | undefined,
-				title: issue?.title as string | undefined,
-				state: state?.name as string | undefined,
-				team: team?.key as string | undefined,
-				assignee: assignee
-					? resolveUserDisplayName(
-							assignee.id as string,
-							assignee.name as string,
-						)
+				identifier: issue?.identifier,
+				title: issue?.title,
+				state: issue?.state?.name,
+				team: issue?.team?.key,
+				assignee: issue?.assignee
+					? resolveUserDisplayName(issue.assignee.id, issue.assignee.name)
 					: undefined,
-				priority: issue?.priority as number | undefined,
-				project: project?.name as string | undefined,
-				id: issue?.id as string | undefined,
+				priority: issue?.priority ?? undefined,
+				project: issue?.project?.name,
+				id: issue?.id,
 			};
 		}
 		case "project": {
-			const project = r.project as GraphQLResponseData | undefined;
 			return {
 				type: "project",
-				name: project?.name as string | undefined,
-				state: project?.state as string | undefined,
-				id: project?.id as string | undefined,
+				name: r.project?.name,
+				state: r.project?.state,
+				id: r.project?.id,
 			};
 		}
 		case "initiative": {
-			const initiative = r.initiative as GraphQLResponseData | undefined;
 			return {
 				type: "initiative",
-				name: initiative?.name as string | undefined,
-				status: initiative?.status as string | undefined,
-				id: initiative?.id as string | undefined,
+				name: r.initiative?.name,
+				status: r.initiative?.status ?? undefined,
+				id: r.initiative?.id,
 			};
 		}
 		case "document": {
-			const doc = r.document as GraphQLResponseData | undefined;
-			const docProject = doc?.project as GraphQLResponseData | undefined;
 			return {
 				type: "document",
-				title: doc?.title as string | undefined,
-				project: docProject?.name as string | undefined,
-				slugId: doc?.slugId as string | undefined,
-				id: doc?.id as string | undefined,
+				title: r.document?.title,
+				project: r.document?.project?.name,
+				slugId: r.document?.slugId ?? undefined,
+				id: r.document?.id,
 			};
 		}
 		default:
-			return { type: rType, id: null };
+			return { type: r.type, id: null };
 	}
-}
-
-interface TemplateNode {
-	creator: { name: string } | null;
-	description: string | null;
-	id: string;
-	name: string;
-	team: { key: string } | null;
-	type: string;
 }
 
 function matchesQuery(name: string, query: string): boolean {
@@ -107,7 +91,7 @@ function matchesQuery(name: string, query: string): boolean {
 }
 
 function searchTemplates(
-	templates: TemplateNode[],
+	templates: SearchTemplateNode[],
 	query: string,
 ): Record<string, unknown>[] {
 	return templates
@@ -151,36 +135,31 @@ function buildSemanticQuery(
 	query: string,
 	limit: number,
 	teamOption: string | undefined,
-): Promise<GraphQLResponseData | null> {
+): Promise<SemanticSearchResponse> {
 	const filters: Record<string, unknown> = {};
 	if (teamOption) {
 		filters.issues = { team: { id: { eq: resolveTeam(teamOption) } } };
 	}
-	return graphQLService.rawRequest(SEMANTIC_SEARCH_QUERY, {
-		query,
-		maxResults: limit,
-		filters: Object.keys(filters).length > 0 ? filters : undefined,
-	});
+	return graphQLService.rawRequest<SemanticSearchResponse>(
+		SEMANTIC_SEARCH_QUERY,
+		{
+			query,
+			maxResults: limit,
+			filters: Object.keys(filters).length > 0 ? filters : undefined,
+		},
+	);
 }
 
 function extractSemanticResults(
-	semanticResult: GraphQLResponseData,
+	semanticResult: SemanticSearchResponse,
 	requestedTypes: string[] | null,
 	onlyTemplates: boolean,
 ): Record<string, unknown>[] {
-	const semanticSearch = semanticResult.semanticSearch as
-		| GraphQLResponseData
-		| undefined;
-	let results: GraphQLResponseData[] =
-		(semanticSearch?.results as GraphQLResponseData[] | undefined) ?? [];
+	let results = semanticResult.semanticSearch?.results ?? [];
 
 	if (requestedTypes && !onlyTemplates) {
-		const semanticTypes = requestedTypes.filter(
-			(t: string) => t !== "template",
-		);
-		results = results.filter((r: GraphQLResponseData) =>
-			semanticTypes.includes(r.type as string),
-		);
+		const semanticTypes = requestedTypes.filter((t) => t !== "template");
+		results = results.filter((r) => semanticTypes.includes(r.type));
 	}
 
 	return results.map(transformSearchResult);
@@ -221,7 +200,9 @@ export function setupSearchCommands(program: Command): void {
 							? buildSemanticQuery(graphQLService, query, limit, options.team)
 							: null,
 						includeTemplates
-							? graphQLService.rawRequest(TEMPLATES_QUERY)
+							? graphQLService.rawRequest<SearchTemplatesResponse>(
+									TEMPLATES_QUERY,
+								)
 							: null,
 					]);
 
@@ -236,8 +217,7 @@ export function setupSearchCommands(program: Command): void {
 					}
 
 					if (templateResult) {
-						const templates =
-							(templateResult.templates as unknown as TemplateNode[]) ?? [];
+						const templates = templateResult.templates ?? [];
 						data = [...data, ...searchTemplates(templates, query)];
 					}
 
