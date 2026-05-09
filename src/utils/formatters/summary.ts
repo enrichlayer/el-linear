@@ -121,6 +121,70 @@ function joinLabels(v: unknown): string {
 		.join(", ");
 }
 
+// ── shared list-table renderer ─────────────────────────────────
+
+interface ColumnDef<T> {
+	/** Column header (uppercased — e.g. "ID", "TITLE"). */
+	header: string;
+	/** Minimum width. Header label is auto-included; this is the floor. */
+	minWidth: number;
+	/** Optional cap; values longer than this get truncated with an ellipsis. */
+	maxWidth?: number;
+	/** Pull the column's string value from one row. */
+	extract: (row: T) => string;
+}
+
+interface RenderTableOptions {
+	/** Returned verbatim when `rows` is empty (e.g. "(no issues)"). */
+	emptyText: string;
+	/** Singular form of the row noun for the footer ("issue", "team", ...). */
+	itemNoun: string;
+}
+
+/**
+ * Render a list of rows as a fixed-width text table with a header,
+ * separator, body, and "<N> <noun>s" footer.
+ *
+ * Subsumes the formatXList family in this file — each one used to
+ * inline its own column-width math, header/separator wiring, and
+ * footer pluralization. Centralizing here cuts ~340 lines of
+ * mechanical boilerplate to a single 30-line helper plus per-resource
+ * column declarations.
+ */
+function renderTable<T>(
+	rows: T[],
+	columns: ColumnDef<T>[],
+	options: RenderTableOptions,
+): string {
+	if (rows.length === 0) return options.emptyText;
+
+	// Extract values once per row so we don't re-evaluate `extract` for
+	// the width pass and the body pass.
+	const values: string[][] = rows.map((row) =>
+		columns.map((col) => {
+			const raw = col.extract(row);
+			return col.maxWidth ? truncate(raw, col.maxWidth) : raw;
+		}),
+	);
+
+	const widths = columns.map((col, i) => {
+		const fromRows = values.reduce(
+			(max, row) => Math.max(max, row[i].length),
+			0,
+		);
+		const computed = Math.max(col.minWidth, col.header.length, fromRows);
+		return col.maxWidth ? Math.min(col.maxWidth, computed) : computed;
+	});
+
+	const header = columns.map((col, i) => pad(col.header, widths[i])).join("  ");
+	const sep = "-".repeat(header.length);
+	const body = values
+		.map((row) => row.map((v, i) => pad(v, widths[i])).join("  "))
+		.join("\n");
+	const noun = `${rows.length} ${options.itemNoun}${rows.length === 1 ? "" : "s"}`;
+	return `${header}\n${sep}\n${body}\n\n${noun}`;
+}
+
 // ── header rendering for single-resource summaries ─────────────
 
 interface HeaderField {
@@ -169,32 +233,25 @@ export function formatIssueSummary(issue: Record<string, unknown>): string {
 }
 
 export function formatIssueList(issues: unknown[]): string {
-	if (issues.length === 0) return "(no issues)";
-	const rows = issues.map((raw) => {
-		const i = asObj(raw) ?? {};
-		return {
-			id: s(i.identifier),
-			title: truncate(s(i.title), TITLE_TRUNC),
-			state: getName(i.state),
-			assignee: getName(i.assignee),
-		};
-	});
-	const idW = Math.max(2, ...rows.map((r) => r.id.length));
-	const titleW = Math.min(
-		TITLE_TRUNC,
-		Math.max(5, ...rows.map((r) => r.title.length)),
+	return renderTable(
+		issues.map((raw) => asObj(raw) ?? {}),
+		[
+			{ header: "ID", minWidth: 2, extract: (i) => s(i.identifier) },
+			{
+				header: "TITLE",
+				minWidth: 5,
+				maxWidth: TITLE_TRUNC,
+				extract: (i) => s(i.title),
+			},
+			{ header: "STATE", minWidth: 5, extract: (i) => getName(i.state) },
+			{
+				header: "ASSIGNEE",
+				minWidth: 8,
+				extract: (i) => getName(i.assignee),
+			},
+		],
+		{ emptyText: "(no issues)", itemNoun: "issue" },
 	);
-	const stateW = Math.max(5, ...rows.map((r) => r.state.length));
-	const assigneeW = Math.max(8, ...rows.map((r) => r.assignee.length));
-	const header = `${pad("ID", idW)}  ${pad("TITLE", titleW)}  ${pad("STATE", stateW)}  ${pad("ASSIGNEE", assigneeW)}`;
-	const sep = "-".repeat(header.length);
-	const body = rows
-		.map(
-			(r) =>
-				`${pad(r.id, idW)}  ${pad(r.title, titleW)}  ${pad(r.state, stateW)}  ${pad(r.assignee, assigneeW)}`,
-		)
-		.join("\n");
-	return `${header}\n${sep}\n${body}\n\n${rows.length} issue${rows.length === 1 ? "" : "s"}`;
 }
 
 // ── projects ───────────────────────────────────────────────────
@@ -235,34 +292,26 @@ export function formatProjectSummary(project: Record<string, unknown>): string {
 	return parts.filter((p) => p !== "").join("\n");
 }
 
+function pct(value: unknown): string {
+	return typeof value === "number" ? `${Math.round(value * 100)}%` : "—";
+}
+
 export function formatProjectList(projects: unknown[]): string {
-	if (projects.length === 0) return "(no projects)";
-	const rows = projects.map((raw) => {
-		const p = asObj(raw) ?? {};
-		const progress =
-			typeof p.progress === "number"
-				? `${Math.round((p.progress as number) * 100)}%`
-				: "—";
-		return {
-			name: truncate(s(p.name), TITLE_TRUNC),
-			state: s(p.state),
-			progress,
-			lead: getName(p.lead),
-		};
-	});
-	const nameW = Math.max(4, ...rows.map((r) => r.name.length));
-	const stateW = Math.max(5, ...rows.map((r) => r.state.length));
-	const progW = Math.max(8, ...rows.map((r) => r.progress.length));
-	const leadW = Math.max(4, ...rows.map((r) => r.lead.length));
-	const header = `${pad("NAME", nameW)}  ${pad("STATE", stateW)}  ${pad("PROGRESS", progW)}  ${pad("LEAD", leadW)}`;
-	const sep = "-".repeat(header.length);
-	const body = rows
-		.map(
-			(r) =>
-				`${pad(r.name, nameW)}  ${pad(r.state, stateW)}  ${pad(r.progress, progW)}  ${pad(r.lead, leadW)}`,
-		)
-		.join("\n");
-	return `${header}\n${sep}\n${body}\n\n${rows.length} project${rows.length === 1 ? "" : "s"}`;
+	return renderTable(
+		projects.map((raw) => asObj(raw) ?? {}),
+		[
+			{
+				header: "NAME",
+				minWidth: 4,
+				maxWidth: TITLE_TRUNC,
+				extract: (p) => s(p.name),
+			},
+			{ header: "STATE", minWidth: 5, extract: (p) => s(p.state) },
+			{ header: "PROGRESS", minWidth: 8, extract: (p) => pct(p.progress) },
+			{ header: "LEAD", minWidth: 4, extract: (p) => getName(p.lead) },
+		],
+		{ emptyText: "(no projects)", itemNoun: "project" },
+	);
 }
 
 // ── comments ───────────────────────────────────────────────────
@@ -317,35 +366,26 @@ export function formatCycleSummary(cycle: Record<string, unknown>): string {
 }
 
 export function formatCycleList(cycles: unknown[]): string {
-	if (cycles.length === 0) return "(no cycles)";
-	const rows = cycles.map((raw) => {
-		const c = asObj(raw) ?? {};
-		const progress =
-			typeof c.progress === "number"
-				? `${Math.round((c.progress as number) * 100)}%`
-				: "—";
-		return {
-			number: s(c.number),
-			name: truncate(s(c.name ?? `Cycle ${s(c.number)}`), 40),
-			team: getName(c.team),
-			active: c.isActive ? "yes" : "no",
-			progress,
-		};
-	});
-	const numW = Math.max(2, ...rows.map((r) => r.number.length));
-	const nameW = Math.max(4, ...rows.map((r) => r.name.length));
-	const teamW = Math.max(4, ...rows.map((r) => r.team.length));
-	const activeW = 6;
-	const progW = Math.max(8, ...rows.map((r) => r.progress.length));
-	const header = `${pad("#", numW)}  ${pad("NAME", nameW)}  ${pad("TEAM", teamW)}  ${pad("ACTIVE", activeW)}  ${pad("PROGRESS", progW)}`;
-	const sep = "-".repeat(header.length);
-	const body = rows
-		.map(
-			(r) =>
-				`${pad(r.number, numW)}  ${pad(r.name, nameW)}  ${pad(r.team, teamW)}  ${pad(r.active, activeW)}  ${pad(r.progress, progW)}`,
-		)
-		.join("\n");
-	return `${header}\n${sep}\n${body}\n\n${rows.length} cycle${rows.length === 1 ? "" : "s"}`;
+	return renderTable(
+		cycles.map((raw) => asObj(raw) ?? {}),
+		[
+			{ header: "#", minWidth: 2, extract: (c) => s(c.number) },
+			{
+				header: "NAME",
+				minWidth: 4,
+				maxWidth: 40,
+				extract: (c) => s(c.name ?? `Cycle ${s(c.number)}`),
+			},
+			{ header: "TEAM", minWidth: 4, extract: (c) => getName(c.team) },
+			{
+				header: "ACTIVE",
+				minWidth: 6,
+				extract: (c) => (c.isActive ? "yes" : "no"),
+			},
+			{ header: "PROGRESS", minWidth: 8, extract: (c) => pct(c.progress) },
+		],
+		{ emptyText: "(no cycles)", itemNoun: "cycle" },
+	);
 }
 
 // ── milestones ─────────────────────────────────────────────────
@@ -367,81 +407,68 @@ export function formatMilestoneSummary(
 }
 
 export function formatMilestoneList(milestones: unknown[]): string {
-	if (milestones.length === 0) return "(no milestones)";
-	const rows = milestones.map((raw) => {
-		const m = asObj(raw) ?? {};
-		return {
-			name: truncate(s(m.name), TITLE_TRUNC),
-			target: s(m.targetDate),
-			project: getName(m.project),
-		};
-	});
-	const nameW = Math.max(4, ...rows.map((r) => r.name.length));
-	const targetW = Math.max(6, ...rows.map((r) => r.target.length));
-	const projW = Math.max(7, ...rows.map((r) => r.project.length));
-	const header = `${pad("NAME", nameW)}  ${pad("TARGET", targetW)}  ${pad("PROJECT", projW)}`;
-	const sep = "-".repeat(header.length);
-	const body = rows
-		.map(
-			(r) =>
-				`${pad(r.name, nameW)}  ${pad(r.target, targetW)}  ${pad(r.project, projW)}`,
-		)
-		.join("\n");
-	return `${header}\n${sep}\n${body}\n\n${rows.length} milestone${rows.length === 1 ? "" : "s"}`;
+	return renderTable(
+		milestones.map((raw) => asObj(raw) ?? {}),
+		[
+			{
+				header: "NAME",
+				minWidth: 4,
+				maxWidth: TITLE_TRUNC,
+				extract: (m) => s(m.name),
+			},
+			{ header: "TARGET", minWidth: 6, extract: (m) => s(m.targetDate) },
+			{ header: "PROJECT", minWidth: 7, extract: (m) => getName(m.project) },
+		],
+		{ emptyText: "(no milestones)", itemNoun: "milestone" },
+	);
 }
 
 // ── teams ──────────────────────────────────────────────────────
 
 export function formatTeamList(teams: unknown[]): string {
-	if (teams.length === 0) return "(no teams)";
-	const rows = teams.map((raw) => {
-		const t = asObj(raw) ?? {};
-		return {
-			key: s(t.key),
-			name: truncate(s(t.name), TITLE_TRUNC),
-			description: truncate(s(t.description), 60),
-		};
-	});
-	const keyW = Math.max(3, ...rows.map((r) => r.key.length));
-	const nameW = Math.max(4, ...rows.map((r) => r.name.length));
-	const descW = Math.max(11, ...rows.map((r) => r.description.length));
-	const header = `${pad("KEY", keyW)}  ${pad("NAME", nameW)}  ${pad("DESCRIPTION", descW)}`;
-	const sep = "-".repeat(header.length);
-	const body = rows
-		.map(
-			(r) =>
-				`${pad(r.key, keyW)}  ${pad(r.name, nameW)}  ${pad(r.description, descW)}`,
-		)
-		.join("\n");
-	return `${header}\n${sep}\n${body}\n\n${rows.length} team${rows.length === 1 ? "" : "s"}`;
+	return renderTable(
+		teams.map((raw) => asObj(raw) ?? {}),
+		[
+			{ header: "KEY", minWidth: 3, extract: (t) => s(t.key) },
+			{
+				header: "NAME",
+				minWidth: 4,
+				maxWidth: TITLE_TRUNC,
+				extract: (t) => s(t.name),
+			},
+			{
+				header: "DESCRIPTION",
+				minWidth: 11,
+				maxWidth: 60,
+				extract: (t) => s(t.description),
+			},
+		],
+		{ emptyText: "(no teams)", itemNoun: "team" },
+	);
 }
 
 // ── labels ─────────────────────────────────────────────────────
 
 export function formatLabelList(labels: unknown[]): string {
-	if (labels.length === 0) return "(no labels)";
-	const rows = labels.map((raw) => {
-		const l = asObj(raw) ?? {};
-		return {
-			name: truncate(s(l.name), TITLE_TRUNC),
-			scope: s(l.scope),
-			team: l.team ? getName(l.team) : "",
-			color: s(l.color),
-		};
-	});
-	const nameW = Math.max(4, ...rows.map((r) => r.name.length));
-	const scopeW = Math.max(5, ...rows.map((r) => r.scope.length));
-	const teamW = Math.max(4, ...rows.map((r) => r.team.length));
-	const colorW = Math.max(5, ...rows.map((r) => r.color.length));
-	const header = `${pad("NAME", nameW)}  ${pad("SCOPE", scopeW)}  ${pad("TEAM", teamW)}  ${pad("COLOR", colorW)}`;
-	const sep = "-".repeat(header.length);
-	const body = rows
-		.map(
-			(r) =>
-				`${pad(r.name, nameW)}  ${pad(r.scope, scopeW)}  ${pad(r.team, teamW)}  ${pad(r.color, colorW)}`,
-		)
-		.join("\n");
-	return `${header}\n${sep}\n${body}\n\n${rows.length} label${rows.length === 1 ? "" : "s"}`;
+	return renderTable(
+		labels.map((raw) => asObj(raw) ?? {}),
+		[
+			{
+				header: "NAME",
+				minWidth: 4,
+				maxWidth: TITLE_TRUNC,
+				extract: (l) => s(l.name),
+			},
+			{ header: "SCOPE", minWidth: 5, extract: (l) => s(l.scope) },
+			{
+				header: "TEAM",
+				minWidth: 4,
+				extract: (l) => (l.team ? getName(l.team) : ""),
+			},
+			{ header: "COLOR", minWidth: 5, extract: (l) => s(l.color) },
+		],
+		{ emptyText: "(no labels)", itemNoun: "label" },
+	);
 }
 
 // ── users ──────────────────────────────────────────────────────
@@ -458,29 +485,30 @@ export function formatUserSummary(user: Record<string, unknown>): string {
 }
 
 export function formatUserList(users: unknown[]): string {
-	if (users.length === 0) return "(no users)";
-	const rows = users.map((raw) => {
-		const u = asObj(raw) ?? {};
-		return {
-			name: truncate(s(u.name), 30),
-			displayName: truncate(s(u.displayName), 25),
-			email: truncate(s(u.email), 40),
-			active: u.active === false ? "no" : "yes",
-		};
-	});
-	const nameW = Math.max(4, ...rows.map((r) => r.name.length));
-	const dispW = Math.max(7, ...rows.map((r) => r.displayName.length));
-	const emailW = Math.max(5, ...rows.map((r) => r.email.length));
-	const activeW = 6;
-	const header = `${pad("NAME", nameW)}  ${pad("DISPLAY", dispW)}  ${pad("EMAIL", emailW)}  ${pad("ACTIVE", activeW)}`;
-	const sep = "-".repeat(header.length);
-	const body = rows
-		.map(
-			(r) =>
-				`${pad(r.name, nameW)}  ${pad(r.displayName, dispW)}  ${pad(r.email, emailW)}  ${pad(r.active, activeW)}`,
-		)
-		.join("\n");
-	return `${header}\n${sep}\n${body}\n\n${rows.length} user${rows.length === 1 ? "" : "s"}`;
+	return renderTable(
+		users.map((raw) => asObj(raw) ?? {}),
+		[
+			{ header: "NAME", minWidth: 4, maxWidth: 30, extract: (u) => s(u.name) },
+			{
+				header: "DISPLAY",
+				minWidth: 7,
+				maxWidth: 25,
+				extract: (u) => s(u.displayName),
+			},
+			{
+				header: "EMAIL",
+				minWidth: 5,
+				maxWidth: 40,
+				extract: (u) => s(u.email),
+			},
+			{
+				header: "ACTIVE",
+				minWidth: 6,
+				extract: (u) => (u.active === false ? "no" : "yes"),
+			},
+		],
+		{ emptyText: "(no users)", itemNoun: "user" },
+	);
 }
 
 // ── documents ──────────────────────────────────────────────────
@@ -502,27 +530,24 @@ export function formatDocumentSummary(doc: Record<string, unknown>): string {
 }
 
 export function formatDocumentList(docs: unknown[]): string {
-	if (docs.length === 0) return "(no documents)";
-	const rows = docs.map((raw) => {
-		const d = asObj(raw) ?? {};
-		return {
-			title: truncate(s(d.title), TITLE_TRUNC),
-			project: getName(d.project),
-			updated: s(d.updatedAt).slice(0, 10),
-		};
-	});
-	const titleW = Math.max(5, ...rows.map((r) => r.title.length));
-	const projW = Math.max(7, ...rows.map((r) => r.project.length));
-	const updW = Math.max(7, ...rows.map((r) => r.updated.length));
-	const header = `${pad("TITLE", titleW)}  ${pad("PROJECT", projW)}  ${pad("UPDATED", updW)}`;
-	const sep = "-".repeat(header.length);
-	const body = rows
-		.map(
-			(r) =>
-				`${pad(r.title, titleW)}  ${pad(r.project, projW)}  ${pad(r.updated, updW)}`,
-		)
-		.join("\n");
-	return `${header}\n${sep}\n${body}\n\n${rows.length} document${rows.length === 1 ? "" : "s"}`;
+	return renderTable(
+		docs.map((raw) => asObj(raw) ?? {}),
+		[
+			{
+				header: "TITLE",
+				minWidth: 5,
+				maxWidth: TITLE_TRUNC,
+				extract: (d) => s(d.title),
+			},
+			{ header: "PROJECT", minWidth: 7, extract: (d) => getName(d.project) },
+			{
+				header: "UPDATED",
+				minWidth: 7,
+				extract: (d) => s(d.updatedAt).slice(0, 10),
+			},
+		],
+		{ emptyText: "(no documents)", itemNoun: "document" },
+	);
 }
 
 // ── templates ──────────────────────────────────────────────────
@@ -544,55 +569,44 @@ export function formatTemplateSummary(tpl: Record<string, unknown>): string {
 }
 
 export function formatTemplateList(tpls: unknown[]): string {
-	if (tpls.length === 0) return "(no templates)";
-	const rows = tpls.map((raw) => {
-		const t = asObj(raw) ?? {};
-		return {
-			name: truncate(s(t.name), TITLE_TRUNC),
-			type: s(t.type),
-			team: getName(t.team),
-			id: s(t.id),
-		};
-	});
-	const nameW = Math.max(4, ...rows.map((r) => r.name.length));
-	const typeW = Math.max(4, ...rows.map((r) => r.type.length));
-	const teamW = Math.max(4, ...rows.map((r) => r.team.length));
-	const idW = Math.max(2, ...rows.map((r) => r.id.length));
-	const header = `${pad("NAME", nameW)}  ${pad("TYPE", typeW)}  ${pad("TEAM", teamW)}  ${pad("ID", idW)}`;
-	const sep = "-".repeat(header.length);
-	const body = rows
-		.map(
-			(r) =>
-				`${pad(r.name, nameW)}  ${pad(r.type, typeW)}  ${pad(r.team, teamW)}  ${pad(r.id, idW)}`,
-		)
-		.join("\n");
-	return `${header}\n${sep}\n${body}\n\n${rows.length} template${rows.length === 1 ? "" : "s"}`;
+	return renderTable(
+		tpls.map((raw) => asObj(raw) ?? {}),
+		[
+			{
+				header: "NAME",
+				minWidth: 4,
+				maxWidth: TITLE_TRUNC,
+				extract: (t) => s(t.name),
+			},
+			{ header: "TYPE", minWidth: 4, extract: (t) => s(t.type) },
+			{ header: "TEAM", minWidth: 4, extract: (t) => getName(t.team) },
+			{ header: "ID", minWidth: 2, extract: (t) => s(t.id) },
+		],
+		{ emptyText: "(no templates)", itemNoun: "template" },
+	);
 }
 
 // ── attachments ────────────────────────────────────────────────
 
 export function formatAttachmentList(attachments: unknown[]): string {
-	if (attachments.length === 0) return "(no attachments)";
-	const rows = attachments.map((raw) => {
-		const a = asObj(raw) ?? {};
-		return {
-			title: truncate(s(a.title), TITLE_TRUNC),
-			url: truncate(s(a.url), 60),
-			created: s(a.createdAt).slice(0, 10),
-		};
-	});
-	const titleW = Math.max(5, ...rows.map((r) => r.title.length));
-	const urlW = Math.max(3, ...rows.map((r) => r.url.length));
-	const createdW = Math.max(7, ...rows.map((r) => r.created.length));
-	const header = `${pad("TITLE", titleW)}  ${pad("URL", urlW)}  ${pad("CREATED", createdW)}`;
-	const sep = "-".repeat(header.length);
-	const body = rows
-		.map(
-			(r) =>
-				`${pad(r.title, titleW)}  ${pad(r.url, urlW)}  ${pad(r.created, createdW)}`,
-		)
-		.join("\n");
-	return `${header}\n${sep}\n${body}\n\n${rows.length} attachment${rows.length === 1 ? "" : "s"}`;
+	return renderTable(
+		attachments.map((raw) => asObj(raw) ?? {}),
+		[
+			{
+				header: "TITLE",
+				minWidth: 5,
+				maxWidth: TITLE_TRUNC,
+				extract: (a) => s(a.title),
+			},
+			{ header: "URL", minWidth: 3, maxWidth: 60, extract: (a) => s(a.url) },
+			{
+				header: "CREATED",
+				minWidth: 7,
+				extract: (a) => s(a.createdAt).slice(0, 10),
+			},
+		],
+		{ emptyText: "(no attachments)", itemNoun: "attachment" },
+	);
 }
 
 // ── releases ───────────────────────────────────────────────────
@@ -616,57 +630,52 @@ export function formatReleaseSummary(release: Record<string, unknown>): string {
 }
 
 export function formatReleaseList(releases: unknown[]): string {
-	if (releases.length === 0) return "(no releases)";
-	const rows = releases.map((raw) => {
-		const r = asObj(raw) ?? {};
-		const stage = asObj(r.stage);
-		return {
-			name: truncate(s(r.name), TITLE_TRUNC),
-			version: s(r.version),
-			stage: stage ? s(stage.name) : "—",
-			target: s(r.targetDate),
-		};
-	});
-	const nameW = Math.max(4, ...rows.map((r) => r.name.length));
-	const verW = Math.max(7, ...rows.map((r) => r.version.length));
-	const stageW = Math.max(5, ...rows.map((r) => r.stage.length));
-	const targetW = Math.max(6, ...rows.map((r) => r.target.length));
-	const header = `${pad("NAME", nameW)}  ${pad("VERSION", verW)}  ${pad("STAGE", stageW)}  ${pad("TARGET", targetW)}`;
-	const sep = "-".repeat(header.length);
-	const body = rows
-		.map(
-			(r) =>
-				`${pad(r.name, nameW)}  ${pad(r.version, verW)}  ${pad(r.stage, stageW)}  ${pad(r.target, targetW)}`,
-		)
-		.join("\n");
-	return `${header}\n${sep}\n${body}\n\n${rows.length} release${rows.length === 1 ? "" : "s"}`;
+	return renderTable(
+		releases.map((raw) => asObj(raw) ?? {}),
+		[
+			{
+				header: "NAME",
+				minWidth: 4,
+				maxWidth: TITLE_TRUNC,
+				extract: (r) => s(r.name),
+			},
+			{ header: "VERSION", minWidth: 7, extract: (r) => s(r.version) },
+			{
+				header: "STAGE",
+				minWidth: 5,
+				extract: (r) => {
+					const stage = asObj(r.stage);
+					return stage ? s(stage.name) : "—";
+				},
+			},
+			{ header: "TARGET", minWidth: 6, extract: (r) => s(r.targetDate) },
+		],
+		{ emptyText: "(no releases)", itemNoun: "release" },
+	);
 }
 
 // ── search-results (cross-resource) ────────────────────────────
 
 export function formatSearchResultList(results: unknown[]): string {
-	if (results.length === 0) return "(no results)";
-	const rows = results.map((raw) => {
-		const r = asObj(raw) ?? {};
-		const id = s(r.identifier ?? r.id);
-		return {
-			type: s(r.type),
-			id: truncate(id, 18),
-			title: truncate(s(r.title ?? r.name), TITLE_TRUNC),
-		};
-	});
-	const typeW = Math.max(4, ...rows.map((r) => r.type.length));
-	const idW = Math.max(2, ...rows.map((r) => r.id.length));
-	const titleW = Math.max(5, ...rows.map((r) => r.title.length));
-	const header = `${pad("TYPE", typeW)}  ${pad("ID", idW)}  ${pad("TITLE", titleW)}`;
-	const sep = "-".repeat(header.length);
-	const body = rows
-		.map(
-			(r) =>
-				`${pad(r.type, typeW)}  ${pad(r.id, idW)}  ${pad(r.title, titleW)}`,
-		)
-		.join("\n");
-	return `${header}\n${sep}\n${body}\n\n${rows.length} result${rows.length === 1 ? "" : "s"}`;
+	return renderTable(
+		results.map((raw) => asObj(raw) ?? {}),
+		[
+			{ header: "TYPE", minWidth: 4, extract: (r) => s(r.type) },
+			{
+				header: "ID",
+				minWidth: 2,
+				maxWidth: 18,
+				extract: (r) => s(r.identifier ?? r.id),
+			},
+			{
+				header: "TITLE",
+				minWidth: 5,
+				maxWidth: TITLE_TRUNC,
+				extract: (r) => s(r.title ?? r.name),
+			},
+		],
+		{ emptyText: "(no results)", itemNoun: "result" },
+	);
 }
 
 // ── fallback ───────────────────────────────────────────────────
