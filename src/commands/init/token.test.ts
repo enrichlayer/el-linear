@@ -34,4 +34,28 @@ describe("sanitizeForLog", () => {
 			`{"headers":{"Authorization":"Bearer lin_api_***REDACTED***"}}`,
 		);
 	});
+
+	it("redacts OAuth access tokens (lin_oauth_ prefix)", () => {
+		expect(sanitizeForLog("authorized: lin_oauth_abcdef0123456789xyz")).toBe(
+			"authorized: lin_oauth_***REDACTED***",
+		);
+	});
+
+	it("redacts mixed lin_api_ and lin_oauth_ in the same string", () => {
+		const input =
+			"old: lin_api_personalkey1234567 new: lin_oauth_accesskey1234567";
+		expect(sanitizeForLog(input)).toBe(
+			"old: lin_api_***REDACTED*** new: lin_oauth_***REDACTED***",
+		);
+	});
+
+	it("redacts a high-entropy bearer payload even without the lin_ prefix", () => {
+		const input =
+			"got: Authorization: ABCDEFGH0123456789abcdefghABCDEFGH0123456789xyz";
+		expect(sanitizeForLog(input)).toBe("got: Authorization: ***REDACTED***");
+	});
+
+	it("does not redact short alphanumerics adjacent to Bearer", () => {
+		expect(sanitizeForLog("Bearer abc123")).toBe("Bearer abc123");
+	});
 });

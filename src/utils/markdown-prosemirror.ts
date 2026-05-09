@@ -38,6 +38,22 @@ const INLINE_BOLD_RE = /\*\*(.+?)\*\*|__(.+?)__/;
 const INLINE_ITALIC_RE =
 	/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)|(?<!_)_(?!_)(.+?)(?<!_)_(?!_)/;
 
+/**
+ * Allowlist of URL schemes accepted on link marks. Anything else
+ * (`javascript:`, `data:`, `vbscript:`, `file:`) is silently dropped
+ * so we don't ship XSS-shaped ProseMirror docs into Linear comments
+ * or issue descriptions. Schemeless / relative links pass through —
+ * those resolve against the document base.
+ */
+const SAFE_LINK_SCHEMES = new Set(["http:", "https:", "mailto:", "linear:"]);
+function isSafeLinkScheme(href: string): boolean {
+	const trimmed = href.trim();
+	if (!/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return true;
+	const colon = trimmed.indexOf(":");
+	const scheme = trimmed.slice(0, colon + 1).toLowerCase();
+	return SAFE_LINK_SCHEMES.has(scheme);
+}
+
 interface ParseState {
 	content: ProseMirrorNode[];
 	i: number;
@@ -367,7 +383,7 @@ function findEarliestInlineMatch(text: string): InlineMatch | null {
 	}
 
 	const linkMatch = text.match(INLINE_LINK_RE);
-	if (linkMatch) {
+	if (linkMatch && isSafeLinkScheme(linkMatch[2])) {
 		candidates.push({
 			index: linkMatch.index ?? 0,
 			length: linkMatch[0].length,

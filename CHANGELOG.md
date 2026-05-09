@@ -6,8 +6,31 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- **`sanitizeForLog` now also redacts OAuth tokens.** Previously the
+  redaction regex only matched the `lin_api_…` prefix; OAuth access
+  and refresh tokens (`lin_oauth_…`) were left visible. A
+  high-entropy fallback also redacts 40+ char Bearer-style payloads
+  adjacent to `Authorization` / `Bearer` keywords, catching future
+  token shapes we haven't anticipated.
+
 ### Fixed
 
+- **ProseMirror link marks now reject unsafe URL schemes.** Comments
+  / issue descriptions containing `[label](javascript:…)`,
+  `[label](data:…)`, `[label](vbscript:…)`, or `[label](file://…)`
+  used to flow into Linear's API with the dangerous href intact;
+  now the link mark is silently dropped (label survives as plain
+  text). `http`, `https`, `mailto`, `linear`, and schemeless /
+  relative hrefs still pass through. Defense in depth — Linear's
+  web UI almost certainly has its own sanitizer, but we don't want
+  to depend on that.
+- **Mention regex is now Unicode-aware.** `@(\w+)` was ASCII-only,
+  so `@Юрий`, `@Niño`, or any non-Latin name silently failed to
+  resolve. Bare-name auto-mention had the same limitation via
+  `\b…\b`. Both now use `\p{L}\p{N}_` lookarounds and the `/u`
+  flag, so Cyrillic / accented Latin / CJK names match correctly.
 - **`extractIssueReferences` honors the wrapper's protected ranges.**
   Previously the extractor only stripped fenced code blocks; identifiers
   inside markdown links (`[label](https://x/DEV-100)`), bare URLs
@@ -60,6 +83,10 @@ project adheres to [Semantic Versioning](https://semver.org/).
   during that window. atomicWrite creates the tmp file at the requested
   mode and renames into place, so the destination atomically transitions
   from old-content-old-mode to new-content-new-mode. Closes ALL-932.
+
+The audit-related fixes above close the highest-impact P2 hardening
+findings from the 2026-05-09 product-finalizer audit. Tracked under
+ALL-935; remaining items continue to be tracked there.
 
 ### Added
 

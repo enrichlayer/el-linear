@@ -5,7 +5,10 @@ import type { ProseMirrorNode } from "./markdown-prosemirror.js";
 import { markdownToProseMirror } from "./markdown-prosemirror.js";
 import { isUuid } from "./uuid.js";
 
-const EXPLICIT_MENTION_REGEX = /@(\w+)/g;
+// Unicode-aware mention regex: ASCII-only `\w` would silently fail to
+// match Cyrillic / accented Latin / CJK names (`@Юрий`, `@Niño`).
+// `\p{L}` covers all Unicode letters; `\p{N}` covers all numerics.
+const EXPLICIT_MENTION_REGEX = /@([\p{L}\p{N}_]+)/gu;
 const WHITESPACE_SPLIT_REGEX = /\s+/;
 const FENCED_CODE_REGEX = /```[\s\S]*?```/g;
 const INLINE_CODE_REGEX = /`[^`]+`/g;
@@ -70,7 +73,14 @@ export async function resolveMentions(
 	if (autoMention) {
 		const stripped = stripCodeAndLinks(body);
 		for (const candidate of getBareMentionCandidates()) {
-			const pattern = new RegExp(`\\b${escapeRegex(candidate)}\\b`);
+			// Unicode-aware "word boundary": ASCII `\b` doesn't fire on
+			// Cyrillic / accented Latin / CJK chars, so a candidate like
+			// `Юрий` would silently fail to match. Lookarounds against
+			// the same letter+number+underscore class behave correctly.
+			const pattern = new RegExp(
+				`(?<![\\p{L}\\p{N}_])${escapeRegex(candidate)}(?![\\p{L}\\p{N}_])`,
+				"u",
+			);
 			if (!pattern.test(stripped)) {
 				continue;
 			}
@@ -283,7 +293,10 @@ function buildCombinedRegex(
 	const parts: string[] = [];
 
 	if (explicit.size > 0) {
-		parts.push("@\\w+");
+		// Same Unicode-aware character class as EXPLICIT_MENTION_REGEX
+		// at module top so the splitter and the resolver agree on
+		// what counts as a name char.
+		parts.push("@[\\p{L}\\p{N}_]+");
 	}
 
 	if (bare.size > 0) {
@@ -291,13 +304,15 @@ function buildCombinedRegex(
 			.sort((a, b) => b.length - a.length)
 			.map(escapeRegex)
 			.join("|");
-		parts.push(`\\b(?:${alternation})\\b`);
+		// Unicode-aware "word boundary": no `\b` (ASCII-only); use
+		// lookarounds against the same letter+number+underscore class.
+		parts.push(`(?<![\\p{L}\\p{N}_])(?:${alternation})(?![\\p{L}\\p{N}_])`);
 	}
 
 	if (parts.length === 0) {
 		return null;
 	}
-	return new RegExp(parts.join("|"), "g");
+	return new RegExp(parts.join("|"), "gu");
 }
 
 function escapeRegex(s: string): string {
