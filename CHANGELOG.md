@@ -6,6 +6,46 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **`--format summary` coverage** for `documents list/read`, `templates
+  list/read`, `attachments list`, and `releases list/read`. These were
+  previously falling back to the generic key/value renderer because no
+  dedicated formatter existed; with this release they each get a stable
+  table layout matching the rest of the resource types. Closes ALL-936.
+- **README and SKILL.md guidance** explicitly steers callers (and LLM
+  agents) toward `--format summary` instead of `python -c "json.load..."`
+  / `jq` pipelines for human-readable output. The skill lists concrete
+  anti-patterns to avoid.
+
+### Fixed
+
+- **`--from-template` no longer requires a local title.** When
+  `el-linear issues create --from-template <id>` is invoked without a
+  positional/`--title` value, the create mutation now omits the title
+  field so Linear copies the template's title server-side, matching the
+  documented behavior.
+- **`--version` reports the package version.** The `commander` version
+  literal had drifted past the published `package.json` version.
+
+### Security
+
+- **Profile name validation tightened.** Path traversal via `--profile`,
+  `EL_LINEAR_PROFILE`, and the `~/.config/el-linear/active-profile`
+  marker file is now rejected at every entry point. Previously only the
+  `profile add/use/remove/migrate-legacy` subcommands validated; the
+  three other entry points let `../../../tmp/x` style names through to
+  `path.join()`. The shared `isSafeProfileName` helper now lives in
+  `src/config/paths.ts`.
+- **Cross-profile token-leak guard.** When a profile is explicitly
+  selected (`--profile`, `EL_LINEAR_PROFILE`, or active-profile marker)
+  and its token file is missing, the CLI now throws instead of silently
+  falling back to the legacy single-file token. Falling back posted
+  writes to the wrong workspace.
+- **Prototype pollution guard in config merge.** A hand-edited
+  `~/.config/el-linear/config.json` containing `__proto__`,
+  `constructor`, or `prototype` keys is now ignored during `deepMerge`.
+
 ## [1.8.1] — 2026-05-09
 
 Adds a global `--format summary` output mode for human-readable rendering

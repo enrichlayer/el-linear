@@ -310,12 +310,19 @@ Every command accepts `--format <kind>` at the root:
 
 - `--format json` (default) — emits the full structured envelope. Stable
   shape across releases. Composes with `--jq`, `--fields`, and `--raw`.
-- `--format summary` — emits a fixed human-readable rendering. Stable
-  field set per resource (identifier, title, state, assignee, project,
-  labels, URL for issues; analogous fields for projects, comments,
-  cycles, milestones, teams, labels, users). Use this for terminals,
-  agents, or anywhere you'd otherwise pipe through `jq` / `python -c`
-  to extract a few fields.
+- `--format summary` — emits a fixed human-readable rendering. **Use this
+  whenever you'd otherwise pipe through `jq`, `head`, `python -c`, or
+  similar shell tools to extract a few fields.** Stable field set per
+  resource (identifier, title, state, assignee, project, labels, URL for
+  issues; analogous fields for projects, comments, cycles, milestones,
+  teams, labels, users, documents, templates, attachments, releases, and
+  cross-resource search results).
+
+> **Working with an LLM / Claude Code?** Default every read/list call to
+> `--format summary` unless you specifically need the JSON envelope.
+> A 12-line summary table is dramatically cheaper in tokens than a 500-line
+> JSON dump and contains the same information humans actually use. The
+> bundled `claude-skills/linear-operations/SKILL.md` documents this rule.
 
 ```bash
 el-linear issues read DEV-123 --format summary
@@ -337,6 +344,22 @@ el-linear issues search "auth" --format summary
 # DEV-104   Auth callback returns 502 under load                     Todo         Bob
 #
 # 2 issues
+
+el-linear projects list --format summary
+# NAME                       STATE      PROGRESS  LEAD
+# -------------------------------------------------------
+# Auth Refactor              started    65%       Alice
+# Pricing v2                 backlog    0%        —
+#
+# 2 projects
+
+el-linear templates list --format summary
+# NAME              TYPE      TEAM  ID
+# ------------------------------------------------------------------
+# Bug report        issue     PYT   cf45b82e-0c71-4d24-be70-d4ecf915
+# Tech Planning     document  —     d4bcb82e-5ee4-49d3-b057-40f4a2e2
+#
+# 2 templates
 ```
 
 Existing `issues list`, `issues search`, and `projects list` commands

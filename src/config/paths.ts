@@ -78,6 +78,16 @@ const DEFAULT_FS_OPS: ProfileFsOps = {
 };
 
 /**
+ * Conservative profile-name charset. Rejects path traversal (`..`, `/`),
+ * shell metacharacters, and Unicode lookalikes that would confuse `profile
+ * use` or let `--profile`/EL_LINEAR_PROFILE/active-profile escape out of
+ * <CONFIG_DIR>/profiles/.
+ */
+export function isSafeProfileName(name: string): boolean {
+	return /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(name);
+}
+
+/**
  * Per-process override for the active profile name. Set by main.ts when
  * `--profile <name>` is passed (highest priority).
  */
@@ -86,9 +96,27 @@ let sessionProfileOverride: string | null = null;
 /**
  * Set the active profile for the duration of this process. Pass `null`
  * to clear the override and fall back to env / on-disk markers.
+ *
+ * @throws when `name` is not a safe profile name. Validation lives here
+ * so every entry point (CLI flag, env var, marker file) goes through one
+ * gate — see `resolveActiveProfile`.
  */
 export function setActiveProfileForSession(name: string | null): void {
-	sessionProfileOverride = name && name.trim().length > 0 ? name.trim() : null;
+	if (name === null) {
+		sessionProfileOverride = null;
+		return;
+	}
+	const trimmed = name.trim();
+	if (trimmed.length === 0) {
+		sessionProfileOverride = null;
+		return;
+	}
+	if (!isSafeProfileName(trimmed)) {
+		throw new Error(
+			`Invalid profile name "${trimmed}". Allowed: [A-Za-z0-9][A-Za-z0-9_.-]{0,63}.`,
+		);
+	}
+	sessionProfileOverride = trimmed;
 }
 
 /** Read-only accessor for the per-session override (test seam). */
@@ -105,12 +133,26 @@ export function resolveActiveProfile(
 	env: NodeJS.ProcessEnv = process.env,
 	fsImpl: ProfileFsOps = DEFAULT_FS_OPS,
 ): ProfilePaths {
-	const explicit =
-		sessionProfileOverride ??
-		(env.EL_LINEAR_PROFILE?.trim() || null) ??
-		readActiveProfileMarker(fsImpl);
-	if (explicit) {
-		return profilePaths(explicit);
+	// session override is already validated at write time (see
+	// setActiveProfileForSession). Env var is explicit user input and
+	// must fail loudly. Marker file is our own on-disk state; treat
+	// invalid contents as "no marker" so a stale/corrupt file doesn't
+	// brick every command.
+	if (sessionProfileOverride) {
+		return profilePaths(sessionProfileOverride);
+	}
+	const envName = env.EL_LINEAR_PROFILE?.trim();
+	if (envName) {
+		if (!isSafeProfileName(envName)) {
+			throw new Error(
+				`Invalid EL_LINEAR_PROFILE value "${envName}". Allowed: [A-Za-z0-9][A-Za-z0-9_.-]{0,63}.`,
+			);
+		}
+		return profilePaths(envName);
+	}
+	const marker = readActiveProfileMarker(fsImpl);
+	if (marker && isSafeProfileName(marker)) {
+		return profilePaths(marker);
 	}
 	return {
 		name: null,

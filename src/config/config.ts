@@ -179,6 +179,12 @@ function deepMerge(
 ): Record<string, unknown> {
 	const result: Record<string, unknown> = { ...target };
 	for (const key of Object.keys(source)) {
+		// Reject prototype-pollution keys regardless of value shape: a
+		// hand-edited config.json with `__proto__` would otherwise mutate
+		// Object.prototype for the whole process.
+		if (key === "__proto__" || key === "constructor" || key === "prototype") {
+			continue;
+		}
 		if (
 			source[key] &&
 			typeof source[key] === "object" &&

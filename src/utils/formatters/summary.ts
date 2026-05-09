@@ -440,6 +440,165 @@ export function formatUserList(users: unknown[]): string {
 	return `${header}\n${sep}\n${body}\n\n${rows.length} user${rows.length === 1 ? "" : "s"}`;
 }
 
+// ── documents ──────────────────────────────────────────────────
+
+export function formatDocumentSummary(doc: Record<string, unknown>): string {
+	const title = s(doc.title);
+	const fields: HeaderField[] = [
+		{ label: "Project", value: getName(doc.project) },
+		{ label: "Issue", value: getName(doc.issue) },
+		{ label: "Creator", value: getName(doc.creator) },
+		{ label: "Updated", value: s(doc.updatedAt) },
+		{ label: "URL", value: s(doc.url) },
+	];
+	const header = renderHeader(fields);
+	const body = clipDescription(doc.content as string | undefined);
+	const parts = [title, header];
+	if (body) parts.push("", body);
+	return parts.filter((p) => p !== "").join("\n");
+}
+
+export function formatDocumentList(docs: unknown[]): string {
+	if (docs.length === 0) return "(no documents)";
+	const rows = docs.map((raw) => {
+		const d = asObj(raw) ?? {};
+		return {
+			title: truncate(s(d.title), TITLE_TRUNC),
+			project: getName(d.project),
+			updated: s(d.updatedAt).slice(0, 10),
+		};
+	});
+	const titleW = Math.max(5, ...rows.map((r) => r.title.length));
+	const projW = Math.max(7, ...rows.map((r) => r.project.length));
+	const updW = Math.max(7, ...rows.map((r) => r.updated.length));
+	const header = `${pad("TITLE", titleW)}  ${pad("PROJECT", projW)}  ${pad("UPDATED", updW)}`;
+	const sep = "-".repeat(header.length);
+	const body = rows
+		.map(
+			(r) =>
+				`${pad(r.title, titleW)}  ${pad(r.project, projW)}  ${pad(r.updated, updW)}`,
+		)
+		.join("\n");
+	return `${header}\n${sep}\n${body}\n\n${rows.length} document${rows.length === 1 ? "" : "s"}`;
+}
+
+// ── templates ──────────────────────────────────────────────────
+
+export function formatTemplateSummary(tpl: Record<string, unknown>): string {
+	const name = s(tpl.name);
+	const fields: HeaderField[] = [
+		{ label: "Type", value: s(tpl.type) },
+		{ label: "Team", value: getName(tpl.team) },
+		{ label: "Creator", value: getName(tpl.creator) },
+		{ label: "Updated", value: s(tpl.updatedAt) },
+		{ label: "ID", value: s(tpl.id) },
+	];
+	const header = renderHeader(fields);
+	const body = clipDescription(tpl.description as string | undefined);
+	const parts = [name, header];
+	if (body) parts.push("", body);
+	return parts.filter((p) => p !== "").join("\n");
+}
+
+export function formatTemplateList(tpls: unknown[]): string {
+	if (tpls.length === 0) return "(no templates)";
+	const rows = tpls.map((raw) => {
+		const t = asObj(raw) ?? {};
+		return {
+			name: truncate(s(t.name), TITLE_TRUNC),
+			type: s(t.type),
+			team: getName(t.team),
+			id: s(t.id),
+		};
+	});
+	const nameW = Math.max(4, ...rows.map((r) => r.name.length));
+	const typeW = Math.max(4, ...rows.map((r) => r.type.length));
+	const teamW = Math.max(4, ...rows.map((r) => r.team.length));
+	const idW = Math.max(2, ...rows.map((r) => r.id.length));
+	const header = `${pad("NAME", nameW)}  ${pad("TYPE", typeW)}  ${pad("TEAM", teamW)}  ${pad("ID", idW)}`;
+	const sep = "-".repeat(header.length);
+	const body = rows
+		.map(
+			(r) =>
+				`${pad(r.name, nameW)}  ${pad(r.type, typeW)}  ${pad(r.team, teamW)}  ${pad(r.id, idW)}`,
+		)
+		.join("\n");
+	return `${header}\n${sep}\n${body}\n\n${rows.length} template${rows.length === 1 ? "" : "s"}`;
+}
+
+// ── attachments ────────────────────────────────────────────────
+
+export function formatAttachmentList(attachments: unknown[]): string {
+	if (attachments.length === 0) return "(no attachments)";
+	const rows = attachments.map((raw) => {
+		const a = asObj(raw) ?? {};
+		return {
+			title: truncate(s(a.title), TITLE_TRUNC),
+			url: truncate(s(a.url), 60),
+			created: s(a.createdAt).slice(0, 10),
+		};
+	});
+	const titleW = Math.max(5, ...rows.map((r) => r.title.length));
+	const urlW = Math.max(3, ...rows.map((r) => r.url.length));
+	const createdW = Math.max(7, ...rows.map((r) => r.created.length));
+	const header = `${pad("TITLE", titleW)}  ${pad("URL", urlW)}  ${pad("CREATED", createdW)}`;
+	const sep = "-".repeat(header.length);
+	const body = rows
+		.map(
+			(r) =>
+				`${pad(r.title, titleW)}  ${pad(r.url, urlW)}  ${pad(r.created, createdW)}`,
+		)
+		.join("\n");
+	return `${header}\n${sep}\n${body}\n\n${rows.length} attachment${rows.length === 1 ? "" : "s"}`;
+}
+
+// ── releases ───────────────────────────────────────────────────
+
+export function formatReleaseSummary(release: Record<string, unknown>): string {
+	const name = s(release.name);
+	const stage = asObj(release.stage);
+	const fields: HeaderField[] = [
+		{ label: "Version", value: s(release.version) },
+		{ label: "Stage", value: stage ? s(stage.name) : "" },
+		{ label: "Pipeline", value: getName(release.pipeline) },
+		{ label: "Start", value: s(release.startDate) },
+		{ label: "Target", value: s(release.targetDate) },
+		{ label: "URL", value: s(release.url) },
+	];
+	const header = renderHeader(fields);
+	const body = clipDescription(release.description as string | undefined);
+	const parts = [name, header];
+	if (body) parts.push("", body);
+	return parts.filter((p) => p !== "").join("\n");
+}
+
+export function formatReleaseList(releases: unknown[]): string {
+	if (releases.length === 0) return "(no releases)";
+	const rows = releases.map((raw) => {
+		const r = asObj(raw) ?? {};
+		const stage = asObj(r.stage);
+		return {
+			name: truncate(s(r.name), TITLE_TRUNC),
+			version: s(r.version),
+			stage: stage ? s(stage.name) : "—",
+			target: s(r.targetDate),
+		};
+	});
+	const nameW = Math.max(4, ...rows.map((r) => r.name.length));
+	const verW = Math.max(7, ...rows.map((r) => r.version.length));
+	const stageW = Math.max(5, ...rows.map((r) => r.stage.length));
+	const targetW = Math.max(6, ...rows.map((r) => r.target.length));
+	const header = `${pad("NAME", nameW)}  ${pad("VERSION", verW)}  ${pad("STAGE", stageW)}  ${pad("TARGET", targetW)}`;
+	const sep = "-".repeat(header.length);
+	const body = rows
+		.map(
+			(r) =>
+				`${pad(r.name, nameW)}  ${pad(r.version, verW)}  ${pad(r.stage, stageW)}  ${pad(r.target, targetW)}`,
+		)
+		.join("\n");
+	return `${header}\n${sep}\n${body}\n\n${rows.length} release${rows.length === 1 ? "" : "s"}`;
+}
+
 // ── search-results (cross-resource) ────────────────────────────
 
 export function formatSearchResultList(results: unknown[]): string {
@@ -530,6 +689,13 @@ export type ResourceKind =
 	| "label-list"
 	| "user"
 	| "user-list"
+	| "document"
+	| "document-list"
+	| "template"
+	| "template-list"
+	| "attachment-list"
+	| "release"
+	| "release-list"
 	| "search-result-list"
 	| "empty-list"
 	| "generic";
@@ -569,6 +735,14 @@ export function inferKindFromPayload(value: unknown): ResourceKind {
 		("startsAt" in obj || "endsAt" in obj || "issues" in obj)
 	)
 		return "cycle";
+	if ("title" in obj && "content" in obj && "slugId" in obj) return "document";
+	if ("name" in obj && "templateData" in obj) return "template";
+	if (
+		"name" in obj &&
+		"stage" in obj &&
+		("version" in obj || "pipeline" in obj)
+	)
+		return "release";
 	if ("targetDate" in obj && "name" in obj && !("teams" in obj))
 		return "milestone";
 	if ("displayName" in obj && "email" in obj) return "user";
@@ -592,7 +766,9 @@ function inferListKind(
 	const sample = asObj(items[0]) ?? {};
 	if ("identifier" in sample && "title" in sample) {
 		// could be issue or search result
-		if ("type" in sample) return "search-result-list";
+		if ("type" in sample && !("templateData" in sample)) {
+			return "search-result-list";
+		}
 		return "issue-list";
 	}
 	if ("body" in sample && "createdAt" in sample) return "comment-list";
@@ -600,6 +776,24 @@ function inferListKind(
 		if ("startsAt" in sample || "endsAt" in sample) return "cycle-list";
 		return "project-list";
 	}
+	if ("title" in sample && ("content" in sample || "slugId" in sample))
+		return "document-list";
+	// templates always have type + name; some include team / templateData
+	if (
+		"name" in sample &&
+		"type" in sample &&
+		("templateData" in sample || "creator" in sample)
+	)
+		return "template-list";
+	// releases: name + stage, typically with version or pipeline
+	if (
+		"name" in sample &&
+		"stage" in sample &&
+		("version" in sample || "pipeline" in sample)
+	)
+		return "release-list";
+	if ("title" in sample && "url" in sample && !("identifier" in sample))
+		return "attachment-list";
 	if ("targetDate" in sample && "name" in sample) return "milestone-list";
 	if ("key" in sample && "name" in sample) return "team-list";
 	if ("color" in sample && "scope" in sample) return "label-list";
@@ -625,6 +819,14 @@ function mapHint(kind: string): ResourceKind {
 		users: "user-list",
 		comment: "comment-list",
 		comments: "comment-list",
+		document: "document-list",
+		documents: "document-list",
+		template: "template-list",
+		templates: "template-list",
+		attachment: "attachment-list",
+		attachments: "attachment-list",
+		release: "release-list",
+		releases: "release-list",
 	};
 	return known[kind.toLowerCase()] ?? "generic";
 }
@@ -671,6 +873,20 @@ export function dispatch(kind: ResourceKind, payload: unknown): string {
 			return formatUserSummary((obj ?? {}) as Record<string, unknown>);
 		case "user-list":
 			return formatUserList(list ?? []);
+		case "document":
+			return formatDocumentSummary((obj ?? {}) as Record<string, unknown>);
+		case "document-list":
+			return formatDocumentList(list ?? []);
+		case "template":
+			return formatTemplateSummary((obj ?? {}) as Record<string, unknown>);
+		case "template-list":
+			return formatTemplateList(list ?? []);
+		case "attachment-list":
+			return formatAttachmentList(list ?? []);
+		case "release":
+			return formatReleaseSummary((obj ?? {}) as Record<string, unknown>);
+		case "release-list":
+			return formatReleaseList(list ?? []);
 		case "search-result-list":
 			return formatSearchResultList(list ?? []);
 		case "empty-list":

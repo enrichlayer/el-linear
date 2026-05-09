@@ -30,6 +30,7 @@ import {
 	ACTIVE_PROFILE_FILE,
 	CONFIG_DIR,
 	CONFIG_PATH,
+	isSafeProfileName as isSafeName,
 	PROFILES_DIR,
 	profilePaths,
 	resolveActiveProfile,
@@ -248,14 +249,4 @@ async function pathExists(p: string): Promise<boolean> {
 	} catch {
 		return false;
 	}
-}
-
-/**
- * Profile names land in filesystem paths AND get written to a
- * single-line marker. Restrict to a conservative charset so we can't
- * accidentally pick up `..` traversal, command-line metacharacters, or
- * Unicode lookalikes that would confuse `profile use`.
- */
-function isSafeName(name: string): boolean {
-	return /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(name);
 }

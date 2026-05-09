@@ -716,7 +716,7 @@ function buildDescriptionWithAttachments(
 }
 
 async function handleCreateIssue(
-	title: string,
+	title: string | undefined,
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
@@ -729,7 +729,7 @@ async function handleCreateIssue(
 		status,
 		subscriberIds,
 		priority,
-	} = await resolveCreateInputs(title, options, rootOpts);
+	} = await resolveCreateInputs(title ?? "", options, rootOpts);
 
 	const uploadResults = await uploadAttachmentsIfNeeded(options, rootOpts);
 	const descriptionWithAttachments = buildDescriptionWithAttachments(
@@ -764,7 +764,9 @@ async function handleCreateIssue(
 	);
 
 	const result = await issuesService.createIssue({
-		title,
+		// title is omitted when --from-template is set without an override,
+		// so Linear copies the template's title server-side.
+		...(title ? { title } : {}),
 		teamId,
 		teamInput,
 		description: prepared.description,
@@ -1704,9 +1706,14 @@ export function setupIssuesCommands(program: Command): void {
 						options.labels = options.label;
 					}
 					const title = options.title || titleArg;
-					if (!title) {
+					// --from-template lets Linear copy the template's title, so a
+					// local title is optional in that path. Without --from-template,
+					// the create mutation requires a title up front.
+					const fromTemplate =
+						typeof options.fromTemplate === "string" && options.fromTemplate;
+					if (!title && !fromTemplate) {
 						throw new Error(
-							"Title is required. Provide it as a positional argument or with --title.",
+							"Title is required. Provide it as a positional argument, with --title, or use --from-template to copy the template's title.",
 						);
 					}
 					return handleCreateIssue(title, options, command);

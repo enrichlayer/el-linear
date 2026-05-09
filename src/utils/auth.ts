@@ -3,7 +3,6 @@ import {
 	LEGACY_LINCTL_TOKEN_PATH,
 	LEGACY_TOKEN_PATH,
 	resolveActiveProfile,
-	TOKEN_PATH,
 } from "../config/paths.js";
 import { maybeEmitMigrationHint } from "./migration-hint.js";
 
@@ -21,19 +20,18 @@ export function getApiToken(options: AuthOptions): string {
 	}
 
 	// Profile-aware: read from <CONFIG_DIR>/profiles/<name>/token when a
-	// profile is active, falling back to the legacy single-file path
-	// (TOKEN_PATH) for the no-profile case.
+	// profile is active. When the user has explicitly selected a profile
+	// (--profile / EL_LINEAR_PROFILE / active-profile marker), do NOT
+	// fall back to the legacy single-file token — that path silently
+	// posts writes to the wrong workspace when a profile token is missing.
 	const active = resolveActiveProfile();
 	if (fs.existsSync(active.tokenPath)) {
 		return fs.readFileSync(active.tokenPath, "utf8").trim();
 	}
-
-	// Even when a profile is selected, fall through to the legacy token
-	// path so an operator who only has the single-file layout doesn't
-	// suddenly fail. The active-profile name is informational only when
-	// no profile-scoped token exists yet.
-	if (active.tokenPath !== TOKEN_PATH && fs.existsSync(TOKEN_PATH)) {
-		return fs.readFileSync(TOKEN_PATH, "utf8").trim();
+	if (active.name !== null) {
+		throw new Error(
+			`No token for active profile \`${active.name}\` (expected at ${active.tokenPath}). Run \`el-linear init token --profile ${active.name}\` (or unset --profile / EL_LINEAR_PROFILE / \`el-linear profile use <name>\`) before retrying. Refusing to fall back to the legacy single-file token to avoid posting writes to the wrong workspace.`,
+		);
 	}
 
 	// Fallback to the linctl-era token (the CLI was briefly published as
