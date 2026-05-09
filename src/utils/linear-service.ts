@@ -151,10 +151,17 @@ export class LinearService {
 		throw notFoundError("User", nameOrEmailOrId);
 	}
 
-	async getUsers(activeOnly?: boolean, limit = 100): Promise<LinearUser[]> {
+	async getUsers(
+		activeOnly?: boolean,
+		limit = 100,
+		nameFilter?: string,
+	): Promise<LinearUser[]> {
 		const filter: Record<string, unknown> = {};
 		if (activeOnly) {
 			filter.active = eqFilter(true);
+		}
+		if (nameFilter) {
+			filter.name = { containsIgnoreCase: nameFilter };
 		}
 		const usersConnection = await this.client.users({
 			filter: nonEmptyFilter(filter),
@@ -170,8 +177,25 @@ export class LinearService {
 		return users.sort((a, b) => a.name.localeCompare(b.name));
 	}
 
-	async getProjects(limit = 100): Promise<LinearProject[]> {
+	async getProjects(
+		limit = 100,
+		options: {
+			nameFilter?: string;
+			states?: string[];
+			excludeStates?: string[];
+		} = {},
+	): Promise<LinearProject[]> {
+		const filter: Record<string, unknown> = {};
+		if (options.nameFilter) {
+			filter.name = { containsIgnoreCase: options.nameFilter };
+		}
+		if (options.states && options.states.length > 0) {
+			filter.state = { in: options.states };
+		} else if (options.excludeStates && options.excludeStates.length > 0) {
+			filter.state = { nin: options.excludeStates };
+		}
 		const projects = await this.client.projects({
+			filter: nonEmptyFilter(filter),
 			first: limit,
 			orderBy: sdkOrderBy("updatedAt"),
 			includeArchived: false,
@@ -322,13 +346,19 @@ export class LinearService {
 	async getLabels(
 		teamFilter?: string,
 		limit = 100,
+		nameFilter?: string,
 	): Promise<{ labels: LinearLabel[] }> {
 		const labels: LinearLabel[] = [];
+		const labelFilter: Record<string, unknown> = {};
+		if (nameFilter) {
+			labelFilter.name = { containsIgnoreCase: nameFilter };
+		}
 		if (teamFilter) {
 			const teamId = await this.resolveTeamId(teamFilter);
 			const team = await this.client.team(teamId);
+			labelFilter.team = teamIdFilter(teamId);
 			const teamLabels = await this.client.issueLabels({
-				filter: { team: teamIdFilter(teamId) },
+				filter: labelFilter,
 				first: limit,
 			});
 			const teamRef = { id: team.id, key: team.key, name: team.name };
@@ -339,7 +369,10 @@ export class LinearService {
 				labels.push(await this.buildLabelData(label, "team", teamRef));
 			}
 		} else {
-			const allLabels = await this.client.issueLabels({ first: limit });
+			const allLabels = await this.client.issueLabels({
+				filter: nonEmptyFilter(labelFilter),
+				first: limit,
+			});
 			for (const label of allLabels.nodes) {
 				if (label.isGroup) {
 					continue;

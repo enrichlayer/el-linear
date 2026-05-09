@@ -48,7 +48,11 @@ describe("projects commands", () => {
 			setupProjectsCommands(program);
 			await runCommand(program, ["projects", "list"]);
 
-			expect(mockGetProjects).toHaveBeenCalledWith(100);
+			expect(mockGetProjects).toHaveBeenCalledWith(100, {
+				nameFilter: undefined,
+				states: undefined,
+				excludeStates: undefined,
+			});
 		});
 
 		it("calls getProjects with custom limit", async () => {
@@ -56,7 +60,52 @@ describe("projects commands", () => {
 			setupProjectsCommands(program);
 			await runCommand(program, ["projects", "list", "--limit", "10"]);
 
-			expect(mockGetProjects).toHaveBeenCalledWith(10);
+			expect(mockGetProjects).toHaveBeenCalledWith(10, {
+				nameFilter: undefined,
+				states: undefined,
+				excludeStates: undefined,
+			});
+		});
+
+		it("passes --name through nameFilter", async () => {
+			const program = createTestProgram();
+			setupProjectsCommands(program);
+			await runCommand(program, ["projects", "list", "--name", "knowledge"]);
+
+			expect(mockGetProjects).toHaveBeenCalledWith(100, {
+				nameFilter: "knowledge",
+				states: undefined,
+				excludeStates: undefined,
+			});
+		});
+
+		it("passes --active as excludeStates [completed, canceled]", async () => {
+			const program = createTestProgram();
+			setupProjectsCommands(program);
+			await runCommand(program, ["projects", "list", "--active"]);
+
+			expect(mockGetProjects).toHaveBeenCalledWith(100, {
+				nameFilter: undefined,
+				states: undefined,
+				excludeStates: ["completed", "canceled"],
+			});
+		});
+
+		it("passes --state as states list (lowercased)", async () => {
+			const program = createTestProgram();
+			setupProjectsCommands(program);
+			await runCommand(program, [
+				"projects",
+				"list",
+				"--state",
+				"Started, Planned",
+			]);
+
+			expect(mockGetProjects).toHaveBeenCalledWith(100, {
+				nameFilter: undefined,
+				states: ["started", "planned"],
+				excludeStates: undefined,
+			});
 		});
 
 		it("outputs result via outputSuccess", async () => {

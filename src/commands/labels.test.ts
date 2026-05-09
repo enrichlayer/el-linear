@@ -62,7 +62,7 @@ describe("labels", () => {
 		it("calls getLabels with no team filter", async () => {
 			mockGetLabels.mockResolvedValue({ labels: [] });
 			await runCommand(program, ["labels", "list"]);
-			expect(mockGetLabels).toHaveBeenCalledWith(undefined, 100);
+			expect(mockGetLabels).toHaveBeenCalledWith(undefined, 100, undefined);
 			expect(mockOutputSuccess).toHaveBeenCalledWith({
 				data: [],
 				meta: { count: 0 },
@@ -76,11 +76,21 @@ describe("labels", () => {
 			});
 			await runCommand(program, ["labels", "list", "--team", "ENG"]);
 			expect(mockResolveTeam).toHaveBeenCalledWith("ENG");
-			expect(mockGetLabels).toHaveBeenCalledWith("team-uuid-456", 100);
+			expect(mockGetLabels).toHaveBeenCalledWith(
+				"team-uuid-456",
+				100,
+				undefined,
+			);
 			expect(mockOutputSuccess).toHaveBeenCalledWith({
 				data: [{ id: "lbl-1", name: "Bug" }],
 				meta: { count: 1 },
 			});
+		});
+
+		it("passes --name as third arg", async () => {
+			mockGetLabels.mockResolvedValue({ labels: [] });
+			await runCommand(program, ["labels", "list", "--name", "chore"]);
+			expect(mockGetLabels).toHaveBeenCalledWith(undefined, 100, "chore");
 		});
 	});
 
