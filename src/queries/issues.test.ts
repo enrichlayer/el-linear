@@ -1,11 +1,13 @@
 import { Kind, parse, visit } from "graphql";
 import { describe, expect, it } from "vitest";
 import {
+	ARCHIVE_ISSUE_MUTATION,
 	BATCH_RESOLVE_FOR_CREATE_QUERY,
 	BATCH_RESOLVE_FOR_SEARCH_QUERY,
 	BATCH_RESOLVE_FOR_UPDATE_QUERY,
 	buildResolveLabelsByNameQuery,
 	CREATE_ISSUE_MUTATION,
+	DELETE_ISSUE_MUTATION,
 	FILTERED_SEARCH_ISSUES_QUERY,
 	GET_ISSUE_BY_ID_QUERY,
 	GET_ISSUE_BY_IDENTIFIER_QUERY,
@@ -156,6 +158,25 @@ describe("UPDATE_ISSUE_MUTATION", () => {
 		const vars = extractVariables(UPDATE_ISSUE_MUTATION);
 		expect(vars).toContain("id");
 		expect(vars).toContain("input");
+	});
+});
+
+describe("ARCHIVE_ISSUE_MUTATION", () => {
+	it("is a mutation with id", () => {
+		expect(getOperationType(ARCHIVE_ISSUE_MUTATION)).toBe("mutation");
+		expect(extractVariables(ARCHIVE_ISSUE_MUTATION)).toEqual(["id"]);
+		expect(containsField(ARCHIVE_ISSUE_MUTATION, "issueArchive")).toBe(true);
+		expect(containsField(ARCHIVE_ISSUE_MUTATION, "lastSyncId")).toBe(true);
+	});
+});
+
+describe("DELETE_ISSUE_MUTATION", () => {
+	it("is a mutation with id and permanentlyDelete", () => {
+		expect(getOperationType(DELETE_ISSUE_MUTATION)).toBe("mutation");
+		const vars = extractVariables(DELETE_ISSUE_MUTATION);
+		expect(vars).toContain("id");
+		expect(vars).toContain("permanentlyDelete");
+		expect(containsField(DELETE_ISSUE_MUTATION, "issueDelete")).toBe(true);
 	});
 });
 

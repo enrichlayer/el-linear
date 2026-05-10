@@ -775,6 +775,44 @@ async function handleUpdateIssue(
 	outputSuccess(autoLinked ? { ...result, autoLinked } : result);
 }
 
+async function handleArchiveIssue(
+	issueId: string,
+	_options: OptionValues,
+	command: Command,
+): Promise<void> {
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
+	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
+	const result = await issuesService.archiveIssue(issueId);
+	outputSuccess({
+		success: true,
+		archived: true,
+		...result,
+	});
+}
+
+async function handleDeleteIssue(
+	issueId: string,
+	options: OptionValues,
+	command: Command,
+): Promise<void> {
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
+	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
+	const permanentlyDelete = Boolean(options.permanentlyDelete || options.hard);
+	const result = await issuesService.deleteIssue(issueId, {
+		permanentlyDelete,
+	});
+	outputSuccess({
+		success: true,
+		deleted: true,
+		permanentlyDeleted: permanentlyDelete,
+		...result,
+	});
+}
+
 async function handleRetrolink(
 	options: OptionValues,
 	command: Command,
@@ -1108,6 +1146,47 @@ export function setupIssuesCommands(program: Command): void {
 			"skip auto-linking issue references found in the description",
 		)
 		.action(handleAsyncCommand(handleUpdateIssue));
+
+	issues
+		.command("archive <issueId>")
+		.description("Archive an issue.")
+		.addHelpText(
+			"after",
+			"\nBoth UUID and identifiers like ABC-123 are supported.",
+		)
+		.action(handleAsyncCommand(handleArchiveIssue));
+
+	issues
+		.command("delete <issueId>")
+		.description("Delete (trash) an issue.")
+		.addHelpText(
+			"after",
+			"\nBoth UUID and identifiers like ABC-123 are supported. Use --permanently-delete only when you intend to skip Linear's grace period; Linear requires admin permissions.",
+		)
+		.option(
+			"--permanently-delete",
+			"skip Linear's 30-day grace period (admin only)",
+		)
+		.option("--hard", "alias for --permanently-delete")
+		.action(handleAsyncCommand(handleDeleteIssue));
+
+	issues
+		.command("hard-delete <issueId>")
+		.description("Permanently delete an issue immediately (admin only).")
+		.addHelpText(
+			"after",
+			"\nBoth UUID and identifiers like ABC-123 are supported.",
+		)
+		.action(
+			handleAsyncCommand(
+				(issueId: string, options: OptionValues, command: Command) =>
+					handleDeleteIssue(
+						issueId,
+						{ ...options, permanentlyDelete: true },
+						command,
+					),
+			),
+		);
 
 	issues
 		.command("history <issueId>")

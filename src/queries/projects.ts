@@ -108,3 +108,27 @@ export const UPDATE_PROJECT_MUTATION = `
     }
   }
 `;
+
+export const ARCHIVE_PROJECT_MUTATION = `
+  mutation ArchiveProject($id: String!) {
+    projectArchive(id: $id) {
+      success
+      lastSyncId
+      entity {
+        id
+      }
+    }
+  }
+`;
+
+export const DELETE_PROJECT_MUTATION = `
+  mutation DeleteProject($id: String!) {
+    projectDelete(id: $id) {
+      success
+      lastSyncId
+      entity {
+        id
+      }
+    }
+  }
+`;

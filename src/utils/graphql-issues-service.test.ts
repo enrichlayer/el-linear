@@ -17,6 +17,71 @@ function createService() {
 }
 
 describe("GraphQLIssuesService", () => {
+	describe("archive/delete issue", () => {
+		it("archives a resolved issue id", async () => {
+			const graphQLService = new GraphQLService("token");
+			const linearService = new LinearService("token");
+			vi.spyOn(linearService, "resolveIssueId").mockResolvedValue("uuid-1");
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValue({
+					issueArchive: {
+						success: true,
+						entity: { id: "uuid-1" },
+						lastSyncId: 1,
+					},
+				});
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			const result = await service.archiveIssue("DEV-1");
+
+			expect(rawRequest).toHaveBeenCalledWith(
+				expect.stringContaining("issueArchive"),
+				{
+					id: "uuid-1",
+				},
+			);
+			expect(result).toEqual({
+				id: "uuid-1",
+				entity: { id: "uuid-1" },
+				lastSyncId: 1,
+			});
+		});
+
+		it("deletes an issue with permanent deletion flag", async () => {
+			const graphQLService = new GraphQLService("token");
+			const linearService = new LinearService("token");
+			vi.spyOn(linearService, "resolveIssueId").mockResolvedValue("uuid-1");
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValue({
+					issueDelete: {
+						success: true,
+						entity: null,
+						lastSyncId: 2,
+					},
+				});
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			const result = await service.deleteIssue("DEV-1", {
+				permanentlyDelete: true,
+			});
+
+			expect(rawRequest).toHaveBeenCalledWith(
+				expect.stringContaining("issueDelete"),
+				{
+					id: "uuid-1",
+					permanentlyDelete: true,
+				},
+			);
+			expect(result).toEqual({
+				id: "uuid-1",
+				entity: undefined,
+				lastSyncId: 2,
+			});
+		});
+	});
+
 	describe("resolveTeamId (via internal access)", () => {
 		it("returns team ID when GraphQL exact match succeeds", async () => {
 			const service = createService();

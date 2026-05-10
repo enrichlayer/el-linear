@@ -151,6 +151,26 @@ export interface UpdateIssueResponse {
 	};
 }
 
+export interface IssueArchiveEntity {
+	id: string;
+}
+
+export interface IssueArchivePayload {
+	success: boolean;
+	lastSyncId: number;
+	entity: IssueArchiveEntity | null;
+}
+
+/** Response shape for `ARCHIVE_ISSUE_MUTATION`. */
+export interface ArchiveIssueResponse {
+	issueArchive: IssueArchivePayload;
+}
+
+/** Response shape for `DELETE_ISSUE_MUTATION`. */
+export interface DeleteIssueResponse {
+	issueDelete: IssueArchivePayload;
+}
+
 /** Response shape for `GET_ISSUE_TEAM_QUERY`. */
 export interface GetIssueTeamResponse {
 	issue: {
@@ -183,6 +203,93 @@ export interface RelationIncomingNode {
 	id: string;
 	type: string;
 	issue: RelationPeerNode | null;
+}
+
+// ── BATCH_RESOLVE_FOR_{CREATE,SEARCH,UPDATE} response shapes ────
+//
+// The three batch-resolve queries select overlapping but distinct
+// subsets of the same entities (teams, projects, milestones, users,
+// issues, labels). The service merges the chosen batch query result
+// with a separate label-resolution query result into a single
+// `resolveResult` blob threaded through ~10 helper methods.
+//
+// Rather than three rigid types + force-casts at the merge points,
+// we model a single `BatchResolveResult` whose fields are all
+// optional — each consumer reads only the fields its query selected,
+// missing fields show up as `undefined` (the existing helpers
+// already handle that path with `?.nodes ?? []`).
+//
+// The per-query response wrappers below are typed exactly to what
+// each query selects, so the rawRequest call sites stay strict.
+
+export interface BatchResolveProjectMilestoneRef {
+	id: string;
+	name: string;
+}
+
+export interface BatchResolveProjectNode {
+	id: string;
+	name: string;
+	/** Present on `BATCH_RESOLVE_FOR_CREATE_QUERY`. */
+	teams?: { nodes: { id: string; key: string }[] };
+	/** Present on `BATCH_RESOLVE_FOR_CREATE_QUERY` and `BATCH_RESOLVE_FOR_UPDATE_QUERY`. */
+	projectMilestones?: { nodes: BatchResolveProjectMilestoneRef[] };
+}
+
+export interface BatchResolveLabelNode {
+	id: string;
+	name: string;
+	isGroup: boolean;
+	team: { id: string } | null;
+}
+
+export interface BatchResolveIssueForUpdate {
+	id: string;
+	identifier: string;
+	team: { id: string; key: string } | null;
+	labels: { nodes: { id: string; name: string }[] };
+	project: {
+		id: string;
+		projectMilestones: { nodes: BatchResolveProjectMilestoneRef[] };
+	} | null;
+}
+
+export interface BatchResolveForCreateResponse {
+	teams: { nodes: { id: string; key: string; name: string }[] };
+	projects: { nodes: BatchResolveProjectNode[] };
+	milestones: { nodes: BatchResolveProjectMilestoneRef[] };
+	parentIssues: { nodes: { id: string; identifier: string }[] };
+}
+
+export interface BatchResolveForSearchResponse {
+	teams: { nodes: { id: string; key: string; name: string }[] };
+	projects: { nodes: BatchResolveProjectNode[] };
+	users: { nodes: { id: string; name: string; email: string }[] };
+}
+
+export interface BatchResolveForUpdateResponse {
+	projects: { nodes: BatchResolveProjectNode[] };
+	milestones: { nodes: BatchResolveProjectMilestoneRef[] };
+	issues: { nodes: BatchResolveIssueForUpdate[] };
+}
+
+export interface ResolveLabelsByNameResponse {
+	labels: { nodes: BatchResolveLabelNode[] };
+}
+
+/**
+ * Merged blob threaded through the field-resolution helpers. All
+ * fields are optional because the helpers don't know which batch
+ * query produced the result — they read only what they need.
+ */
+export interface BatchResolveResult {
+	teams?: { nodes: { id: string; key: string; name: string }[] };
+	projects?: { nodes: BatchResolveProjectNode[] };
+	milestones?: { nodes: BatchResolveProjectMilestoneRef[] };
+	parentIssues?: { nodes: { id: string; identifier: string }[] };
+	users?: { nodes: { id: string; name: string; email: string }[] };
+	issues?: { nodes: BatchResolveIssueForUpdate[] };
+	labels?: { nodes: BatchResolveLabelNode[] };
 }
 
 /** Response shape for `GET_ISSUE_RELATIONS_QUERY`. */
