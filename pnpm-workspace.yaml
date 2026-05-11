@@ -1,0 +1,8 @@
+# Defense-in-depth against fast-yank supply-chain attacks: pnpm refuses
+# to install any package version younger than this many minutes. This
+# protects `pnpm install` / `pnpm update` runs even when dependabot
+# isn't in the loop. 10080 = 7 * 24 * 60 (7 days).
+#
+# Matches the dependabot `cooldown.default-days: 7` in
+# .github/dependabot.yml. Bump both together if you change the policy.
+minimumReleaseAge: 10080
