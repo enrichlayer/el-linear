@@ -17,6 +17,7 @@
  */
 
 import { getApiToken } from "../utils/auth.js";
+import { sanitizeForLog } from "../utils/sanitize-for-log.js";
 import { withFileLock } from "./oauth-fs.js";
 import {
 	type OAuthState,
@@ -134,8 +135,12 @@ export async function ensureFreshAccessToken(
 			);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
+			// Sanitize again here even though refreshTokens already does
+			// so at source — defense in depth, in case a future caller
+			// (or a wrapper that catches+rethrows) inserts an unsanitized
+			// stage into the error chain (DEV-4065).
 			throw new Error(
-				`OAuth refresh failed: ${message}. Re-run \`el-linear init oauth\` to re-authorize.`,
+				`OAuth refresh failed: ${sanitizeForLog(message)}. Re-run \`el-linear init oauth\` to re-authorize.`,
 			);
 		}
 
