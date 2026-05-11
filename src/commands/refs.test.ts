@@ -336,4 +336,45 @@ describe("refs wrap (CLI integration)", () => {
 
 		expect(captured).toBe(`real [DEV-100](${url("DEV-100")}) vs ISO-1424`);
 	});
+
+	it("accepts a single positional arg as input text", async () => {
+		setupResolverWith(["DEV-100"]);
+
+		await runCommand(program, ["refs", "wrap", "see DEV-100 for context"]);
+
+		expect(captured).toBe(`see [DEV-100](${url("DEV-100")}) for context`);
+	});
+
+	it("joins multiple positional args with a single space", async () => {
+		setupResolverWith(["DEV-100", "DEV-200"]);
+
+		await runCommand(program, ["refs", "wrap", "DEV-100", "and", "DEV-200"]);
+
+		expect(captured).toBe(
+			`[DEV-100](${url("DEV-100")}) and [DEV-200](${url("DEV-200")})`,
+		);
+	});
+
+	it("positional args take precedence over --file", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "linctl-refs-"));
+		const file = join(dir, "input.md");
+		writeFileSync(file, "from-file DEV-999", "utf8");
+		setupResolverWith(["DEV-100"]);
+
+		try {
+			await runCommand(program, [
+				"refs",
+				"wrap",
+				"--file",
+				file,
+				"positional DEV-100",
+			]);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+
+		// Positional won; --file was ignored. DEV-999 from --file does not appear.
+		expect(captured).toBe(`positional [DEV-100](${url("DEV-100")})`);
+		expect(captured).not.toContain("DEV-999");
+	});
 });

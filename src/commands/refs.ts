@@ -82,6 +82,7 @@ interface HandleWrapOptions extends OptionValues {
 }
 
 async function handleWrap(
+	textArgs: string[],
 	options: HandleWrapOptions,
 	command: Command,
 ): Promise<void> {
@@ -94,10 +95,15 @@ async function handleWrap(
 	// `validate` is `true` by default and `false` when `--no-validate` is passed.
 	const validate = options.validate !== false;
 
+	// Input precedence: positional args > --file > stdin. Positional args are
+	// the most direct path (`el-linear refs wrap "DEV-100 ..."`) and match what
+	// users naturally try; --file and stdin remain for piped / large bodies.
 	const text =
-		typeof options.file === "string" && options.file.length > 0
-			? readFileSync(options.file, "utf8")
-			: await readAllStdin();
+		textArgs.length > 0
+			? textArgs.join(" ")
+			: typeof options.file === "string" && options.file.length > 0
+				? readFileSync(options.file, "utf8")
+				: await readAllStdin();
 
 	const rootOpts = getRootOpts(command);
 
@@ -143,9 +149,14 @@ export function setupRefsCommands(program: Command): void {
 		.command("wrap")
 		.description(
 			"Wrap recognized Linear issue identifiers in input text as links. " +
-				"Reads from stdin (or --file) and writes to stdout. By default, " +
-				"each candidate identifier is validated against the workspace; " +
-				"unresolvable ones are left as plain text.",
+				"Reads input from positional args, --file, or stdin (in that order). " +
+				"Writes the result to stdout. By default, each candidate identifier " +
+				"is validated against the workspace; unresolvable ones are left as " +
+				"plain text.",
+		)
+		.argument(
+			"[text...]",
+			"input text — overrides stdin/--file; multiple positional args are joined with a single space",
 		)
 		.option("--file <path>", "read input from a file instead of stdin")
 		.option(
