@@ -51,7 +51,7 @@ interface LinearTokenResponse {
 	refresh_token?: string;
 }
 
-export interface ExchangeCodeInput {
+interface ExchangeCodeInput {
 	clientId: string;
 	clientSecret?: string;
 	code: string;
@@ -59,13 +59,13 @@ export interface ExchangeCodeInput {
 	codeVerifier: string;
 }
 
-export interface RefreshTokensInput {
+interface RefreshTokensInput {
 	clientId: string;
 	clientSecret?: string;
 	refreshToken: string;
 }
 
-export interface RevokeTokenInput {
+interface RevokeTokenInput {
 	accessToken: string;
 }
 

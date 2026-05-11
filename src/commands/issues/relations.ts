@@ -26,7 +26,7 @@ type CreatedIssueRelation = NonNullable<
 	IssueRelationCreateResponse["issueRelationCreate"]["issueRelation"]
 >;
 
-export function transformIssueRelation(
+function transformIssueRelation(
 	rel: CreatedIssueRelation,
 ): LinearIssueRelation {
 	return {
@@ -117,14 +117,14 @@ export interface RelatedIssueEntry {
  * DEV-100 "blocks" DEV-200, and we query DEV-200, the inverse relation
  * type is "blocks" but direction is incoming → "blockedBy".
  */
-export function normalizeInverseType(type: string): string {
+function normalizeInverseType(type: string): string {
 	if (type === "blocks") {
 		return "blockedBy";
 	}
 	return type;
 }
 
-export function buildRelatedIssueSummary(
+function buildRelatedIssueSummary(
 	peer: RelationPeerNode,
 ): RelatedIssueEntry["issue"] {
 	return {

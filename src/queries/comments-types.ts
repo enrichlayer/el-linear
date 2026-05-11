@@ -3,7 +3,7 @@
  * See `./issues-types.ts` for the rationale (ALL-937).
  */
 
-export interface CommentUserRef {
+interface CommentUserRef {
 	id: string;
 	name: string;
 	displayName: string | null;
@@ -23,7 +23,7 @@ export interface CommentNode {
 	user: CommentUserRef;
 }
 
-export interface UpdatedCommentNode extends CommentNode {
+interface UpdatedCommentNode extends CommentNode {
 	issue: {
 		id: string;
 		identifier: string;

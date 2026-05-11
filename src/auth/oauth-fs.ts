@@ -38,7 +38,7 @@ export async function atomicWrite(
 	}
 }
 
-export interface FileLockOptions {
+interface FileLockOptions {
 	/** Treat a lock older than this as crashed and steal it. Default 30s. */
 	staleAfterMs?: number;
 	/** Maximum time to wait for the lock before giving up. Default 30s. */

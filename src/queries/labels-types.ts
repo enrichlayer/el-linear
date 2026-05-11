@@ -3,19 +3,19 @@
  * See `./issues-types.ts` for the rationale (ALL-937).
  */
 
-export interface LabelTeamRef {
+interface LabelTeamRef {
 	id: string;
 	key: string;
 	name: string;
 }
 
-export interface LabelParentRef {
+interface LabelParentRef {
 	id: string;
 	name: string;
 }
 
 /** Mirrors the issueLabel selection set on `CREATE_LABEL_MUTATION`. */
-export interface CreatedLabelNode {
+interface CreatedLabelNode {
 	id: string;
 	name: string;
 	color: string;
@@ -24,7 +24,7 @@ export interface CreatedLabelNode {
 }
 
 /** Mirrors the issueLabel selection set on `RETIRE_LABEL_MUTATION`. */
-export interface RetiredLabelNode {
+interface RetiredLabelNode {
 	id: string;
 	name: string;
 	color: string;
@@ -33,14 +33,14 @@ export interface RetiredLabelNode {
 }
 
 /** Mirrors the issueLabel selection set on `RESTORE_LABEL_MUTATION`. */
-export interface RestoredLabelNode {
+interface RestoredLabelNode {
 	id: string;
 	name: string;
 	color: string;
 	team: LabelTeamRef | null;
 }
 
-export interface ParentLabelNode {
+interface ParentLabelNode {
 	id: string;
 	name: string;
 	isGroup: boolean;

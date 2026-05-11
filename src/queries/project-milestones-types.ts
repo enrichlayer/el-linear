@@ -10,7 +10,7 @@
 
 import type { IssueNode } from "./issues-types.js";
 
-export interface MilestoneProjectRef {
+interface MilestoneProjectRef {
 	id: string;
 	name: string;
 }
@@ -19,7 +19,7 @@ export interface MilestoneProjectRef {
  * Mirrors the milestone selection set in `LIST_PROJECT_MILESTONES_QUERY`
  * — full milestone fields without the project-back-reference.
  */
-export interface MilestoneListNode {
+interface MilestoneListNode {
 	id: string;
 	name: string;
 	description: string | null;
@@ -33,7 +33,7 @@ export interface MilestoneListNode {
  * Mirrors the milestone selection set in `GET_PROJECT_MILESTONE_BY_ID_QUERY`
  * — list shape + project + issues connection.
  */
-export interface MilestoneDetailNode extends MilestoneListNode {
+interface MilestoneDetailNode extends MilestoneListNode {
 	project: MilestoneProjectRef;
 	issues: { nodes: IssueNode[] };
 }
@@ -54,7 +54,7 @@ export interface MilestoneLookupNode {
  * Mirrors the milestone selection set on the create / update mutations —
  * list shape + project (no issues connection).
  */
-export interface MutatedMilestoneNode extends MilestoneListNode {
+interface MutatedMilestoneNode extends MilestoneListNode {
 	project: MilestoneProjectRef;
 }
 

@@ -23,15 +23,7 @@ export const ALIASES_PROGRESS_PATH = path.join(
  * because of an npm collision with `dorkitude/linctl`. Reads check the new
  * path first and fall back to these. Writes always go to the new path.
  */
-export const LEGACY_LINCTL_CONFIG_DIR = path.join(
-	os.homedir(),
-	".config",
-	"linctl",
-);
-export const LEGACY_LINCTL_CONFIG_PATH = path.join(
-	LEGACY_LINCTL_CONFIG_DIR,
-	"config.json",
-);
+const LEGACY_LINCTL_CONFIG_DIR = path.join(os.homedir(), ".config", "linctl");
 export const LEGACY_LINCTL_TOKEN_PATH = path.join(
 	LEGACY_LINCTL_CONFIG_DIR,
 	"token",

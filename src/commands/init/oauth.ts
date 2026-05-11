@@ -104,7 +104,7 @@ export interface OAuthStepOptions {
 	validateViewer?: (oauthToken: string) => Promise<ViewerResponse["viewer"]>;
 }
 
-export interface OAuthStepResult {
+interface OAuthStepResult {
 	state: OAuthState;
 	viewer: ViewerResponse["viewer"];
 }

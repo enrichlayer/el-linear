@@ -2,9 +2,7 @@ import type { Command } from "commander";
 import { downloadLinearUploads } from "../utils/download-uploads.js";
 import { extractField } from "../utils/extract-field.js";
 import { createFileService } from "../utils/file-service.js";
-import { GraphQLIssuesService } from "../utils/graphql-issues-service.js";
-import { createGraphQLService } from "../utils/graphql-service.js";
-import { createLinearService } from "../utils/linear-service.js";
+import { createIssuesService } from "../utils/issues-service-bootstrap.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
 import { getRootOpts } from "../utils/root-opts.js";
 
@@ -87,9 +85,7 @@ export async function readIssues(
 	command: Command,
 ): Promise<void> {
 	const rootOpts = getRootOpts(command);
-	const graphQLService = await createGraphQLService(rootOpts);
-	const linearService = await createLinearService(rootOpts);
-	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
+	const { issuesService } = await createIssuesService(rootOpts);
 	const fileService = await createFileService(rootOpts);
 
 	const fieldName = typeof options.field === "string" ? options.field : null;

@@ -30,12 +30,12 @@ import type {
 import { createFileService } from "../utils/file-service.js";
 import { applyFooter } from "../utils/footer.js";
 import { createGraphQLAttachmentsService } from "../utils/graphql-attachments-service.js";
-import {
-	GraphQLIssuesService,
-	type SearchIssueArgs,
-	type UpdateIssueArgs,
+import type {
+	SearchIssueArgs,
+	UpdateIssueArgs,
 } from "../utils/graphql-issues-service.js";
 import { createGraphQLService } from "../utils/graphql-service.js";
+import { createIssuesService } from "../utils/issues-service-bootstrap.js";
 import { createLinearService } from "../utils/linear-service.js";
 import { logger } from "../utils/logger.js";
 import {
@@ -222,9 +222,7 @@ async function handleListIssues(
 		options.labels = options.label;
 	}
 	const rootOpts = getRootOpts(command);
-	const graphQLService = await createGraphQLService(rootOpts);
-	const linearService = await createLinearService(rootOpts);
-	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
+	const { issuesService } = await createIssuesService(rootOpts);
 
 	const hasFilters =
 		options.team ||
@@ -275,9 +273,7 @@ async function handleSearchIssues(
 		options.labels = options.label;
 	}
 	const rootOpts = getRootOpts(command);
-	const graphQLService = await createGraphQLService(rootOpts);
-	const linearService = await createLinearService(rootOpts);
-	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
+	const { issuesService } = await createIssuesService(rootOpts);
 
 	const searchArgs: SearchIssueArgs = {
 		query,
@@ -496,9 +492,8 @@ async function handleCreateIssue(
 			noFooter,
 		}) ?? "";
 
-	const graphQLService = await createGraphQLService(rootOpts);
-	const linearService = await createLinearService(rootOpts);
-	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
+	const { graphQLService, linearService, issuesService } =
+		await createIssuesService(rootOpts);
 
 	// Wrap valid issue identifiers as markdown links before creating, so the description
 	// saved on Linear has clickable refs from the start. Self-reference can't apply here
@@ -712,8 +707,8 @@ async function handleUpdateIssue(
 	}
 	validateUpdateOptions(options);
 	const rootOpts = getRootOpts(command);
-	const graphQLService = await createGraphQLService(rootOpts);
-	const linearService = await createLinearService(rootOpts);
+	const { graphQLService, linearService, issuesService } =
+		await createIssuesService(rootOpts);
 
 	if (options.appendDescription) {
 		const resolved = await linearService.resolveIssueId(issueId);
@@ -754,7 +749,6 @@ async function handleUpdateIssue(
 		options.description = prepared.description;
 	}
 
-	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
 	const assigneeId = options.assignee
 		? await resolveAssignee(options.assignee, rootOpts)
 		: undefined;
@@ -783,9 +777,7 @@ async function handleArchiveIssue(
 	command: Command,
 ): Promise<void> {
 	const rootOpts = getRootOpts(command);
-	const graphQLService = await createGraphQLService(rootOpts);
-	const linearService = await createLinearService(rootOpts);
-	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
+	const { issuesService } = await createIssuesService(rootOpts);
 	const result = await issuesService.archiveIssue(issueId);
 	outputSuccess({
 		success: true,
@@ -800,9 +792,7 @@ async function handleDeleteIssue(
 	command: Command,
 ): Promise<void> {
 	const rootOpts = getRootOpts(command);
-	const graphQLService = await createGraphQLService(rootOpts);
-	const linearService = await createLinearService(rootOpts);
-	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
+	const { issuesService } = await createIssuesService(rootOpts);
 	const permanentlyDelete = Boolean(options.permanentlyDelete || options.hard);
 	const result = await issuesService.deleteIssue(issueId, {
 		permanentlyDelete,
@@ -862,9 +852,7 @@ async function handleRetrolink(
 			: `Retrolinked from branch: ${currentBranch}`;
 
 	const rootOpts = getRootOpts(command);
-	const graphQLService = await createGraphQLService(rootOpts);
-	const linearService = await createLinearService(rootOpts);
-	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
+	const { issuesService } = await createIssuesService(rootOpts);
 
 	let result: LinearIssue;
 

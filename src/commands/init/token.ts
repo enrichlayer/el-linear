@@ -42,7 +42,7 @@ interface ViewerResponse {
 	};
 }
 
-export interface TokenStepResult {
+interface TokenStepResult {
 	token: string;
 	viewer: ViewerResponse["viewer"];
 }

@@ -25,7 +25,7 @@ interface TeamsResponse {
 	teams: { nodes: Array<{ id: string; key: string; name: string }> };
 }
 
-export interface WorkspaceStepResult {
+interface WorkspaceStepResult {
 	workspaceUrlKey: string;
 	defaultTeam: string | undefined;
 	teams: Record<string, string>;

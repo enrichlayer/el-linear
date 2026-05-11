@@ -17,7 +17,7 @@ import { CONFIG_DIR, resolveActiveProfile } from "../config/paths.js";
 import { atomicWrite } from "./oauth-fs.js";
 
 export const OAUTH_STATE_VERSION = 1;
-export const OAUTH_STATE_FILENAME = "oauth.json";
+const OAUTH_STATE_FILENAME = "oauth.json";
 
 /**
  * Persisted OAuth state. Mirrors what we got back from Linear's token

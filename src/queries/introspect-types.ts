@@ -8,42 +8,42 @@
  * shallowly — only as deep as the queries actually select.
  */
 
-export interface IntrospectTypeRefShallow {
+interface IntrospectTypeRefShallow {
 	name: string | null;
 	kind: string;
 	ofType: { name: string | null } | null;
 }
 
-export interface IntrospectTypeRef {
+interface IntrospectTypeRef {
 	name: string | null;
 	kind: string;
 	ofType: IntrospectTypeRefShallow | null;
 }
 
-export interface IntrospectArg {
+interface IntrospectArg {
 	name: string;
 	type: IntrospectTypeRef;
 }
 
-export interface IntrospectField {
+interface IntrospectField {
 	name: string;
 	description: string | null;
 	type: IntrospectTypeRef;
 	args: IntrospectArg[];
 }
 
-export interface IntrospectEnumValue {
+interface IntrospectEnumValue {
 	name: string;
 	description: string | null;
 }
 
-export interface IntrospectInputField {
+interface IntrospectInputField {
 	name: string;
 	type: IntrospectTypeRef;
 }
 
 /** Mirrors the inner `__type` shape selected by `INTROSPECT_TYPE_QUERY`. */
-export interface IntrospectTypeNode {
+interface IntrospectTypeNode {
 	name: string;
 	kind: string;
 	description: string | null;

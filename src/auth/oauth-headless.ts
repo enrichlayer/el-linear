@@ -19,7 +19,7 @@
 import { input } from "@inquirer/prompts";
 import { type CallbackParams, parseCallbackUrl } from "./oauth-client.js";
 
-export interface PromptForPastedCodeOptions {
+interface PromptForPastedCodeOptions {
 	expectedState: string;
 	/**
 	 * Allow the user to paste a bare authorization code without a

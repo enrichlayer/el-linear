@@ -25,7 +25,6 @@ import type {
 	BatchResolveResult,
 	CreateIssueResponse,
 	DeleteIssueResponse,
-	FilteredSearchIssuesResponse,
 	GetIssueByIdentifierResponse,
 	GetIssueByIdResponse,
 	GetIssuesResponse,
@@ -87,52 +86,21 @@ export interface SearchIssueArgs {
 }
 
 /**
- * Arguments accepted by `GraphQLIssuesService.updateIssue`. Same
- * field shapes as `CreateIssueArgs` (UUID-or-name where applicable),
- * but with `id` required (the issue to update) and `subscriberIds` /
- * `templateId` omitted (not valid on update).
- */
-export interface UpdateIssueArgs {
-	/** Issue identifier (e.g. `DEV-3592`) or UUID. Required. */
-	id: string;
-	title?: string;
-	description?: string;
-	/** Assignee name, email, alias, or UUID. */
-	assigneeId?: string;
-	priority?: LinearPriority;
-	projectId?: string;
-	statusId?: string;
-	/**
-	 * Hint for the team-aware label resolver when the issue is being
-	 * moved between teams.
-	 */
-	teamId?: string;
-	labelIds?: string[];
-	parentId?: string;
-	milestoneId?: string;
-	cycleId?: string | null;
-	dueDate?: string;
-	estimate?: number;
-}
-
-/**
- * Arguments accepted by `GraphQLIssuesService.createIssue`. Most fields
- * may be passed as a Linear UUID OR a name/identifier — the service
- * resolves names to UUIDs against the workspace before issuing the
- * mutation. The few fields that must already be UUIDs are noted on
- * the property docstring.
+ * Fields shared by `CreateIssueArgs` and `UpdateIssueArgs`. Both mutations
+ * accept the same scalar/foreign-key fields — only their lifecycle
+ * fields differ. `Create` adds `teamInput`/`subscriberIds`/`templateId`
+ * (initial-state-only); `Update` adds the required `id` and widens
+ * `cycleId` to `| null` (Linear's API uses `null` to detach from a
+ * cycle on update).
  *
- * Pre-fix this was `Record<string, unknown>` and every command-side
- * caller built up a free-form object. A typo in `assigeeId` vs
- * `assigneeId` compiled cleanly and silently dropped the field. With
- * the typed shape, `tsc` catches the typo.
+ * Pre-fix this lived as two parallel 13-field interfaces. A field added
+ * to one would silently diverge from the other; the shared base now
+ * forces a deliberate per-side decision.
  */
-export interface CreateIssueArgs {
+interface IssueMutationFields {
 	title?: string;
-	/** Team key, name, or UUID. Required unless `templateId` is set. */
+	/** Team key, name, or UUID. Required on create unless `templateId` is set. */
 	teamId?: string;
-	/** Original team token (key or name) — used in label resolution error messages. */
-	teamInput?: string;
 	description?: string;
 	/** Assignee name, email, alias, or UUID. */
 	assigneeId?: string;
@@ -148,14 +116,47 @@ export interface CreateIssueArgs {
 	parentId?: string;
 	/** Project milestone name or UUID — resolved within the project. */
 	milestoneId?: string;
-	/** Cycle number, name, or UUID — resolved per team. */
-	cycleId?: string;
-	/** Subscriber names, emails, aliases, or UUIDs. */
-	subscriberIds?: string[];
 	/** Due date, ISO 8601. */
 	dueDate?: string;
 	/** Story-points / estimate. */
 	estimate?: number;
+}
+
+/**
+ * Arguments accepted by `GraphQLIssuesService.updateIssue`. Same field
+ * shapes as `CreateIssueArgs` (UUID-or-name where applicable), but with
+ * `id` required (the issue to update) and the create-only initial-state
+ * fields (`teamInput` / `subscriberIds` / `templateId`) omitted.
+ */
+export interface UpdateIssueArgs extends IssueMutationFields {
+	/** Issue identifier (e.g. `DEV-3592`) or UUID. Required. */
+	id: string;
+	/**
+	 * On update, `null` detaches the issue from its current cycle.
+	 * (`undefined` leaves it unchanged; a UUID/number/name moves it.)
+	 */
+	cycleId?: string | null;
+}
+
+/**
+ * Arguments accepted by `GraphQLIssuesService.createIssue`. Most fields
+ * may be passed as a Linear UUID OR a name/identifier — the service
+ * resolves names to UUIDs against the workspace before issuing the
+ * mutation. The few fields that must already be UUIDs are noted on
+ * the property docstring.
+ *
+ * Pre-fix this was `Record<string, unknown>` and every command-side
+ * caller built up a free-form object. A typo in `assigeeId` vs
+ * `assigneeId` compiled cleanly and silently dropped the field. With
+ * the typed shape, `tsc` catches the typo.
+ */
+export interface CreateIssueArgs extends IssueMutationFields {
+	/** Original team token (key or name) — used in label resolution error messages. */
+	teamInput?: string;
+	/** Cycle number, name, or UUID — resolved per team. (No `null` on create.) */
+	cycleId?: string;
+	/** Subscriber names, emails, aliases, or UUIDs. */
+	subscriberIds?: string[];
 	/** Linear server-side template UUID for `--from-template`. */
 	templateId?: string;
 }
@@ -603,7 +604,7 @@ export class GraphQLIssuesService {
 			priority: args.priority,
 		});
 		const searchResult =
-			await this.graphQLService.rawRequest<FilteredSearchIssuesResponse>(
+			await this.graphQLService.rawRequest<GetIssuesResponse>(
 				FILTERED_SEARCH_ISSUES_QUERY,
 				{
 					first: limit,
