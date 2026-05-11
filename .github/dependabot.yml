@@ -6,6 +6,15 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    # Supply-chain safety: don't open PRs for versions younger than the
+    # cooldown window. Catches fast-yank windows (event-stream-style)
+    # and gives the npm ecosystem time to surface compromise reports
+    # before we install. Majors get extra soak — bigger blast radius.
+    cooldown:
+      default-days: 7
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 7
     groups:
       dev-dependencies:
         dependency-type: development
@@ -15,3 +24,5 @@ updates:
     directory: "/"
     schedule:
       interval: monthly
+    cooldown:
+      default-days: 7
