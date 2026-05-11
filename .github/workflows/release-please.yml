@@ -3,7 +3,23 @@ name: release-please
 # On push to main, release-please scans conventional commits since the last
 # release and opens (or updates) a "Release vX.Y.Z" PR with the version bump
 # in package.json + the new CHANGELOG entry. Merging that PR tags vX.Y.Z,
-# which then triggers the existing release.yml workflow to publish to npm.
+# which then triggers the release.yml workflow to publish to the registry.
+#
+# Token: authenticate the action with a PAT (`RELEASE_PLEASE_TOKEN`) so that
+# the tag push fires `release.yml`. GitHub's automatic `GITHUB_TOKEN` is
+# intentionally muted on tag pushes it creates — that's why an earlier
+# 1.10.0 release stalled with no registry publish until the tag was
+# re-pushed by hand. With a PAT the chain runs end-to-end without
+# intervention.
+#
+# Setup (one-time per repo):
+#   1. Generate a fine-grained PAT scoped to this repo with:
+#      - Contents:      Read + Write
+#      - Pull requests: Read + Write
+#      - Workflows:     Read + Write   (this lets tag pushes trigger workflows)
+#   2. Add it as a repo secret named `RELEASE_PLEASE_TOKEN`.
+# If the secret is absent the action falls back to `GITHUB_TOKEN` and the
+# tag-push → publish chain will need a manual nudge (delete + re-push tag).
 #
 # Safety: this workflow uses no untrusted inputs in run: blocks. The
 # release-please action handles all PR-body / commit-message parsing
@@ -28,3 +44,4 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
