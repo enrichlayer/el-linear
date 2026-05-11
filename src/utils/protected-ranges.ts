@@ -37,19 +37,71 @@ const ANGLE_AUTOLINK_REGEX = /<[^>\s]+>/g;
 // components (e.g. "https://github.com/foo/DEV-100") don't get
 // processed.
 //
-// The character class excludes ASCII closing-bracket / quote chars
-// that CommonMark treats as bare-URL terminators: `)`, `]`, `}`,
-// `>`, `"`. This terminates the URL at the bracket regardless of
-// whether whitespace follows — so both `foo) DEV-100` (with space)
-// and `foo)DEV-100bar` (no space) expose the trailing identifier to
-// auto-link extraction.
+// Match strategy follows CommonMark's "extended autolink" rule:
 //
-// Pre-fix the regex was `https?:\/\/\S+`, which greedily consumed up
-// to the next whitespace and silently hid identifiers in position-
-// dependent prose. A prior fix used a trailing-punctuation lookahead
-// that only worked when whitespace followed the terminator; this
-// character-class form is symmetric (no whitespace required).
-const BARE_URL_REGEX = /https?:\/\/[^\s<>"()\]}]+/g;
+// 1. Greedy match up to whitespace or angle/quote terminators
+//    (`<`, `>`, `"`). Parens and brackets stay IN the match — they
+//    appear inside legitimate URLs (Wikipedia article paths, Next.js
+//    route groups like `/docs/app/(group)/page`, CDN signing-key
+//    query strings, etc.).
+// 2. Post-process via `trimBareUrlTrailingPunct` to strip UNBALANCED
+//    trailing brackets and stand-alone punctuation. So
+//    `https://example.com/foo)DEV-100` correctly terminates at
+//    `…foo` (the closing paren is unbalanced — no opener inside the
+//    match), while `https://en.wikipedia.org/wiki/Foo_(bar)` keeps
+//    its balanced parens intact.
+//
+// Pre-fix `https?:\/\/\S+` greedily consumed everything to the next
+// whitespace and silently hid identifiers in position-dependent
+// prose. A char-class exclusion of `)`, `]`, `}` over-corrected and
+// broke Wikipedia / route-group URLs (cycle 2 finding on PR #75).
+// The balanced-paren trim is the CommonMark-faithful middle ground.
+const BARE_URL_REGEX = /https?:\/\/[^\s<>"]+/g;
+
+/**
+ * Find the first position in `s` where a close-bracket character
+ * appears without a matching opener earlier in the string. Returns
+ * `s.length` if all close-brackets are balanced. Used to truncate
+ * a bare-URL match at the first unbalanced `)`, `]`, or `}` —
+ * exactly the position CommonMark treats as the URL terminator.
+ */
+function firstUnbalancedClose(s: string): number {
+	let parenDepth = 0;
+	let brackDepth = 0;
+	let braceDepth = 0;
+	for (let i = 0; i < s.length; i++) {
+		const ch = s[i];
+		if (ch === "(") parenDepth++;
+		else if (ch === ")") {
+			if (parenDepth === 0) return i;
+			parenDepth--;
+		} else if (ch === "[") brackDepth++;
+		else if (ch === "]") {
+			if (brackDepth === 0) return i;
+			brackDepth--;
+		} else if (ch === "{") braceDepth++;
+		else if (ch === "}") {
+			if (braceDepth === 0) return i;
+			braceDepth--;
+		}
+	}
+	return s.length;
+}
+
+function trimBareUrlTrailingPunct(url: string): string {
+	// First: truncate at the first unbalanced bracket. So
+	// `https://example.com/foo)DEV-100` (no `(` opener inside) terminates
+	// at the `)` regardless of what follows it; `Foo_(bar)/DEV` keeps
+	// the balanced `(bar)` intact.
+	let trimmed = url.slice(0, firstUnbalancedClose(url));
+	// Then: strip standard trailing sentence-terminators (`.`, `,`, `;`,
+	// `:`, `!`, `?`). These never appear in legitimate URL paths at the
+	// very end, but they're commonly adjacent to URLs in prose.
+	while (trimmed.length > 0 && /[.,;:!?]$/.test(trimmed)) {
+		trimmed = trimmed.slice(0, -1);
+	}
+	return trimmed;
+}
 
 export interface ProtectedRange {
 	end: number;
@@ -76,12 +128,18 @@ export function findProtectedRanges(text: string): ProtectedRange[] {
 		// clarity here.
 		SLACK_LINK_REGEX,
 		ANGLE_AUTOLINK_REGEX,
-		BARE_URL_REGEX,
 	]) {
 		for (const m of text.matchAll(re)) {
 			const start = m.index ?? 0;
 			ranges.push({ start, end: start + m[0].length });
 		}
+	}
+	// Bare URLs need the trailing-punctuation trim that's hard to express
+	// in pure regex (depends on bracket-balance inside the match).
+	for (const m of text.matchAll(BARE_URL_REGEX)) {
+		const start = m.index ?? 0;
+		const trimmed = trimBareUrlTrailingPunct(m[0]);
+		ranges.push({ start, end: start + trimmed.length });
 	}
 	return ranges;
 }

@@ -25,9 +25,12 @@ const ATX_HEADER_RE = /^(?:#{1,6})\s+([^\n]+?)(?::\s*)?\s*$/;
 const BOLD_PSEUDO_HEADER_RE = /^\*\*([^*\n]+?)(?::\s*)?\*\*\s*$/;
 
 // Fenced code block delimiters per CommonMark: at least three backticks or
-// tildes at the start of a line. We toggle an inFence flag while scanning so
-// section headers inside code samples don't terminate the real section.
-const FENCE_RE = /^[ \t]*(`{3,}|~{3,})/;
+// tildes at the start of a line, with up to 3 leading SPACES of indent (4+
+// is an indented code block, which is a different construct; tabs are not
+// permitted as fence indent per the CommonMark spec). We toggle an inFence
+// flag while scanning so section headers inside code samples don't
+// terminate the real section.
+const FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
 
 function normalize(s: string): string {
 	return s.toLowerCase().trim().replace(/\s+/g, " ");
