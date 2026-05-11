@@ -12,8 +12,8 @@ importers:
         specifier: ^8.4.2
         version: 8.4.2(@types/node@25.6.0)
       '@linear/sdk':
-        specifier: ^83.0.0
-        version: 83.0.0(graphql@16.13.2)
+        specifier: ^84.0.0
+        version: 84.0.0(graphql@16.13.2)
       commander:
         specifier: ^14.0.0
         version: 14.0.3
@@ -402,8 +402,8 @@ packages:
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
 
-  '@linear/sdk@83.0.0':
-    resolution: {integrity: sha512-/M1FETZfA8U7WrNvBavO+/fkWrIV49/G0g3w/57q2h/K/1FtVmskXpsvSvQXuGJr2njJmAQbygF3yNi/AJ5Jag==}
+  '@linear/sdk@84.0.0':
+    resolution: {integrity: sha512-jPtGlY06zG86ba6cL78d4JB9m61YMHo3L0luMrtVFgeOounI/GK3S3c6Ncjw7cxWzcsepoNZD10mQYoT81uKKA==}
     engines: {node: '>=18.x'}
 
   '@napi-rs/wasm-runtime@1.1.4':
@@ -1132,7 +1132,7 @@ snapshots:
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
-  '@linear/sdk@83.0.0(graphql@16.13.2)':
+  '@linear/sdk@84.0.0(graphql@16.13.2)':
     dependencies:
       '@graphql-typed-document-node/core': 3.2.0(graphql@16.13.2)
     transitivePeerDependencies:
