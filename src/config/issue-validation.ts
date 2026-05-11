@@ -17,8 +17,11 @@ const DEFAULT_TYPE_LABELS = ["bug", "feature", "refactor", "chore", "spike"];
 /**
  * Recommended leading verbs for each type label.
  * Title verb and type label should express the same intent.
+ *
+ * Exported so error-enrichment can reuse the same mapping when inferring a
+ * type label from a title's first word.
  */
-const TYPE_VERB_MAP: Record<string, string[]> = {
+export const TYPE_VERB_MAP: Record<string, string[]> = {
 	bug: ["Fix", "Resolve", "Patch", "Handle", "Address", "Correct"],
 	feature: [
 		"Add",
@@ -117,6 +120,58 @@ function getValidationConfig(): ValidationConfig {
 		enabled: validation?.enabled ?? true,
 		typeLabels: validation?.typeLabels ?? DEFAULT_TYPE_LABELS,
 	};
+}
+
+/**
+ * Public accessor for the canonical type labels.
+ * Used by error-enrichment when suggesting labels.
+ */
+export function getCanonicalTypeLabels(): string[] {
+	return getValidationConfig().typeLabels;
+}
+
+/**
+ * Find the canonical type label for a title's first word, if it matches a
+ * known verb in TYPE_VERB_MAP. Returns the matched verb and inferred type,
+ * or null if no match.
+ *
+ * Checks multi-word verbs first (e.g. "Set up"), then single-word verbs.
+ */
+export function inferTypeFromTitle(
+	title: string,
+): { verb: string; type: string } | null {
+	const lowered = title.toLowerCase();
+
+	// Multi-word verbs first ("Set up")
+	for (const [type, verbs] of Object.entries(TYPE_VERB_MAP)) {
+		for (const verb of verbs) {
+			if (!verb.includes(" ")) {
+				continue;
+			}
+			const verbLower = verb.toLowerCase();
+			if (lowered.startsWith(`${verbLower} `) || lowered === verbLower) {
+				return { verb, type };
+			}
+		}
+	}
+
+	// Single-word verb
+	const firstWord = title.split(/\s/)[0];
+	if (!firstWord) {
+		return null;
+	}
+	const firstLower = firstWord.toLowerCase();
+	for (const [type, verbs] of Object.entries(TYPE_VERB_MAP)) {
+		for (const verb of verbs) {
+			if (verb.includes(" ")) {
+				continue;
+			}
+			if (verb.toLowerCase() === firstLower) {
+				return { verb, type };
+			}
+		}
+	}
+	return null;
 }
 
 /**
