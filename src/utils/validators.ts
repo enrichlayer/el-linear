@@ -1,3 +1,4 @@
+import type { LinearPriority } from "../types/linear.js";
 import { invalidParameterError } from "./error-messages.js";
 
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
@@ -20,8 +21,12 @@ export function parsePositiveInt(value: string, flagName: string): number {
  * Accepts:
  *   - keywords:  none | urgent | high | medium | normal | low
  *   - numbers:   0 (no priority), 1 (urgent), 2 (high), 3 (medium), 4 (low)
+ *
+ * Narrows arbitrary string input to the `LinearPriority` literal union so
+ * downstream call sites get type-level guarantees that the value is in
+ * range — no `as 0 | 1 | 2 | 3 | 4` cast at the boundary.
  */
-export function validatePriority(value: string): number {
+export function validatePriority(value: string): LinearPriority {
 	const asName = PRIORITY_NAMES[value.toLowerCase()];
 	if (asName !== undefined) {
 		return asName;
@@ -33,7 +38,9 @@ export function validatePriority(value: string): number {
 			`"${value}" is not valid. Use names (none, urgent, high, medium/normal, low) or numbers (0-4).`,
 		);
 	}
-	return n;
+	// The 0-4 range check above is what narrows `n` to LinearPriority;
+	// TypeScript can't infer that automatically.
+	return n as LinearPriority;
 }
 
 export function validateHexColor(value: string): string {
@@ -82,7 +89,7 @@ export function splitList(value: string | undefined | null | false): string[] {
 // Shared keyword → Linear priority number map. `none` and `0` mean "No priority"
 // (Linear stores it as a real state, not absence). `1..4` are the rated priorities,
 // `urgent` (1) being the highest.
-const PRIORITY_NAMES: Record<string, number> = {
+const PRIORITY_NAMES: Record<string, LinearPriority> = {
 	none: 0,
 	urgent: 1,
 	high: 2,
@@ -91,7 +98,7 @@ const PRIORITY_NAMES: Record<string, number> = {
 	low: 4,
 };
 
-export function parsePriorityFilter(value: string): number[] {
+export function parsePriorityFilter(value: string): LinearPriority[] {
 	return splitList(value).map((item) => validatePriority(item));
 }
 

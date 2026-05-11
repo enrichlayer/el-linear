@@ -39,7 +39,7 @@ import type {
 } from "../queries/issues-types.js";
 import { CREATE_LABEL_MUTATION } from "../queries/labels.js";
 import type { CreateLabelResponse } from "../queries/labels-types.js";
-import type { LinearIssue } from "../types/linear.js";
+import type { LinearIssue, LinearPriority } from "../types/linear.js";
 import { toISOStringOrNow } from "./date-format.js";
 import { extractEmbeds } from "./embed-parser.js";
 import { notFoundError } from "./error-messages.js";
@@ -79,7 +79,7 @@ export interface SearchIssueArgs {
 	/** Label names to require (intersection). */
 	labelNames?: string[];
 	/** Priority values (0-4) to include. */
-	priority?: number[];
+	priority?: LinearPriority[];
 	/** Result cap; defaults to 10 when not set. */
 	limit?: number;
 	/** Linear orderBy enum (`createdAt` / `updatedAt`). */
@@ -99,7 +99,7 @@ export interface UpdateIssueArgs {
 	description?: string;
 	/** Assignee name, email, alias, or UUID. */
 	assigneeId?: string;
-	priority?: number;
+	priority?: LinearPriority;
 	projectId?: string;
 	statusId?: string;
 	/**
@@ -137,7 +137,7 @@ export interface CreateIssueArgs {
 	/** Assignee name, email, alias, or UUID. */
 	assigneeId?: string;
 	/** Linear priority: 0 (none), 1 (urgent), 2 (high), 3 (medium), 4 (low). */
-	priority?: number;
+	priority?: LinearPriority;
 	/** Project name or UUID. */
 	projectId?: string;
 	/** Status name or UUID — resolved per team. */
@@ -1083,7 +1083,7 @@ export class GraphQLIssuesService {
 			projectId?: string;
 			status?: string[];
 			labelNames?: string[];
-			priority?: number[];
+			priority?: LinearPriority[];
 		},
 	): LinearIssue[] {
 		let filtered = results;
@@ -1118,7 +1118,7 @@ export class GraphQLIssuesService {
 		}
 		if (filters.priority && filters.priority.length > 0) {
 			filtered = filtered.filter((issue: LinearIssue) =>
-				(filters.priority as number[]).includes(issue.priority),
+				(filters.priority as LinearPriority[]).includes(issue.priority),
 			);
 		}
 		return filtered;
@@ -1131,7 +1131,7 @@ export class GraphQLIssuesService {
 		noProject?: boolean;
 		status?: string[];
 		labelNames?: string[];
-		priority?: number[];
+		priority?: LinearPriority[];
 	}): Record<string, unknown> {
 		const filter: Record<string, unknown> = {};
 		if (filters.teamId) {

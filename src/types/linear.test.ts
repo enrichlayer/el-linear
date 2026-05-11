@@ -13,6 +13,7 @@ import type {
 	LinearIssue,
 	LinearIssueRelation,
 	LinearLabel,
+	LinearPriority,
 	LinearProject,
 	LinearRelease,
 	LinearTeam,
@@ -40,6 +41,17 @@ describe("linear entity types", () => {
 
 	it("LinearLabel scope is a string union", () => {
 		expectTypeOf<LinearLabel["scope"]>().toEqualTypeOf<"team" | "workspace">();
+	});
+
+	it("LinearPriority is the Linear 0-4 literal union (DEV-4068 T9)", () => {
+		// Surface contract — priority everywhere narrows to this set.
+		expectTypeOf<LinearPriority>().toEqualTypeOf<0 | 1 | 2 | 3 | 4>();
+		// LinearIssue.priority uses it.
+		expectTypeOf<LinearIssue["priority"]>().toEqualTypeOf<LinearPriority>();
+		// Out-of-range literals must NOT assign — `5` should fail to compile.
+		// @ts-expect-error -- 5 is not a valid Linear priority
+		const _bad: LinearPriority = 5;
+		void _bad;
 	});
 
 	it("LinearCycleDetail extends LinearCycleSummary", () => {

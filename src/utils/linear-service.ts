@@ -7,6 +7,7 @@ import type {
 	LinearCycleSummary,
 	LinearIssue,
 	LinearLabel,
+	LinearPriority,
 	LinearProject,
 	LinearTeam,
 	LinearUser,
@@ -485,7 +486,10 @@ export class LinearService {
 				url: issue.url,
 				title: issue.title,
 				description: issue.description || undefined,
-				priority: issue.priority,
+				// Linear SDK types `priority` as `number`; the GraphQL schema only
+				// emits 0-4, so the cast is safe and the runtime range is
+				// guaranteed by Linear's server-side schema.
+				priority: issue.priority as LinearPriority,
 				estimate: issue.estimate || undefined,
 				state: state ? { id: state.id, name: state.name } : undefined,
 				assignee: assignee

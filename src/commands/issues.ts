@@ -25,6 +25,7 @@ import type {
 	IssueStateSpan,
 	LinearAttachment,
 	LinearIssue,
+	LinearPriority,
 } from "../types/linear.js";
 import { createFileService } from "../utils/file-service.js";
 import { applyFooter } from "../utils/footer.js";
@@ -311,9 +312,9 @@ async function resolveCreateInputs(
 	labelIds: string[];
 	status: string | undefined;
 	subscriberIds: string[] | undefined;
-	/** Resolved priority number (0-4) or undefined when no priority was set
+	/** Resolved priority (0-4) or undefined when no priority was set
 	 * by --priority or config.defaultPriority. */
-	priority: number | undefined;
+	priority: LinearPriority | undefined;
 }> {
 	const config = loadConfig();
 	enforceTerms([title, options.description], { strict: options.strict });
