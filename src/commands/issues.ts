@@ -894,7 +894,13 @@ async function handleRetrolink(
 	let newBranch: string | undefined;
 	if (result.branchName) {
 		newBranch = toBranchName(result.branchName);
-		execFileSync("git", ["branch", "-m", oldBranch, newBranch], {
+		// `--` BEFORE the ref operands terminates option parsing so a
+		// name starting with `-` (server bug, malicious slug, forked
+		// Linear-compatible API) is parsed as a ref name rather than a
+		// git flag. Defense in depth — the default feature/ prefix
+		// already blocks the common case, but the prefix is configurable
+		// (DEV-4064).
+		execFileSync("git", ["branch", "-m", "--", oldBranch, newBranch], {
 			stdio: "pipe",
 		});
 	}
