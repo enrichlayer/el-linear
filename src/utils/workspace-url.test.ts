@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockLoadConfig = vi.fn();
 vi.mock("../config/config.js", () => ({
@@ -29,13 +29,63 @@ const baseConfig = {
 	workspaceUrlKey: "",
 };
 
+const ENV_KEY = "EL_LINEAR_WORKSPACE_URL_KEY";
+
 describe("getWorkspaceUrlKey", () => {
+	let originalEnv: string | undefined;
+
 	beforeEach(() => {
 		_resetWorkspaceUrlKeyCache();
 		vi.clearAllMocks();
+		originalEnv = process.env[ENV_KEY];
+		delete process.env[ENV_KEY];
 	});
 
-	it("returns config.workspaceUrlKey when set, without calling the API", async () => {
+	afterEach(() => {
+		if (originalEnv === undefined) {
+			delete process.env[ENV_KEY];
+		} else {
+			process.env[ENV_KEY] = originalEnv;
+		}
+	});
+
+	it("returns options.override when set, without reading config or env", async () => {
+		mockLoadConfig.mockReturnValue({
+			...baseConfig,
+			workspaceUrlKey: "config",
+		});
+		process.env[ENV_KEY] = "env";
+		const service = makeService();
+
+		const result = await getWorkspaceUrlKey(
+			service as unknown as Parameters<typeof getWorkspaceUrlKey>[0],
+			{ override: "explicit" },
+		);
+
+		expect(result).toBe("explicit");
+		expect(service.rawRequest).not.toHaveBeenCalled();
+		expect(mockLoadConfig).not.toHaveBeenCalled();
+	});
+
+	it("returns the env var when no override is supplied", async () => {
+		mockLoadConfig.mockReturnValue({
+			...baseConfig,
+			workspaceUrlKey: "config",
+		});
+		process.env[ENV_KEY] = "from-env";
+		const service = makeService();
+
+		const result = await getWorkspaceUrlKey(
+			service as unknown as Parameters<typeof getWorkspaceUrlKey>[0],
+		);
+
+		expect(result).toBe("from-env");
+		expect(service.rawRequest).not.toHaveBeenCalled();
+		// Config is not consulted when env wins.
+		expect(mockLoadConfig).not.toHaveBeenCalled();
+	});
+
+	it("returns config.workspaceUrlKey when no override or env, without calling the API", async () => {
 		mockLoadConfig.mockReturnValue({ ...baseConfig, workspaceUrlKey: "acme" });
 		const service = makeService();
 
@@ -47,7 +97,7 @@ describe("getWorkspaceUrlKey", () => {
 		expect(service.rawRequest).not.toHaveBeenCalled();
 	});
 
-	it("queries viewer.organization.urlKey when config has no override", async () => {
+	it("queries viewer.organization.urlKey when nothing is configured", async () => {
 		mockLoadConfig.mockReturnValue({ ...baseConfig, workspaceUrlKey: "" });
 		const service = makeService();
 		service.rawRequest.mockResolvedValue({
@@ -64,7 +114,34 @@ describe("getWorkspaceUrlKey", () => {
 		);
 	});
 
-	it("caches the result so subsequent calls do not hit the API", async () => {
+	it("throws when no graphQLService is given and no override/env/config exists", async () => {
+		mockLoadConfig.mockReturnValue({ ...baseConfig, workspaceUrlKey: "" });
+
+		await expect(getWorkspaceUrlKey(undefined)).rejects.toThrow(
+			/no override, env, or config/i,
+		);
+	});
+
+	it("works offline when override is supplied without a graphQLService", async () => {
+		mockLoadConfig.mockReturnValue({ ...baseConfig, workspaceUrlKey: "" });
+
+		const result = await getWorkspaceUrlKey(undefined, { override: "offline" });
+
+		expect(result).toBe("offline");
+		expect(mockLoadConfig).not.toHaveBeenCalled();
+	});
+
+	it("works offline when env var is supplied without a graphQLService", async () => {
+		mockLoadConfig.mockReturnValue({ ...baseConfig, workspaceUrlKey: "" });
+		process.env[ENV_KEY] = "env-offline";
+
+		const result = await getWorkspaceUrlKey(undefined);
+
+		expect(result).toBe("env-offline");
+		expect(mockLoadConfig).not.toHaveBeenCalled();
+	});
+
+	it("caches the API result so subsequent calls do not hit the network", async () => {
 		mockLoadConfig.mockReturnValue({ ...baseConfig, workspaceUrlKey: "" });
 		const service = makeService();
 		service.rawRequest.mockResolvedValue({
@@ -82,6 +159,18 @@ describe("getWorkspaceUrlKey", () => {
 		expect(b).toBe("cached");
 		expect(service.rawRequest).toHaveBeenCalledTimes(1);
 		expect(mockLoadConfig).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not cache env-supplied values — env changes win on next call", async () => {
+		mockLoadConfig.mockReturnValue({ ...baseConfig, workspaceUrlKey: "" });
+		process.env[ENV_KEY] = "first";
+
+		const first = await getWorkspaceUrlKey(undefined);
+		process.env[ENV_KEY] = "second";
+		const second = await getWorkspaceUrlKey(undefined);
+
+		expect(first).toBe("first");
+		expect(second).toBe("second");
 	});
 
 	it("throws when API returns no urlKey", async () => {
