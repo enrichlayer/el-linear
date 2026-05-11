@@ -38,7 +38,8 @@ import type {
 	UpdateIssueResponse,
 } from "../queries/issues-types.js";
 import { CREATE_LABEL_MUTATION } from "../queries/labels.js";
-import type { GraphQLResponseData, LinearIssue } from "../types/linear.js";
+import type { CreateLabelResponse } from "../queries/labels-types.js";
+import type { LinearIssue } from "../types/linear.js";
 import { toISOStringOrNow } from "./date-format.js";
 import { extractEmbeds } from "./embed-parser.js";
 import { notFoundError } from "./error-messages.js";
@@ -789,19 +790,15 @@ export class GraphQLIssuesService {
 			if (teamId) {
 				input.teamId = teamId;
 			}
-			const result = await this.graphQLService.rawRequest(
+			const result = await this.graphQLService.rawRequest<CreateLabelResponse>(
 				CREATE_LABEL_MUTATION,
 				{ input },
 			);
-			const created = (result as GraphQLResponseData).issueLabelCreate as
-				| GraphQLResponseData
-				| undefined;
-			if (created?.success && created.issueLabel) {
-				const labelData = created.issueLabel as GraphQLResponseData;
-				const teamInfo = labelData.team as GraphQLResponseData | undefined;
-				const teamKey = teamInfo?.key ?? "";
+			const created = result.issueLabelCreate;
+			if (created.success && created.issueLabel) {
+				const teamKey = created.issueLabel.team?.key ?? "";
 				logger.error(`Auto-created label "${name}" on team ${teamKey}`);
-				return labelData.id as string;
+				return created.issueLabel.id;
 			}
 			return null;
 		} catch {
