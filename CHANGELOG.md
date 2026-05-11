@@ -4,6 +4,18 @@ All notable changes to `@enrichlayer/el-linear` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.10.0](https://github.com/enrichlayer/el-linear/compare/v1.9.0...v1.10.0) (2026-05-11)
+
+
+### Features
+
+* **workspace:** --workspace-url-key flag + EL_LINEAR_WORKSPACE_URL_KEY env (ALL-920) ([#67](https://github.com/enrichlayer/el-linear/issues/67)) ([9ced5d4](https://github.com/enrichlayer/el-linear/commit/9ced5d40a528d7cc19bd6104035cb8c984d258b4))
+
+
+### Bug Fixes
+
+* **summary:** capture kind before --fields/--raw strip signature fields (ALL-933) ([#66](https://github.com/enrichlayer/el-linear/issues/66)) ([d7a404f](https://github.com/enrichlayer/el-linear/commit/d7a404f84b4606f3e4da7d28a7c4c5a7341ac71d))
+
 ## [1.9.0](https://github.com/enrichlayer/el-linear/compare/v1.8.1...v1.9.0) (2026-05-09)
 
 
