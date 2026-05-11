@@ -10,6 +10,7 @@ import { setupEmbedsCommands } from "./commands/embeds.js";
 import { setupGdocCommands } from "./commands/gdoc.js";
 import { setupGraphQLCommands } from "./commands/graphql.js";
 import { setupInitCommands } from "./commands/init/index.js";
+import { setupIntrospectCommand } from "./commands/introspect.js";
 import { setupIssueIdCommand } from "./commands/issue-id.js";
 import { setupIssuesCommands } from "./commands/issues.js";
 import { setupLabelsCommands } from "./commands/labels.js";
@@ -145,6 +146,7 @@ setupConfigCommands(program);
 setupInitCommands(program);
 setupProfileCommands(program);
 setupRefsCommands(program);
+setupIntrospectCommand(program);
 setupReadShortcut(program);
 
 program
