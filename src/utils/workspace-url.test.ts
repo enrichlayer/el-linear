@@ -173,6 +173,49 @@ describe("getWorkspaceUrlKey", () => {
 		expect(second).toBe("second");
 	});
 
+	// DEV-4067: validate env/config values against /^[a-z0-9-]+$/i so a
+	// malformed key (`javascript:alert(1)#`, leading space, etc.) can't
+	// flow into markdown link URLs verbatim.
+	it("throws on env var containing invalid characters (space)", async () => {
+		mockLoadConfig.mockReturnValue({ ...baseConfig, workspaceUrlKey: "" });
+		process.env[ENV_KEY] = " evil ";
+		await expect(getWorkspaceUrlKey(undefined)).rejects.toThrow(
+			/Invalid Linear workspace URL key/i,
+		);
+	});
+
+	it("throws on env var containing scheme injection chars", async () => {
+		mockLoadConfig.mockReturnValue({ ...baseConfig, workspaceUrlKey: "" });
+		process.env[ENV_KEY] = "javascript:alert(1)#";
+		await expect(getWorkspaceUrlKey(undefined)).rejects.toThrow(
+			/Invalid Linear workspace URL key/i,
+		);
+	});
+
+	it("throws on config.workspaceUrlKey containing invalid characters", async () => {
+		mockLoadConfig.mockReturnValue({
+			...baseConfig,
+			workspaceUrlKey: "ev/il.com",
+		});
+		const service = makeService();
+		await expect(
+			getWorkspaceUrlKey(
+				service as unknown as Parameters<typeof getWorkspaceUrlKey>[0],
+			),
+		).rejects.toThrow(/Invalid Linear workspace URL key/i);
+	});
+
+	it("throws on --workspace-url-key flag containing invalid characters", async () => {
+		await expect(
+			getWorkspaceUrlKey(undefined, { override: "ev/il.com" }),
+		).rejects.toThrow(/Invalid Linear workspace URL key/i);
+	});
+
+	it("accepts mixed-case + digits + hyphens (the URL-key spec)", async () => {
+		process.env[ENV_KEY] = "Vertical-Int-1";
+		expect(await getWorkspaceUrlKey(undefined)).toBe("Vertical-Int-1");
+	});
+
 	it("throws when API returns no urlKey", async () => {
 		mockLoadConfig.mockReturnValue({ ...baseConfig, workspaceUrlKey: "" });
 		const service = makeService();
