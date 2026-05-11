@@ -82,6 +82,12 @@ function describeCommand(cmd: Command): CommandDescriptor {
 function findCommand(root: Command, path: string[]): Command | null {
 	let current: Command = root;
 	for (const segment of path) {
+		// First-match wins. Commander itself doesn't forbid duplicate
+		// aliases across sibling commands, so two commands could in
+		// theory both expose the same alias — the later one would be
+		// silently shadowed by this lookup. `el-linear` has no such
+		// collisions today, but this comment documents the contract
+		// so a future audit doesn't have to rediscover it.
 		const next = current.commands.find(
 			(c) => c.name() === segment || c.aliases().includes(segment),
 		);
