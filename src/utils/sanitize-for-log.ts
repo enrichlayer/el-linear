@@ -13,11 +13,13 @@
  * formatting. Hoisted to `utils/` so the central error path
  * (`output.ts`'s `outputError`) can use it too — that path runs on
  * every non-wizard CLI invocation. `init/token.ts` re-exports the
- * symbol so existing imports under `init/` keep working. The OAuth
- * token-refresh path (`auth/token-resolver.ts`) doesn't sanitize
- * directly today; refresh errors are routed through `outputError`,
- * which then runs sanitization. Source-side sanitization in the
- * OAuth path is tracked as a separate defense-in-depth follow-up.
+ * symbol so existing imports under `init/` keep working.
+ *
+ * The OAuth token-exchange / refresh / revoke paths also call this
+ * function at source (`auth/oauth-token.ts`'s `postForm` + `revokeToken`,
+ * `auth/token-resolver.ts`'s refresh-failure rewrap) so a future caller
+ * that catches+rethrows or logs mid-chain can't leak a token before the
+ * error reaches `outputError`. Defense in depth (DEV-4065).
  */
 
 // Personal-API tokens (`lin_api_…`) and OAuth access/refresh tokens

@@ -11,6 +11,7 @@
  * network.
  */
 
+import { sanitizeForLog } from "../utils/sanitize-for-log.js";
 import {
 	LINEAR_REVOKE_URL,
 	LINEAR_TOKEN_URL,
@@ -102,15 +103,21 @@ async function postForm<T>(
 	if (!res.ok) {
 		// Don't dump the request body — it contains client_secret /
 		// refresh_token / authorization code, all of which are secrets.
+		// Sanitize the response body at source too: an MITM, misconfigured
+		// proxy, or buggy upstream that echoes the request headers back in
+		// its error body would otherwise leak `Bearer <token>` into the
+		// error chain. Defense in depth on top of outputError's
+		// sanitization (DEV-4065).
+		const safe = sanitizeForLog(text || "(empty body)");
 		throw new Error(
-			`OAuth endpoint ${url} responded ${res.status} ${res.statusText}: ${text || "(empty body)"}`,
+			`OAuth endpoint ${url} responded ${res.status} ${res.statusText}: ${safe}`,
 		);
 	}
 	try {
 		return JSON.parse(text) as T;
 	} catch {
 		throw new Error(
-			`OAuth endpoint ${url} returned non-JSON response: ${text.slice(0, 200)}`,
+			`OAuth endpoint ${url} returned non-JSON response: ${sanitizeForLog(text.slice(0, 200))}`,
 		);
 	}
 }
@@ -216,13 +223,18 @@ export async function revokeToken(
 			},
 			body: "",
 		});
+		// Sanitize at source for symmetry with postForm's error branch — a
+		// misconfigured proxy that echoes the request's Authorization header
+		// in its 5xx body would otherwise surface the bearer token through
+		// `message`. The two call sites in `commands/init/oauth.ts` already
+		// re-sanitize at emission, but defense in depth (DEV-4065).
 		return {
 			ok: res.ok,
 			status: res.status,
-			message: res.ok ? undefined : await res.text(),
+			message: res.ok ? undefined : sanitizeForLog(await res.text()),
 		};
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
-		return { ok: false, status: 0, message };
+		return { ok: false, status: 0, message: sanitizeForLog(message) };
 	}
 }
