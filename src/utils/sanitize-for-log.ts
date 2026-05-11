@@ -10,9 +10,14 @@
  * Bearer header in its 502 body.
  *
  * Originally lived in `commands/init/token.ts` for the wizard's error
- * formatting. Hoisted to `utils/` so the central error path (`output.ts`'s
- * `outputError`) and the OAuth token-refresh path (`auth/token-resolver.ts`)
- * can use it too — those run on every CLI invocation, not just `init`.
+ * formatting. Hoisted to `utils/` so the central error path
+ * (`output.ts`'s `outputError`) can use it too — that path runs on
+ * every non-wizard CLI invocation. `init/token.ts` re-exports the
+ * symbol so existing imports under `init/` keep working. The OAuth
+ * token-refresh path (`auth/token-resolver.ts`) doesn't sanitize
+ * directly today; refresh errors are routed through `outputError`,
+ * which then runs sanitization. Source-side sanitization in the
+ * OAuth path is tracked as a separate defense-in-depth follow-up.
  */
 
 // Personal-API tokens (`lin_api_…`) and OAuth access/refresh tokens

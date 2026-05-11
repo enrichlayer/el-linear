@@ -339,6 +339,66 @@ describe("handleAsyncCommand", () => {
 		expect(() => JSON.parse(allStdout)).not.toThrow();
 		expect(JSON.parse(allStdout).error).toBe("broken");
 	});
+
+	it("redacts a Linear personal API token embedded in error.message", async () => {
+		// A future SDK upgrade that wraps the Authorization header into the
+		// rejection's message would otherwise leak the token through this
+		// central error path. Defense applies via sanitizeForLog.
+		const fn = vi
+			.fn()
+			.mockRejectedValue(
+				new Error("Bearer lin_api_abcdefghijklmnop1234567890 — request failed"),
+			);
+		const wrapped = handleAsyncCommand(fn);
+		await wrapped();
+		const allStdout = stdoutSpy.mock.calls
+			.map((call) => call[0] as string)
+			.join("");
+		const message = JSON.parse(allStdout).error as string;
+		expect(message).not.toContain("lin_api_abcdefghijklmnop1234567890");
+		expect(message).toContain("lin_api_***REDACTED***");
+	});
+
+	it("redacts a Linear OAuth token embedded in error.message", async () => {
+		const fn = vi
+			.fn()
+			.mockRejectedValue(
+				new Error("OAuth refresh failed: lin_oauth_zyxwvutsrqponmlk0987654321"),
+			);
+		const wrapped = handleAsyncCommand(fn);
+		await wrapped();
+		const allStdout = stdoutSpy.mock.calls
+			.map((call) => call[0] as string)
+			.join("");
+		const message = JSON.parse(allStdout).error as string;
+		expect(message).not.toContain("lin_oauth_zyxwvutsrqponmlk0987654321");
+		expect(message).toContain("lin_oauth_***REDACTED***");
+	});
+
+	it("redacts a Bearer-style high-entropy payload embedded in error.stack (debug mode)", async () => {
+		// EL_LINEAR_DEBUG=1 logs the stack to stderr. A leaked Authorization
+		// header in the stack frames would otherwise reach the user's terminal.
+		const oldDebug = process.env.EL_LINEAR_DEBUG;
+		process.env.EL_LINEAR_DEBUG = "1";
+		try {
+			const err = new Error("boom");
+			err.stack =
+				"Authorization: ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij01234567890+/=\n    at runFoo";
+			const fn = vi.fn().mockRejectedValue(err);
+			const wrapped = handleAsyncCommand(fn);
+			await wrapped();
+			const allStderr = stderrSpy.mock.calls
+				.map((call) => call[0] as string)
+				.join("");
+			expect(allStderr).not.toContain(
+				"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij01234567890+/=",
+			);
+			expect(allStderr).toContain("***REDACTED***");
+		} finally {
+			if (oldDebug === undefined) delete process.env.EL_LINEAR_DEBUG;
+			else process.env.EL_LINEAR_DEBUG = oldDebug;
+		}
+	});
 });
 
 describe("--format summary", () => {

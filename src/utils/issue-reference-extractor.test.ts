@@ -107,17 +107,27 @@ describe("extractIssueReferences", () => {
 	});
 
 	it("DOES match an identifier that follows trailing-punctuation URL terminator", () => {
-		// CommonMark stops a bare URL at `)`, `]`, `,`, `.`, `;`, `:`, `!`, `?`
-		// when they immediately precede whitespace or end-of-input. Previously
-		// the greedy regex `\S+` consumed everything up to whitespace, hiding
-		// the trailing identifier inside the "protected" URL range — a silent,
+		// CommonMark stops a bare URL at closing brackets and quote chars
+		// (`)`, `]`, `}`, `>`, `"`). Previously the greedy regex `\S+`
+		// consumed everything up to whitespace, hiding the trailing
+		// identifier inside the "protected" URL range — a silent,
 		// position-dependent drop.
 		expect(
 			extractIssueReferences("(see https://example.com/foo) DEV-100"),
 		).toEqual([related("DEV-100")]);
+		// No-space case from the original adversarial repro: the closing
+		// paren terminates the URL even without whitespace separating it
+		// from the adjacent identifier. (The identifier itself still needs
+		// word-boundedness, so `)DEV-100 bar` extracts but `)DEV-100bar`
+		// won't — that's the identifier regex's `\b\d+\b` requirement, not
+		// the URL termination rule.)
 		expect(
-			extractIssueReferences("link: https://example.com, then DEV-200"),
-		).toEqual([related("DEV-200")]);
+			extractIssueReferences("(see https://example.com/foo)DEV-100 bar"),
+		).toEqual([related("DEV-100")]);
+		// Square brackets too.
+		expect(extractIssueReferences("[https://example.com/foo]DEV-200")).toEqual([
+			related("DEV-200"),
+		]);
 	});
 
 	it("does NOT match identifiers inside markdown links (protected range)", () => {

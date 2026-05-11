@@ -37,13 +37,19 @@ const ANGLE_AUTOLINK_REGEX = /<[^>\s]+>/g;
 // components (e.g. "https://github.com/foo/DEV-100") don't get
 // processed.
 //
-// The trailing-punctuation lookahead mirrors CommonMark's bare-URL
-// termination rule: characters `)]},.;:!?` that immediately precede
-// whitespace or end-of-input are NOT considered part of the URL.
-// Without this, "see https://example.com/foo)DEV-100" greedily
-// consumed `…foo)DEV-100`, hiding the identifier from auto-link
-// processing (silent, position-dependent drop).
-const BARE_URL_REGEX = /https?:\/\/[^\s<>"]+?(?=[)\].,;:!?]*(?:\s|$))/g;
+// The character class excludes ASCII closing-bracket / quote chars
+// that CommonMark treats as bare-URL terminators: `)`, `]`, `}`,
+// `>`, `"`. This terminates the URL at the bracket regardless of
+// whether whitespace follows — so both `foo) DEV-100` (with space)
+// and `foo)DEV-100bar` (no space) expose the trailing identifier to
+// auto-link extraction.
+//
+// Pre-fix the regex was `https?:\/\/\S+`, which greedily consumed up
+// to the next whitespace and silently hid identifiers in position-
+// dependent prose. A prior fix used a trailing-punctuation lookahead
+// that only worked when whitespace followed the terminator; this
+// character-class form is symmetric (no whitespace required).
+const BARE_URL_REGEX = /https?:\/\/[^\s<>"()\]}]+/g;
 
 export interface ProtectedRange {
 	end: number;
