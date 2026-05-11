@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import {
 	dispatch as dispatchSummary,
 	inferKindFromPayload,
+	type ResourceKind,
 } from "./formatters/summary.js";
 import { logger } from "./logger.js";
 
@@ -51,12 +52,15 @@ function filterFields(obj: unknown, fields: string[]): unknown {
 }
 
 /**
- * Emit a summary-format render to stdout for the given payload. The
- * caller (`outputSuccess`) has already applied `--raw` and `--fields`,
- * so the value here is post-filter — no need to unwrap again.
+ * Emit a summary-format render to stdout for the given payload.
+ *
+ * `kind` is captured upstream from the **pre-filter** payload — if we
+ * inferred here, `--fields identifier,url` would strip `title` and
+ * the heuristic would fall through to "generic", silently breaking
+ * the issue-list table. Caching the pre-filter shape keeps the
+ * formatter accurate regardless of how the user pared the JSON.
  */
-function emitSummary(payload: unknown): void {
-	const kind = inferKindFromPayload(payload);
+function emitSummary(payload: unknown, kind: ResourceKind): void {
 	logger.info(dispatchSummary(kind, payload));
 }
 
@@ -73,6 +77,12 @@ export function outputSuccess(data: unknown): void {
 	} else {
 		output = data;
 	}
+	// Capture the kind from the original envelope shape BEFORE --raw /
+	// --fields stripping. Otherwise filtering away signature fields (e.g.
+	// `title` on an issue) breaks shape inference and the summary
+	// formatter falls back to the generic key-value dump.
+	const inferredKind =
+		outputFormat === "summary" ? inferKindFromPayload(output) : "generic";
 	// --raw: unwrap { data: [...] } to just the array
 	if (
 		rawMode &&
@@ -103,7 +113,7 @@ export function outputSuccess(data: unknown): void {
 	// as a human-readable block. We bypass the jq path because jq is a
 	// JSON-shape filter — it doesn't compose with text output.
 	if (outputFormat === "summary") {
-		emitSummary(output);
+		emitSummary(output, inferredKind);
 		return;
 	}
 
