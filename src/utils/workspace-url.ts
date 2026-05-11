@@ -47,6 +47,25 @@ export interface GetWorkspaceUrlKeyOptions {
 
 const WORKSPACE_URL_KEY_ENV = "EL_LINEAR_WORKSPACE_URL_KEY";
 
+// Linear workspace URL keys are URL-safe slugs. The Linear API itself
+// validates this shape (`viewerIsValid` in init/token.ts uses the same
+// regex). Applying the check on env + config reads closes the gap where
+// a malformed key (`EL_LINEAR_WORKSPACE_URL_KEY=" javascript:alert(1)#"`)
+// would otherwise flow into markdown link URLs verbatim. Live-API path
+// is already trusted because the value comes from `viewer.organization`.
+// DEV-4067.
+const VALID_URL_KEY_RE = /^[a-z0-9-]+$/i;
+
+function validateUrlKey(value: string, source: string): string {
+	if (!VALID_URL_KEY_RE.test(value)) {
+		throw new Error(
+			`Invalid Linear workspace URL key from ${source}: ${JSON.stringify(value)}. ` +
+				"Must match /^[a-z0-9-]+$/i (e.g. 'verticalint').",
+		);
+	}
+	return value;
+}
+
 let cachedUrlKey: string | undefined;
 
 export async function getWorkspaceUrlKey(
@@ -55,7 +74,7 @@ export async function getWorkspaceUrlKey(
 ): Promise<string> {
 	// 1. Per-invocation override — highest priority.
 	if (options.override) {
-		return options.override;
+		return validateUrlKey(options.override, "--workspace-url-key flag");
 	}
 
 	// 2. Env var. Read on every call (cheap; lets tests/CI flip the value
@@ -63,7 +82,7 @@ export async function getWorkspaceUrlKey(
 	//    EL_LINEAR_WORKSPACE_URL_KEY then unsets it sees the unset state.
 	const envKey = process.env[WORKSPACE_URL_KEY_ENV];
 	if (envKey) {
-		return envKey;
+		return validateUrlKey(envKey, `${WORKSPACE_URL_KEY_ENV} env var`);
 	}
 
 	// Layers 3-4 are cached in-process — config and the live lookup are
@@ -75,8 +94,9 @@ export async function getWorkspaceUrlKey(
 	// 3. Config override.
 	const { workspaceUrlKey } = loadConfig();
 	if (workspaceUrlKey) {
-		cachedUrlKey = workspaceUrlKey;
-		return workspaceUrlKey;
+		const validated = validateUrlKey(workspaceUrlKey, "config.workspaceUrlKey");
+		cachedUrlKey = validated;
+		return validated;
 	}
 
 	// 4. Live API lookup — requires a GraphQL service.
