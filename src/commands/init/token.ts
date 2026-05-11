@@ -8,7 +8,12 @@
 
 import { confirm, password } from "@inquirer/prompts";
 import { GraphQLService } from "../../utils/graphql-service.js";
+import { sanitizeForLog } from "../../utils/sanitize-for-log.js";
 import { readToken, writeToken } from "./shared.js";
+
+// Re-export for legacy import paths under `init/`. New code should import
+// from `utils/sanitize-for-log.js` directly.
+export { sanitizeForLog };
 
 const TOKEN_GENERATION_URL = "https://linear.app/settings/account/security";
 
@@ -40,34 +45,6 @@ interface ViewerResponse {
 export interface TokenStepResult {
 	token: string;
 	viewer: ViewerResponse["viewer"];
-}
-
-/**
- * Strip anything that looks like a Linear API token from a string. Defense in
- * depth: today the @linear/sdk error message embeds {query, variables} but not
- * the Authorization header. A future SDK upgrade that includes headers (which
- * upstream graphql-request has done historically) would otherwise silently
- * write `Bearer lin_api_…` into stdout / shell history / CI logs. The regex
- * also catches token shapes that may show up in custom error wrappers.
- */
-// Personal-API tokens (`lin_api_…`) and OAuth access/refresh tokens
-// (`lin_oauth_…`). Pre-fix the regex only matched personal tokens.
-const TOKEN_PREFIX_RE = /lin_(api|oauth)_[A-Za-z0-9_-]{16,}/g;
-// High-entropy bearer payload fallback: catches generic Bearer-style
-// strings adjacent to Authorization / Bearer keywords. Useful for
-// future SDK error wrappers that might leak headers without the
-// `lin_` prefix.
-const BEARER_PAYLOAD_RE =
-	/(\b(?:Authorization|Bearer)\b[:\s]*)([A-Za-z0-9_\-/+=]{40,})/gi;
-
-export function sanitizeForLog(text: string): string {
-	return text
-		.replace(TOKEN_PREFIX_RE, (m) =>
-			m.startsWith("lin_oauth_")
-				? "lin_oauth_***REDACTED***"
-				: "lin_api_***REDACTED***",
-		)
-		.replace(BEARER_PAYLOAD_RE, "$1***REDACTED***");
 }
 
 /**

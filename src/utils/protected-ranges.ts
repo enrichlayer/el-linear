@@ -36,7 +36,14 @@ const ANGLE_AUTOLINK_REGEX = /<[^>\s]+>/g;
 // Bare URLs in prose. We protect these so identifiers inside path
 // components (e.g. "https://github.com/foo/DEV-100") don't get
 // processed.
-const BARE_URL_REGEX = /https?:\/\/\S+/g;
+//
+// The trailing-punctuation lookahead mirrors CommonMark's bare-URL
+// termination rule: characters `)]},.;:!?` that immediately precede
+// whitespace or end-of-input are NOT considered part of the URL.
+// Without this, "see https://example.com/foo)DEV-100" greedily
+// consumed `…foo)DEV-100`, hiding the identifier from auto-link
+// processing (silent, position-dependent drop).
+const BARE_URL_REGEX = /https?:\/\/[^\s<>"]+?(?=[)\].,;:!?]*(?:\s|$))/g;
 
 export interface ProtectedRange {
 	end: number;

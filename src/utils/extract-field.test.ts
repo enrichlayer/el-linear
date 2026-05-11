@@ -69,4 +69,39 @@ Stuff we won't do.`;
 		const empty = "## Done when\n\n## Next\n\nx";
 		expect(extractField(empty, "Done when")).toBe("");
 	});
+
+	it("ignores headers inside fenced code blocks (matches the real section)", () => {
+		const body =
+			"## Intro\n\nprose\n\n```\n## Done when\nfoo\n```\n\n## Done when\n\nrealcontent";
+		expect(extractField(body, "Done when")).toBe("realcontent");
+	});
+
+	it("does not terminate the section on a header inside a fenced code block", () => {
+		const body = "## Done when\n\nbefore\n\n```\n## Out of scope\n```\n\nafter";
+		expect(extractField(body, "Done when")).toBe(
+			"before\n\n```\n## Out of scope\n```\n\nafter",
+		);
+	});
+
+	it("supports tilde-fenced code blocks too", () => {
+		const body = "## Done when\n\nbefore\n\n~~~\n## Out of scope\n~~~\n\nafter";
+		expect(extractField(body, "Done when")).toBe(
+			"before\n\n~~~\n## Out of scope\n~~~\n\nafter",
+		);
+	});
+
+	it("does NOT treat a long emphasis paragraph as a pseudo-header (>6 words, no colon)", () => {
+		// Without the heuristic this 7-word fully-bold line would be treated as
+		// a header and prematurely terminate the section.
+		const body =
+			"**Done when**\n\nfoo\n\n**Note that all downstream consumers must adapt**\n\nbar";
+		expect(extractField(body, "Done when")).toBe(
+			"foo\n\n**Note that all downstream consumers must adapt**\n\nbar",
+		);
+	});
+
+	it("DOES treat a short bold line with a trailing colon as a pseudo-header", () => {
+		const body = "**Done when:**\n\nfoo\n\n**Note:**\n\nbar";
+		expect(extractField(body, "Done when")).toBe("foo");
+	});
 });

@@ -106,6 +106,20 @@ describe("extractIssueReferences", () => {
 		).toEqual([]);
 	});
 
+	it("DOES match an identifier that follows trailing-punctuation URL terminator", () => {
+		// CommonMark stops a bare URL at `)`, `]`, `,`, `.`, `;`, `:`, `!`, `?`
+		// when they immediately precede whitespace or end-of-input. Previously
+		// the greedy regex `\S+` consumed everything up to whitespace, hiding
+		// the trailing identifier inside the "protected" URL range — a silent,
+		// position-dependent drop.
+		expect(
+			extractIssueReferences("(see https://example.com/foo) DEV-100"),
+		).toEqual([related("DEV-100")]);
+		expect(
+			extractIssueReferences("link: https://example.com, then DEV-200"),
+		).toEqual([related("DEV-200")]);
+	});
+
 	it("does NOT match identifiers inside markdown links (protected range)", () => {
 		// `[label](https://x/DEV-100)` — neither the label nor the URL
 		// path counts. Mirrors the wrapper's protection so the two
