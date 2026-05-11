@@ -1093,9 +1093,15 @@ export function setupIssuesCommands(program: Command): void {
 		.alias("get")
 		.alias("show")
 		.description("Get issue details. Accepts multiple IDs for batch retrieval.")
+		.option(
+			"--field <name>",
+			'Extract a single named section from the issue description (e.g. "Done when"). ' +
+				"Matches H2/H3 headers and bold pseudo-headers case-insensitively. " +
+				"Outputs the section text only — no JSON envelope. Single-issue only.",
+		)
 		.addHelpText(
 			"after",
-			"\nBoth UUID and identifiers like ABC-123 are supported.\nMultiple IDs: el-linear issue get DEV-123 DEV-456 DEV-789",
+			'\nBoth UUID and identifiers like ABC-123 are supported.\nMultiple IDs: el-linear issue get DEV-123 DEV-456 DEV-789\nExtract a section: el-linear issue read DEV-123 --field "Done when"',
 		)
 		.action(handleAsyncCommand(readIssues));
 

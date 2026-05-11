@@ -1,5 +1,6 @@
 import type { Command } from "commander";
 import { downloadLinearUploads } from "../utils/download-uploads.js";
+import { extractField } from "../utils/extract-field.js";
 import { createFileService } from "../utils/file-service.js";
 import { GraphQLIssuesService } from "../utils/graphql-issues-service.js";
 import { createGraphQLService } from "../utils/graphql-service.js";
@@ -24,9 +25,15 @@ export function setupReadShortcut(program: Command): void {
 		.alias("view")
 		.alias("show")
 		.description("Shortcut for `issues read`. Get issue details by identifier.")
+		.option(
+			"--field <name>",
+			'Extract a single named section from the issue description (e.g. "Done when"). ' +
+				"Matches H2/H3 headers and bold pseudo-headers case-insensitively. " +
+				"Outputs the section text only — no JSON envelope.",
+		)
 		.addHelpText(
 			"after",
-			"\nExamples:\n  el-linear read ADM-652\n  el-linear get DEV-123 DEV-456\n  el-linear ADM-652          (auto-detected)",
+			'\nExamples:\n  el-linear read ADM-652\n  el-linear get DEV-123 DEV-456\n  el-linear ADM-652          (auto-detected)\n  el-linear read DEV-123 --field "Done when"   (just that section)',
 		)
 		.action(handleAsyncCommand(readIssues));
 
@@ -76,7 +83,7 @@ export function setupReadShortcut(program: Command): void {
  */
 export async function readIssues(
 	issueIds: string[],
-	_options: Record<string, unknown>,
+	options: Record<string, unknown>,
 	command: Command,
 ): Promise<void> {
 	const rootOpts = getRootOpts(command);
@@ -84,9 +91,36 @@ export async function readIssues(
 	const linearService = await createLinearService(rootOpts);
 	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
 	const fileService = await createFileService(rootOpts);
+
+	const fieldName = typeof options.field === "string" ? options.field : null;
+
+	// --field is single-issue only. With multiple issues, a section
+	// extraction can't sensibly fan out to N different bodies — the
+	// caller almost always wants one section from one issue.
+	if (fieldName && issueIds.length > 1) {
+		throw new Error(
+			"--field is single-issue only; pass exactly one issueId. " +
+				"For multiple issues, drop --field and use --jq or --format summary.",
+		);
+	}
+
 	if (issueIds.length === 1) {
 		const issue = await issuesService.getIssueById(issueIds[0]);
 		const resolved = await downloadLinearUploads(issue, fileService);
+		if (fieldName) {
+			const section = extractField(resolved.description ?? "", fieldName);
+			if (section === null) {
+				// Print nothing to stdout, exit non-zero with a stderr hint.
+				// Mirrors `grep` semantics for "not found" — scripts can
+				// branch on the exit code.
+				process.stderr.write(
+					`el-linear: section "${fieldName}" not found in ${resolved.identifier}'s description\n`,
+				);
+				process.exit(1);
+			}
+			process.stdout.write(`${section}\n`);
+			return;
+		}
 		outputSuccess(resolved);
 	} else {
 		const results = await Promise.all(

@@ -385,6 +385,26 @@ global `summary` value works on every read/list command.
 `--raw` together with `--format summary` to render a list envelope as a
 bare item-list rather than an envelope.
 
+### Extract a single description section: `--field`
+
+`issues read --field <name>` extracts one named section from an issue's
+markdown description and prints just that section's text — no JSON
+envelope. Matches `##`/`###` headers and bold pseudo-headers
+(`**Done when**`) case-insensitively. Returns exit code 1 with a stderr
+message when the section is missing.
+
+```bash
+el-linear issues read DEV-123 --field "Done when"
+# - Thing A
+# - Thing B
+
+el-linear read ADM-652 --field "Out of scope"
+# Stuff we won't do.
+```
+
+Single-issue only — pair it with `--jq` on full JSON for batch
+extraction across many issues.
+
 ## Wrapping Linear references in arbitrary text
 
 `el-linear refs wrap` takes plain text on stdin (or via `--file`) and rewrites
