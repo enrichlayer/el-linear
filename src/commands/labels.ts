@@ -18,7 +18,7 @@ import { createGraphQLService } from "../utils/graphql-service.js";
 import { createLinearService } from "../utils/linear-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
 import { getRootOpts } from "../utils/root-opts.js";
-import { validateHexColor } from "../utils/validators.js";
+import { parsePositiveInt, validateHexColor } from "../utils/validators.js";
 
 async function handleCreateLabel(
 	name: string,
@@ -120,7 +120,7 @@ export function setupLabelsCommands(program: Command): void {
 				const rootOpts = getRootOpts(command);
 				const teamFilter = options.team ? resolveTeam(options.team) : undefined;
 				const nameFilter = options.name as string | undefined;
-				const limit = Number.parseInt(options.limit, 10);
+				const limit = parsePositiveInt(options.limit, "--limit");
 				const ttl = resolveCacheTTL({
 					configTTL: loadConfig().cacheTTLSeconds,
 					noCacheFlag: rootOpts.cache === false,

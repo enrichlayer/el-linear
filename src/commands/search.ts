@@ -11,6 +11,7 @@ import type { GraphQLService } from "../utils/graphql-service.js";
 import { createGraphQLService } from "../utils/graphql-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
 import { getRootOpts } from "../utils/root-opts.js";
+import { parsePositiveInt } from "../utils/validators.js";
 
 const TEMPLATES_QUERY = `
   query {
@@ -182,7 +183,7 @@ export function setupSearchCommands(program: Command): void {
 				async (query: string, options: OptionValues, command: Command) => {
 					const rootOpts = getRootOpts(command);
 					const graphQLService = await createGraphQLService(rootOpts);
-					const limit = Number.parseInt(options.limit, 10);
+					const limit = parsePositiveInt(options.limit, "--limit");
 
 					const requestedTypes = options.type
 						? options.type.split(",").map((t: string) => t.trim().toLowerCase())

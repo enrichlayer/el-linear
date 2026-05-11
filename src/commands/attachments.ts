@@ -4,6 +4,7 @@ import { createGraphQLAttachmentsService } from "../utils/graphql-attachments-se
 import { createLinearService } from "../utils/linear-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
 import { getRootOpts } from "../utils/root-opts.js";
+import { parsePositiveInt } from "../utils/validators.js";
 
 export function setupAttachmentsCommands(program: Command): void {
 	const attachments = program
@@ -56,7 +57,7 @@ export function setupAttachmentsCommands(program: Command): void {
 						await createGraphQLAttachmentsService(rootOpts);
 					const allAttachments =
 						await attachmentsService.listAttachments(resolvedIssueId);
-					const limit = Number.parseInt(options.limit, 10);
+					const limit = parsePositiveInt(options.limit, "--limit");
 					const data = allAttachments.slice(0, limit);
 					outputSuccess({ data, meta: { count: data.length } });
 				},

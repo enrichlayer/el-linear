@@ -2,6 +2,7 @@ import type { Command, OptionValues } from "commander";
 import { createLinearService } from "../utils/linear-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
 import { getRootOpts } from "../utils/root-opts.js";
+import { parsePositiveInt } from "../utils/validators.js";
 
 export function setupUsersCommands(program: Command): void {
 	const users = program.command("users").description("User operations");
@@ -22,7 +23,7 @@ export function setupUsersCommands(program: Command): void {
 				const service = await createLinearService(rootOpts);
 				const result = await service.getUsers(
 					options.active,
-					Number.parseInt(options.limit, 10),
+					parsePositiveInt(options.limit, "--limit"),
 					options.name as string | undefined,
 				);
 				outputSuccess({ data: result, meta: { count: result.length } });

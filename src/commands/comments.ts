@@ -31,6 +31,7 @@ import { resolveMentions } from "../utils/mention-resolver.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
 import { getRootOpts } from "../utils/root-opts.js";
 import { validateReferences } from "../utils/validate-references.js";
+import { parsePositiveInt } from "../utils/validators.js";
 import { getWorkspaceUrlKey } from "../utils/workspace-url.js";
 
 // Match Linear's bodyData validation error in multiple phrasings so a wording
@@ -316,7 +317,7 @@ async function handleListComments(
 		LIST_COMMENTS_QUERY,
 		{
 			issueId: resolvedId,
-			first: Number.parseInt(options.limit, 10),
+			first: parsePositiveInt(options.limit, "--limit"),
 		},
 	);
 	if (!result.issue) {

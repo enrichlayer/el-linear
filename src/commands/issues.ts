@@ -49,6 +49,7 @@ import {
 	formatTable,
 } from "../utils/table-formatter.js";
 import {
+	parsePositiveInt,
 	parsePriorityFilter,
 	splitList,
 	validatePriority,
@@ -246,7 +247,7 @@ async function handleListIssues(
 				? parsePriorityFilter(options.priority)
 				: undefined,
 			orderBy: options.sort === "created" ? "createdAt" : "updatedAt",
-			limit: Number.parseInt(options.limit, 10),
+			limit: parsePositiveInt(options.limit, "--limit"),
 		};
 		const result = sortIssues(
 			await issuesService.searchIssues(searchArgs),
@@ -257,7 +258,7 @@ async function handleListIssues(
 		});
 	} else {
 		const result = sortIssues(
-			await issuesService.getIssues(Number.parseInt(options.limit, 10)),
+			await issuesService.getIssues(parsePositiveInt(options.limit, "--limit")),
 			options.sort,
 		);
 		outputIssues(result, options.format, options.fields, {});
@@ -290,7 +291,7 @@ async function handleSearchIssues(
 		priority: options.priority
 			? parsePriorityFilter(options.priority)
 			: undefined,
-		limit: Number.parseInt(options.limit, 10),
+		limit: parsePositiveInt(options.limit, "--limit"),
 	};
 	const result = sortIssues(
 		await issuesService.searchIssues(searchArgs),

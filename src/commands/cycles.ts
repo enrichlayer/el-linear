@@ -8,6 +8,7 @@ import {
 import { createLinearService } from "../utils/linear-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
 import { getRootOpts } from "../utils/root-opts.js";
+import { parsePositiveInt } from "../utils/validators.js";
 
 export function setupCyclesCommands(program: Command): void {
 	const cycles = program
@@ -37,7 +38,7 @@ export function setupCyclesCommands(program: Command): void {
 				const allCycles = await linearService.getCycles(
 					teamFilter,
 					options.active || undefined,
-					Number.parseInt(options.limit, 10),
+					parsePositiveInt(options.limit, "--limit"),
 				);
 				if (options.aroundActive) {
 					const n = Number.parseInt(options.aroundActive, 10);
