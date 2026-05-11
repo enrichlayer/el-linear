@@ -37,7 +37,7 @@ import {
 	renderMarkdownTable,
 } from "../utils/table-formatter.js";
 import { isUuid } from "../utils/uuid.js";
-import { splitList } from "../utils/validators.js";
+import { parsePositiveInt, splitList } from "../utils/validators.js";
 
 const VALID_PROJECT_STATES: ReadonlySet<string> = new Set([
 	"backlog",
@@ -610,7 +610,7 @@ export function setupProjectsCommands(program: Command): void {
 		.action(
 			handleAsyncCommand(async (options: OptionValues, command: Command) => {
 				const rootOpts = getRootOpts(command);
-				const limit = Number.parseInt(options.limit, 10);
+				const limit = parsePositiveInt(options.limit, "--limit");
 				const nameFilter = options.name as string | undefined;
 				const stateFilter = resolveProjectStateFilter(options);
 				const ttl = resolveCacheTTL({

@@ -31,7 +31,7 @@ import {
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
 import { getRootOpts } from "../utils/root-opts.js";
 import { isUuid } from "../utils/uuid.js";
-import { validateIsoDate } from "../utils/validators.js";
+import { parsePositiveInt, validateIsoDate } from "../utils/validators.js";
 
 async function resolveMilestoneId(
 	milestoneNameOrId: string,
@@ -92,7 +92,7 @@ async function handleListMilestones(
 		LIST_PROJECT_MILESTONES_QUERY,
 		{
 			projectId,
-			first: Number.parseInt(options.limit || "50", 10),
+			first: parsePositiveInt(options.limit || "50", "--limit"),
 		},
 	);
 	const nodes = result.project?.projectMilestones.nodes ?? [];

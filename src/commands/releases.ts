@@ -18,6 +18,7 @@ import type { LinearRelease } from "../types/linear.js";
 import { createGraphQLService } from "../utils/graphql-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
 import { getRootOpts } from "../utils/root-opts.js";
+import { parsePositiveInt } from "../utils/validators.js";
 
 function transformRelease(
 	release: ReleaseListNode | ReleaseDetailNode | CreatedReleaseNode,
@@ -137,7 +138,7 @@ export function setupReleasesCommands(program: Command): void {
 				const result = await graphQLService.rawRequest<GetReleasesResponse>(
 					GET_RELEASES_QUERY,
 					{
-						first: Number.parseInt(options.limit, 10),
+						first: parsePositiveInt(options.limit, "--limit"),
 						filter: Object.keys(filter).length > 0 ? filter : undefined,
 					},
 				);

@@ -4,6 +4,7 @@ import { createGraphQLDocumentsService } from "../utils/graphql-documents-servic
 import { createLinearService } from "../utils/linear-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
 import { getRootOpts } from "../utils/root-opts.js";
+import { parsePositiveInt } from "../utils/validators.js";
 
 function extractDocumentIdFromUrl(url: string): string | null {
 	try {
@@ -87,7 +88,7 @@ async function handleListDocuments(
 	const rootOpts = getRootOpts(command);
 	const documentsService = await createGraphQLDocumentsService(rootOpts);
 	const linearService = await createLinearService(rootOpts);
-	const limit = Number.parseInt(options.limit || "50", 10);
+	const limit = parsePositiveInt(options.limit || "50", "--limit");
 	if (Number.isNaN(limit) || limit < 1) {
 		throw new Error(
 			`Invalid limit "${options.limit}": must be a positive number`,

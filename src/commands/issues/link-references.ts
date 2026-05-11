@@ -44,6 +44,7 @@ import {
 } from "../../utils/linear-service.js";
 import { outputSuccess } from "../../utils/output.js";
 import { getRootOpts } from "../../utils/root-opts.js";
+import { parsePositiveInt } from "../../utils/validators.js";
 import {
 	prepareDescriptionRewrite,
 	pushDescriptionUpdate,
@@ -176,13 +177,8 @@ async function handleLinkReferencesBatch(
 ): Promise<void> {
 	const teamId = resolveTeam(teamInput);
 	const limit = options.limit
-		? Number.parseInt(options.limit as string, 10)
+		? parsePositiveInt(options.limit as string, "--limit")
 		: 100;
-	if (!Number.isFinite(limit) || limit <= 0) {
-		throw new Error(
-			`--limit must be a positive integer, got: ${options.limit}`,
-		);
-	}
 
 	const dryRun = Boolean(options.dryRun);
 	const includeComments = Boolean(options.includeComments);

@@ -30,6 +30,7 @@ export function setOutputFormat(format: OutputFormat): void {
 	outputFormat = format;
 }
 
+/** @internal Test seam — consumers should not depend on the format state. */
 export function getOutputFormat(): OutputFormat {
 	return outputFormat;
 }
@@ -156,6 +157,7 @@ export function resetWarnings(): void {
 	warningBuffer.length = 0;
 }
 
+/** @internal Test seam — call between tests that toggle `setOutputFormat`. */
 export function resetOutputFormat(): void {
 	outputFormat = "json";
 }

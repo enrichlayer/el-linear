@@ -4,6 +4,7 @@ import { cached, resolveCacheTTL } from "../utils/disk-cache.js";
 import { createLinearService } from "../utils/linear-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
 import { getRootOpts } from "../utils/root-opts.js";
+import { parsePositiveInt } from "../utils/validators.js";
 
 export function setupTeamsCommands(program: Command): void {
 	const teams = program
@@ -19,7 +20,7 @@ export function setupTeamsCommands(program: Command): void {
 		.action(
 			handleAsyncCommand(async (options: OptionValues, command: Command) => {
 				const rootOpts = getRootOpts(command);
-				const limit = Number.parseInt(options.limit, 10);
+				const limit = parsePositiveInt(options.limit, "--limit");
 				const ttl = resolveCacheTTL({
 					configTTL: loadConfig().cacheTTLSeconds,
 					// commander's `--no-cache` produces `cache: false` on the root opts.
