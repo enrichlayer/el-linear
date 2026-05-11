@@ -12,6 +12,8 @@ const mockGetIssueById = vi.fn();
 const mockCreateIssue = vi.fn();
 const mockUpdateIssue = vi.fn();
 const mockSearchIssues = vi.fn();
+const mockArchiveIssue = vi.fn();
+const mockDeleteIssue = vi.fn();
 
 class MockGraphQLIssuesService {
 	getIssues = mockGetIssues;
@@ -19,6 +21,8 @@ class MockGraphQLIssuesService {
 	createIssue = mockCreateIssue;
 	updateIssue = mockUpdateIssue;
 	searchIssues = mockSearchIssues;
+	archiveIssue = mockArchiveIssue;
+	deleteIssue = mockDeleteIssue;
 }
 
 vi.mock("../utils/graphql-issues-service.js", () => ({
@@ -1056,6 +1060,95 @@ describe("issues commands", () => {
 
 			expect(mockUpdateIssue).toHaveBeenCalled();
 			expect(mockOutputSuccess).toHaveBeenCalled();
+		});
+	});
+
+	describe("issues archive/delete", () => {
+		it("archives an issue by identifier", async () => {
+			mockArchiveIssue.mockResolvedValue({
+				id: "uuid-1",
+				entity: { id: "uuid-1" },
+				lastSyncId: 10,
+			});
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, ["issues", "archive", "DEV-1"]);
+
+			expect(mockArchiveIssue).toHaveBeenCalledWith("DEV-1");
+			expect(mockOutputSuccess).toHaveBeenCalledWith({
+				success: true,
+				archived: true,
+				id: "uuid-1",
+				entity: { id: "uuid-1" },
+				lastSyncId: 10,
+			});
+		});
+
+		it("deletes an issue without permanently deleting by default", async () => {
+			mockDeleteIssue.mockResolvedValue({
+				id: "uuid-1",
+				entity: { id: "uuid-1" },
+				lastSyncId: 11,
+			});
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, ["issues", "delete", "DEV-1"]);
+
+			expect(mockDeleteIssue).toHaveBeenCalledWith("DEV-1", {
+				permanentlyDelete: false,
+			});
+			expect(mockOutputSuccess).toHaveBeenCalledWith({
+				success: true,
+				deleted: true,
+				permanentlyDeleted: false,
+				id: "uuid-1",
+				entity: { id: "uuid-1" },
+				lastSyncId: 11,
+			});
+		});
+
+		it("supports permanent issue deletion", async () => {
+			mockDeleteIssue.mockResolvedValue({
+				id: "uuid-1",
+				lastSyncId: 12,
+			});
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"delete",
+				"DEV-1",
+				"--permanently-delete",
+			]);
+
+			expect(mockDeleteIssue).toHaveBeenCalledWith("DEV-1", {
+				permanentlyDelete: true,
+			});
+			expect(mockOutputSuccess).toHaveBeenCalledWith({
+				success: true,
+				deleted: true,
+				permanentlyDeleted: true,
+				id: "uuid-1",
+				lastSyncId: 12,
+			});
+		});
+
+		it("maps hard-delete to permanent issue deletion", async () => {
+			mockDeleteIssue.mockResolvedValue({
+				id: "uuid-1",
+				lastSyncId: 13,
+			});
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, ["issues", "hard-delete", "DEV-1"]);
+
+			expect(mockDeleteIssue).toHaveBeenCalledWith("DEV-1", {
+				permanentlyDelete: true,
+			});
 		});
 	});
 

@@ -1,7 +1,9 @@
 import { Kind, parse, visit } from "graphql";
 import { describe, expect, it } from "vitest";
 import {
+	ARCHIVE_PROJECT_MUTATION,
 	CREATE_PROJECT_MUTATION,
+	DELETE_PROJECT_MUTATION,
 	GET_PROJECT_QUERY,
 	GET_PROJECT_TEAM_ISSUES_QUERY,
 	PROJECT_BY_ID_QUERY,
@@ -167,14 +169,36 @@ describe("UPDATE_PROJECT_MUTATION", () => {
 	});
 });
 
+describe("ARCHIVE_PROJECT_MUTATION", () => {
+	it("is a valid mutation with id", () => {
+		expect(() => parse(ARCHIVE_PROJECT_MUTATION)).not.toThrow();
+		expect(getOperationType(ARCHIVE_PROJECT_MUTATION)).toBe("mutation");
+		expect(extractVariables(ARCHIVE_PROJECT_MUTATION)).toEqual(["id"]);
+		expect(containsField(ARCHIVE_PROJECT_MUTATION, "projectArchive")).toBe(
+			true,
+		);
+	});
+});
+
+describe("DELETE_PROJECT_MUTATION", () => {
+	it("is a valid mutation with id", () => {
+		expect(() => parse(DELETE_PROJECT_MUTATION)).not.toThrow();
+		expect(getOperationType(DELETE_PROJECT_MUTATION)).toBe("mutation");
+		expect(extractVariables(DELETE_PROJECT_MUTATION)).toEqual(["id"]);
+		expect(containsField(DELETE_PROJECT_MUTATION, "projectDelete")).toBe(true);
+	});
+});
+
 describe("all project queries parse without errors", () => {
 	const queries = {
+		ARCHIVE_PROJECT_MUTATION,
 		TEAM_LOOKUP_QUERY,
 		PROJECT_BY_ID_QUERY,
 		GET_PROJECT_QUERY,
 		GET_PROJECT_TEAM_ISSUES_QUERY,
 		SEARCH_PROJECTS_BY_NAME_QUERY,
 		CREATE_PROJECT_MUTATION,
+		DELETE_PROJECT_MUTATION,
 		UPDATE_PROJECT_MUTATION,
 	};
 

@@ -2,7 +2,9 @@ import type { Command, OptionValues } from "commander";
 import { loadConfig } from "../config/config.js";
 import { resolveTeam } from "../config/resolver.js";
 import {
+	ARCHIVE_PROJECT_MUTATION,
 	CREATE_PROJECT_MUTATION,
+	DELETE_PROJECT_MUTATION,
 	GET_PROJECT_QUERY,
 	GET_PROJECT_TEAM_ISSUES_QUERY,
 	PROJECT_BY_ID_QUERY,
@@ -10,7 +12,9 @@ import {
 	UPDATE_PROJECT_MUTATION,
 } from "../queries/projects.js";
 import type {
+	ArchiveProjectResponse,
 	CreateProjectResponse,
+	DeleteProjectResponse,
 	GetProjectResponse,
 	GetProjectTeamIssuesResponse,
 	ProjectByIdResponse,
@@ -490,6 +494,58 @@ async function handleCreateProject(
 	});
 }
 
+async function handleArchiveProject(
+	projectNameOrId: string,
+	_options: OptionValues,
+	command: Command,
+): Promise<void> {
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
+	const projectId = await linearService.resolveProjectId(projectNameOrId);
+	const result = await graphQLService.rawRequest<ArchiveProjectResponse>(
+		ARCHIVE_PROJECT_MUTATION,
+		{ id: projectId },
+	);
+	const payload = result.projectArchive;
+	if (!payload.success) {
+		throw new Error(`Failed to archive project "${projectNameOrId}"`);
+	}
+	outputSuccess({
+		success: true,
+		archived: true,
+		id: projectId,
+		entity: payload.entity ?? undefined,
+		lastSyncId: payload.lastSyncId,
+	});
+}
+
+async function handleDeleteProject(
+	projectNameOrId: string,
+	_options: OptionValues,
+	command: Command,
+): Promise<void> {
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
+	const projectId = await linearService.resolveProjectId(projectNameOrId);
+	const result = await graphQLService.rawRequest<DeleteProjectResponse>(
+		DELETE_PROJECT_MUTATION,
+		{ id: projectId },
+	);
+	const payload = result.projectDelete;
+	if (!payload.success) {
+		throw new Error(`Failed to delete project "${projectNameOrId}"`);
+	}
+	outputSuccess({
+		success: true,
+		deleted: true,
+		id: projectId,
+		entity: payload.entity ?? undefined,
+		lastSyncId: payload.lastSyncId,
+	});
+}
+
 export function setupProjectsCommands(program: Command): void {
 	const projects = program
 		.command("projects")
@@ -511,6 +567,16 @@ export function setupProjectsCommands(program: Command): void {
 		)
 		.option("--force", "create even if a project with the same name exists")
 		.action(handleAsyncCommand(handleCreateProject));
+
+	projects
+		.command("archive <project>")
+		.description("Archive a project (resolves names)")
+		.action(handleAsyncCommand(handleArchiveProject));
+
+	projects
+		.command("delete <project>")
+		.description("Delete (trash) a project (resolves names)")
+		.action(handleAsyncCommand(handleDeleteProject));
 
 	projects
 		.command("list")

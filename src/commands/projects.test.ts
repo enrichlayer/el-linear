@@ -6,12 +6,27 @@ import {
 } from "../__tests__/test-helpers.js";
 
 const mockGetProjects = vi.fn().mockResolvedValue({ projects: [] });
-const mockService = { getProjects: mockGetProjects };
+const mockResolveProjectId = vi
+	.fn()
+	.mockImplementation((project: string) =>
+		Promise.resolve(`project-id-${project}`),
+	);
+const mockResolveTeamId = vi.fn();
+const mockService = {
+	getProjects: mockGetProjects,
+	resolveProjectId: mockResolveProjectId,
+	resolveTeamId: mockResolveTeamId,
+};
 const mockCreateLinearService = vi.fn().mockReturnValue(mockService);
 const mockOutputSuccess = vi.fn();
+const mockGraphQLService = { rawRequest: vi.fn() };
 
 vi.mock("../utils/linear-service.js", () => ({
 	createLinearService: mockCreateLinearService,
+}));
+
+vi.mock("../utils/graphql-service.js", () => ({
+	createGraphQLService: vi.fn().mockResolvedValue(mockGraphQLService),
 }));
 
 vi.mock("../utils/output.js", async (importOriginal) => {
@@ -40,6 +55,9 @@ describe("projects commands", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		suppressExit();
+		mockResolveProjectId.mockImplementation((project: string) =>
+			Promise.resolve(`project-id-${project}`),
+		);
 	});
 
 	describe("projects list", () => {
@@ -119,6 +137,62 @@ describe("projects commands", () => {
 			expect(mockOutputSuccess).toHaveBeenCalledWith({
 				data: projectsData,
 				meta: { count: 1 },
+			});
+		});
+	});
+
+	describe("projects archive/delete", () => {
+		it("archives a project by name", async () => {
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				projectArchive: {
+					success: true,
+					entity: { id: "project-id-Launch" },
+					lastSyncId: 20,
+				},
+			});
+
+			const program = createTestProgram();
+			setupProjectsCommands(program);
+			await runCommand(program, ["projects", "archive", "Launch"]);
+
+			expect(mockResolveProjectId).toHaveBeenCalledWith("Launch");
+			expect(mockGraphQLService.rawRequest).toHaveBeenCalledWith(
+				expect.stringContaining("projectArchive"),
+				{ id: "project-id-Launch" },
+			);
+			expect(mockOutputSuccess).toHaveBeenCalledWith({
+				success: true,
+				archived: true,
+				id: "project-id-Launch",
+				entity: { id: "project-id-Launch" },
+				lastSyncId: 20,
+			});
+		});
+
+		it("deletes a project by name", async () => {
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				projectDelete: {
+					success: true,
+					entity: null,
+					lastSyncId: 21,
+				},
+			});
+
+			const program = createTestProgram();
+			setupProjectsCommands(program);
+			await runCommand(program, ["projects", "delete", "Launch"]);
+
+			expect(mockResolveProjectId).toHaveBeenCalledWith("Launch");
+			expect(mockGraphQLService.rawRequest).toHaveBeenCalledWith(
+				expect.stringContaining("projectDelete"),
+				{ id: "project-id-Launch" },
+			);
+			expect(mockOutputSuccess).toHaveBeenCalledWith({
+				success: true,
+				deleted: true,
+				id: "project-id-Launch",
+				entity: undefined,
+				lastSyncId: 21,
 			});
 		});
 	});

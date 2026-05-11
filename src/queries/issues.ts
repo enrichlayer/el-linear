@@ -200,6 +200,30 @@ export const UPDATE_ISSUE_MUTATION = `
   }
 `;
 
+export const ARCHIVE_ISSUE_MUTATION = `
+  mutation ArchiveIssue($id: String!) {
+    issueArchive(id: $id) {
+      success
+      lastSyncId
+      entity {
+        id
+      }
+    }
+  }
+`;
+
+export const DELETE_ISSUE_MUTATION = `
+  mutation DeleteIssue($id: String!, $permanentlyDelete: Boolean) {
+    issueDelete(id: $id, permanentlyDelete: $permanentlyDelete) {
+      success
+      lastSyncId
+      entity {
+        id
+      }
+    }
+  }
+`;
+
 export const BATCH_RESOLVE_FOR_CREATE_QUERY = `
   query BatchResolveForCreate(
     $teamKey: String

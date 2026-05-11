@@ -62,3 +62,21 @@ export interface UpdateProjectResponse {
 		project: ProjectBaseNode | null;
 	};
 }
+
+export interface ProjectArchiveEntity {
+	id: string;
+}
+
+export interface ProjectArchivePayload {
+	success: boolean;
+	lastSyncId: number;
+	entity: ProjectArchiveEntity | null;
+}
+
+export interface ArchiveProjectResponse {
+	projectArchive: ProjectArchivePayload;
+}
+
+export interface DeleteProjectResponse {
+	projectDelete: ProjectArchivePayload;
+}

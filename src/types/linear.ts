@@ -222,8 +222,14 @@ type GraphQLValue =
 
 /**
  * Recursive index type for raw GraphQL responses.
- * All nested property access requires narrowing via `as GraphQLResponseData`
- * or `as string` etc. — this prevents `any` from leaking into the type system.
+ *
+ * **Prefer per-query response types** (see `src/queries/*-types.ts`)
+ * over `GraphQLResponseData` for any new consumer. ALL-937 swept the
+ * old service/command consumers; this type is kept as the fallback
+ * for the few generic transports (e.g. `graphql-service.rawRequest`'s
+ * default generic). Don't reach for `as GraphQLResponseData` to skip
+ * a typed shape — the per-query types catch query/consumer drift at
+ * compile time. This type cannot.
  */
 export interface GraphQLResponseData {
 	[key: string]: GraphQLValue;
