@@ -86,7 +86,6 @@ export interface SearchIssueArgs {
 }
 
 /**
-/**
  * Fields shared by `CreateIssueArgs` and `UpdateIssueArgs`. Both mutations
  * accept the same scalar/foreign-key fields — only their lifecycle
  * fields differ. `Create` adds `teamInput`/`subscriberIds`/`templateId`

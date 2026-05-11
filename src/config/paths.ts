@@ -24,10 +24,6 @@ export const ALIASES_PROGRESS_PATH = path.join(
  * path first and fall back to these. Writes always go to the new path.
  */
 const LEGACY_LINCTL_CONFIG_DIR = path.join(os.homedir(), ".config", "linctl");
-const LEGACY_LINCTL_CONFIG_PATH = path.join(
-	LEGACY_LINCTL_CONFIG_DIR,
-	"config.json",
-);
 export const LEGACY_LINCTL_TOKEN_PATH = path.join(
 	LEGACY_LINCTL_CONFIG_DIR,
 	"token",
