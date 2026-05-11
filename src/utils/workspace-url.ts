@@ -6,11 +6,20 @@ import type { GraphQLService } from "./graphql-service.js";
  * issue URLs). Used to build canonical markdown link URLs like
  * `https://linear.app/<urlKey>/issue/<identifier>/`.
  *
- * Resolution order:
- *   1. `config.workspaceUrlKey` if explicitly set in el-linear config
- *   2. `viewer.organization.urlKey` from the Linear API (fetched once, cached)
+ * Resolution order (highest priority first):
  *
- * Cached in-process for the lifetime of the CLI invocation.
+ *   1. `options.override` — typically wired from a `--workspace-url-key` CLI flag
+ *      (per-invocation, wins over everything).
+ *   2. `EL_LINEAR_WORKSPACE_URL_KEY` env var.
+ *   3. `config.workspaceUrlKey` from `~/.config/el-linear/config.json`.
+ *   4. Live `viewer.organization.urlKey` GraphQL query (cached in-process).
+ *
+ * Layers 1–3 short-circuit without touching the network — this makes
+ * `el-linear refs wrap --no-validate` work offline once any one of them
+ * is set. Layer 4 is the original behavior preserved as a fallback.
+ *
+ * The graphQLService is only needed for layer 4 — pass `undefined` (or omit it)
+ * when the caller knows the network will not be used.
  */
 
 const VIEWER_ORG_URL_KEY_QUERY = /* GraphQL */ `
@@ -31,21 +40,53 @@ interface ViewerOrgResponse {
 	};
 }
 
+export interface GetWorkspaceUrlKeyOptions {
+	/** Highest-priority source. Typically the `--workspace-url-key` flag. */
+	override?: string;
+}
+
+const WORKSPACE_URL_KEY_ENV = "EL_LINEAR_WORKSPACE_URL_KEY";
+
 let cachedUrlKey: string | undefined;
 
 export async function getWorkspaceUrlKey(
-	graphQLService: GraphQLService,
+	graphQLService?: GraphQLService,
+	options: GetWorkspaceUrlKeyOptions = {},
 ): Promise<string> {
+	// 1. Per-invocation override — highest priority.
+	if (options.override) {
+		return options.override;
+	}
+
+	// 2. Env var. Read on every call (cheap; lets tests/CI flip the value
+	//    mid-process without restarting). Not cached, so a test that sets
+	//    EL_LINEAR_WORKSPACE_URL_KEY then unsets it sees the unset state.
+	const envKey = process.env[WORKSPACE_URL_KEY_ENV];
+	if (envKey) {
+		return envKey;
+	}
+
+	// Layers 3-4 are cached in-process — config and the live lookup are
+	// both stable for the CLI invocation's lifetime.
 	if (cachedUrlKey) {
 		return cachedUrlKey;
 	}
 
+	// 3. Config override.
 	const { workspaceUrlKey } = loadConfig();
 	if (workspaceUrlKey) {
 		cachedUrlKey = workspaceUrlKey;
 		return workspaceUrlKey;
 	}
 
+	// 4. Live API lookup — requires a GraphQL service.
+	if (!graphQLService) {
+		throw new Error(
+			"Could not resolve Linear workspace URL key — no override, env, or config set, " +
+				"and no GraphQL service was provided for the live lookup. " +
+				`Set \`workspaceUrlKey\` in your el-linear config, or \`${WORKSPACE_URL_KEY_ENV}\` in the environment.`,
+		);
+	}
 	const data = await graphQLService.rawRequest<ViewerOrgResponse>(
 		VIEWER_ORG_URL_KEY_QUERY,
 	);

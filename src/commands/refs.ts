@@ -78,6 +78,7 @@ interface HandleWrapOptions extends OptionValues {
 	file?: string;
 	target?: string;
 	validate?: boolean;
+	workspaceUrlKey?: string;
 }
 
 async function handleWrap(
@@ -107,6 +108,13 @@ async function handleWrap(
 			return new Set(map.keys());
 		},
 		async resolveUrlKey() {
+			// When --workspace-url-key or EL_LINEAR_WORKSPACE_URL_KEY supplies
+			// the key, the live lookup never fires — skip the GraphQL service
+			// instantiation entirely so `refs wrap --no-validate` works offline.
+			const override = options.workspaceUrlKey;
+			if (override || process.env.EL_LINEAR_WORKSPACE_URL_KEY) {
+				return getWorkspaceUrlKey(undefined, { override });
+			}
 			const graphQLService = await createGraphQLService(rootOpts);
 			return getWorkspaceUrlKey(graphQLService);
 		},
@@ -148,6 +156,10 @@ export function setupRefsCommands(program: Command): void {
 		.option(
 			"--no-validate",
 			"skip workspace validation; wrap every regex match. Faster, but may produce broken links for IDs that don't exist.",
+		)
+		.option(
+			"--workspace-url-key <key>",
+			"workspace URL key (the segment after linear.app/). Overrides config + env var. With --no-validate, makes the command fully offline.",
 		)
 		.action(handleAsyncCommand(handleWrap));
 }

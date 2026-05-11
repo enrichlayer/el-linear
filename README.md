@@ -237,6 +237,19 @@ A full reference with every key documented lives in [config.example.json](./conf
 UUIDs come from the Linear UI (URL bars, settings pages) or via el-linear
 itself: `el-linear teams list --raw | jq '.[] | {key, id}'`, etc.
 
+### Workspace URL key
+
+`refs wrap` and the auto-link paths build canonical issue URLs like
+`https://linear.app/<workspaceUrlKey>/issue/<id>/`. By default the key is
+fetched once per CLI invocation via `viewer.organization.urlKey`. To skip the
+network call (offline use, perf, `--no-validate`), provide it via any of:
+
+1. `--workspace-url-key <key>` flag on `refs wrap` (per-invocation, highest priority)
+2. `EL_LINEAR_WORKSPACE_URL_KEY` env var
+3. `workspaceUrlKey` field in `config.json`
+
+When any of these is set, no GraphQL request is made.
+
 ## Term enforcement (with brand-promotion examples)
 
 The `terms` rules let you keep a list of canonical names and the misspellings
