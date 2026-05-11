@@ -10,6 +10,7 @@ import { randomBytes } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { withFileLock } from "../../auth/oauth-fs.js";
 import type { ElLinearConfig } from "../../config/config.js";
 import {
 	ALIASES_PROGRESS_PATH,
@@ -111,9 +112,11 @@ export async function ensureConfigDir(): Promise<void> {
 	}
 }
 
-export async function readConfig(): Promise<WizardConfig> {
+export async function readConfig(
+	configPath: string = activePaths().configPath,
+): Promise<WizardConfig> {
 	try {
-		const raw = await fs.readFile(activePaths().configPath, "utf8");
+		const raw = await fs.readFile(configPath, "utf8");
 		return JSON.parse(raw) as WizardConfig;
 	} catch (err) {
 		if ((err as NodeJS.ErrnoException).code === "ENOENT") {
@@ -123,15 +126,47 @@ export async function readConfig(): Promise<WizardConfig> {
 	}
 }
 
-export async function writeConfig(config: WizardConfig): Promise<void> {
+export async function writeConfig(
+	config: WizardConfig,
+	configPath: string = activePaths().configPath,
+): Promise<void> {
 	await ensureConfigDir();
 	// Stable key order so byte-identical config produces byte-identical output.
 	const sorted = sortKeys(config);
-	await atomicWrite(
-		activePaths().configPath,
-		`${JSON.stringify(sorted, null, 2)}\n`,
-		0o644,
-	);
+	await atomicWrite(configPath, `${JSON.stringify(sorted, null, 2)}\n`, 0o644);
+}
+
+/**
+ * Run a read-modify-write update on the active profile's config.json under
+ * an exclusive file lock. The mutator receives the latest on-disk config
+ * (re-read inside the lock), and its return value is written back atomically.
+ *
+ * Use this anywhere two parallel wizard invocations could race a
+ * read → mutate → write sequence. Each `el-linear init <step>` re-reads the
+ * config and merges its slice; without serialization, the slower writer's
+ * mutation would clobber the faster writer's already-persisted changes.
+ *
+ * The interactive prompt phase MUST run outside the lock — prompts can sit
+ * waiting for user input longer than the lock's stale window. Seed prompts
+ * with a cheap pre-read, do the prompts, then call `updateConfig` with a
+ * mutator that re-reads and merges your slice on top of the latest state.
+ *
+ * The active-profile path is snapshotted ONCE at entry and threaded through
+ * `readConfig` + `writeConfig`. A theoretical mid-update profile switch
+ * (`--profile` is bound by the commander preAction before any subcommand
+ * runs, so this can't happen via the CLI today) can't cause a lock-A /
+ * read-or-write-B mismatch.
+ */
+export async function updateConfig(
+	mutator: (current: WizardConfig) => WizardConfig | Promise<WizardConfig>,
+): Promise<void> {
+	await ensureConfigDir();
+	const configPath = activePaths().configPath;
+	await withFileLock(configPath, async () => {
+		const current = await readConfig(configPath);
+		const next = await mutator(current);
+		await writeConfig(next, configPath);
+	});
 }
 
 export async function readToken(): Promise<string | null> {

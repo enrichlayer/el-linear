@@ -127,6 +127,103 @@ describe("writeToken security guarantees", () => {
 		);
 	});
 
+	it("updateConfig serialises concurrent read-modify-write so neither write is lost (DEV-4066)", async () => {
+		// Two parallel `init <step>` invocations both do:
+		//   readConfig → mutate one slice → writeConfig
+		// Without the lock the slower writer clobbers the faster writer's
+		// already-persisted slice. With updateConfig() the mutator runs
+		// inside withFileLock, so the second invocation re-reads the
+		// freshly-written state and merges on top of it.
+		vi.resetModules();
+		const { readConfig, updateConfig, writeConfig } = await import(
+			"./shared.js"
+		);
+		await writeConfig({});
+
+		// Both mutators add a distinct top-level key. If serialization works,
+		// both keys survive. If not, the slower-finishing mutator wins.
+		const a = updateConfig((current) => ({
+			...current,
+			defaultTeam: "TEAM-A",
+		}));
+		const b = updateConfig((current) => ({
+			...current,
+			defaultLabels: ["from-b"],
+		}));
+		await Promise.all([a, b]);
+
+		const result = await readConfig();
+		expect(result.defaultTeam).toBe("TEAM-A");
+		expect(result.defaultLabels).toEqual(["from-b"]);
+	});
+
+	it("updateConfig locks and reads/writes the same snapshot path even if active profile changes mid-update", async () => {
+		// Guard against a future call site that could swap profiles between
+		// the lock acquisition and the read+write inside the closure. If the
+		// snapshot weren't honored, the lock and the file ops would diverge
+		// onto different profile dirs — silently corrupting state.
+		// Implementation: updateConfig captures activePaths().configPath once
+		// at entry; readConfig + writeConfig accept that path as an arg.
+		vi.resetModules();
+		const { readConfig, updateConfig, writeConfig } = await import(
+			"./shared.js"
+		);
+		const paths = await import("../../config/paths.js");
+		await writeConfig({});
+		// Capture the path that was active when we started.
+		const originalPath = paths.resolveActiveProfile().configPath;
+
+		// Inside the mutator, simulate a "profile switch" by repointing
+		// future resolveActiveProfile() calls at a different path. The
+		// snapshot taken at updateConfig entry should still bind the
+		// lock + read + write to the ORIGINAL path.
+		const switchedPath = path.join(
+			path.dirname(originalPath),
+			"profiles",
+			"alternate",
+			"config.json",
+		);
+		await fs.mkdir(path.dirname(switchedPath), { recursive: true });
+		const resolveSpy = vi
+			.spyOn(paths, "resolveActiveProfile")
+			.mockReturnValueOnce(paths.resolveActiveProfile()); // first call: real
+
+		await updateConfig((current) => {
+			// Simulate the profile change in flight by overriding subsequent
+			// resolves. Without the snapshot, the inner writeConfig would
+			// land on switchedPath.
+			resolveSpy.mockReturnValue({
+				name: "alternate",
+				configPath: switchedPath,
+				tokenPath: path.join(path.dirname(switchedPath), "token"),
+			});
+			return { ...current, defaultTeam: "OK" };
+		});
+
+		// Critical assertion: the write hit the ORIGINAL path, not the
+		// switched-to one.
+		const onDisk = await readConfig(originalPath);
+		expect(onDisk.defaultTeam).toBe("OK");
+		await expect(fs.access(switchedPath)).rejects.toThrow();
+		resolveSpy.mockRestore();
+	});
+
+	it("updateConfig releases the lock after the mutator throws", async () => {
+		// If the lock weren't released on throw, the next caller would
+		// either time out or steal a stale lock — both bad. The finally
+		// block in withFileLock guarantees release.
+		vi.resetModules();
+		const { readConfig, updateConfig } = await import("./shared.js");
+		await expect(
+			updateConfig(() => {
+				throw new Error("mutator failure");
+			}),
+		).rejects.toThrow("mutator failure");
+		// Subsequent updateConfig must succeed without blocking.
+		await updateConfig((current) => ({ ...current, defaultTeam: "AFTER" }));
+		expect((await readConfig()).defaultTeam).toBe("AFTER");
+	});
+
 	it("atomic write: SIGINT-equivalent (rename failure) leaves the original file intact", async () => {
 		// We can't actually SIGINT in a test, but we can simulate by mocking
 		// fs.rename to reject — verifying that the original config file is
