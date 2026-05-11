@@ -57,5 +57,6 @@
 	"validation": {
 		"enabled": true,
 		"typeLabels": ["bug", "feature", "chore", "refactor", "spike"]
-	}
+	},
+	"workspaceUrlKey": "acme"
 }
