@@ -38,7 +38,7 @@ export function validatePriority(value: string): LinearPriority {
 			`"${value}" is not valid. Use names (none, urgent, high, medium/normal, low) or numbers (0-4).`,
 		);
 	}
-	// The 0–4 range check above is what narrows `n` to LinearPriority;
+	// The 0-4 range check above is what narrows `n` to LinearPriority;
 	// TypeScript can't infer that automatically.
 	return n as LinearPriority;
 }

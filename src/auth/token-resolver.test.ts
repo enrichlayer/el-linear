@@ -84,7 +84,9 @@ describe("getActiveAuth", () => {
 		const auth = await getActiveAuth({ now: () => NOW });
 		expect(auth.kind).toBe("oauth");
 		expect(auth.token).toBe(state.accessToken);
-		expect(auth.oauth?.accessToken).toBe(state.accessToken);
+		if (auth.kind === "oauth") {
+			expect(auth.oauth.accessToken).toBe(state.accessToken);
+		}
 	});
 
 	it("auto-refreshes when the access token is within the skew window", async () => {

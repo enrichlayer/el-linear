@@ -67,6 +67,13 @@ export interface ProjectMilestoneNode {
 	targetDate: string | null;
 }
 
+/**
+ * Linear's documented generation states for issue summaries. If Linear
+ * adds a new state in the future the runtime API would deserialize the
+ * new string verbatim — TypeScript wouldn't catch the divergence, but
+ * the typical `=== "completed"` check keeps working safely. Widen the
+ * union here when Linear documents a new state.
+ */
 export type IssueSummaryGenerationStatus = "completed" | "pending" | "failed";
 
 export interface IssueSummary {

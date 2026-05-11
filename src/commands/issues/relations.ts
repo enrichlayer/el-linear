@@ -14,7 +14,10 @@ import type {
 	RelationOutgoingNode,
 	RelationPeerNode,
 } from "../../queries/issues-types.js";
-import type { LinearIssueRelation } from "../../types/linear.js";
+import type {
+	LinearIssueRelation,
+	LinearPriority,
+} from "../../types/linear.js";
 import type { GraphQLService } from "../../utils/graphql-service.js";
 import type { LinearService } from "../../utils/linear-service.js";
 import { splitList } from "../../utils/validators.js";
@@ -101,7 +104,7 @@ export interface RelatedIssueEntry {
 		identifier: string;
 		title: string;
 		state?: { id: string; name: string };
-		priority?: number;
+		priority?: LinearPriority;
 		assignee?: { id: string; name: string };
 		team?: { id: string; key: string; name: string };
 	};
