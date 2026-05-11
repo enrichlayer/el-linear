@@ -105,6 +105,8 @@ export function setupIntrospectCommand(program: Command): void {
 					path,
 				});
 				process.exit(1);
+				return; // Defense: explicit so test correctness doesn't
+				// depend on the vi.spyOn(process.exit) mock throwing.
 			}
 			if (path.length === 0) {
 				outputSuccess({
@@ -115,35 +117,56 @@ export function setupIntrospectCommand(program: Command): void {
 					commands: program.commands.map(describeCommand),
 				});
 			} else {
-				outputSuccess(describeCommand(target as Command));
+				outputSuccess(describeCommand(target));
 			}
 		});
 
 	program
-		.command("validate-flag <args...>")
+		.command("validate-flag [args...]")
 		.description(
-			"Verify a flag exists on a command. Pass the command path followed by the flag — e.g. `el-linear validate-flag issues create --parent-ticket`. Exits 0 if the flag is defined on the target command (or on any ancestor for inherited globals), 1 otherwise. Use `--` before flags if commander mis-parses them: `el-linear validate-flag -- issues create --parent-ticket`.",
+			"Verify a flag exists on a command. Two equivalent forms:\n" +
+				"  $ el-linear validate-flag --check-flag --parent-ticket issues create\n" +
+				"  $ el-linear validate-flag issues create --parent-ticket\n" +
+				"The first form is unambiguous regardless of whether the flag-to-check " +
+				"takes an argument; the positional form needs `--` before flags that " +
+				"take args (e.g. `validate-flag -- issues create --jq`) so commander " +
+				"doesn't try to consume the next positional as the flag's value. " +
+				"Exits 0 if the flag is defined on the target command (or any " +
+				"ancestor for inherited globals), 1 otherwise.",
 		)
 		// Without these, commander tries to parse `--parent-ticket` (the
 		// flag we want to *check*) as if it were an option OF validate-flag
 		// itself. We need it to pass through as a positional arg.
 		.allowUnknownOption(true)
-		.action((args: string[]) => {
-			// The flag is the first arg that starts with `-`; everything
-			// before it is the command path. Tolerate the flag being
-			// anywhere in the args (not strictly last) since users may
-			// write it mid-args by habit.
-			const flagIdx = args.findIndex((a) => a.startsWith("-"));
-			if (flagIdx === -1) {
-				outputSuccess({
-					ok: false,
-					error: "No flag argument found. Expected `--<flag>` in the args.",
-					args,
-				});
-				process.exit(1);
+		.option(
+			"--check-flag <flag>",
+			"the flag to look up (unambiguous alternative to passing it positionally — use this when the flag-being-checked is one that takes an argument)",
+		)
+		.action((args: string[], options: { checkFlag?: string }) => {
+			// Resolve the flag-to-check from either `--check-flag <flag>` or
+			// the first positional arg that starts with `-`. The explicit
+			// option form sidesteps commander's positional ambiguity for
+			// flags that take arguments (e.g. `--jq <filter>`).
+			let flag: string;
+			let path: string[];
+			if (options.checkFlag) {
+				flag = options.checkFlag;
+				path = args; // all positionals are the command path
+			} else {
+				const flagIdx = args.findIndex((a) => a.startsWith("-"));
+				if (flagIdx === -1) {
+					outputSuccess({
+						ok: false,
+						error:
+							"No flag argument found. Pass `--check-flag <flag>` or include `--<flag>` in the positional args.",
+						args,
+					});
+					process.exit(1);
+					return;
+				}
+				path = args.slice(0, flagIdx);
+				flag = args[flagIdx];
 			}
-			const path = args.slice(0, flagIdx);
-			const flag = args[flagIdx];
 			const target = path.length === 0 ? program : findCommand(program, path);
 			if (!target) {
 				outputSuccess({
@@ -153,6 +176,7 @@ export function setupIntrospectCommand(program: Command): void {
 					flag,
 				});
 				process.exit(1);
+				return;
 			}
 			// Walk the target + ancestors so root-level globals
 			// (--api-token, --format, etc.) validate when a skill writes
@@ -174,6 +198,7 @@ export function setupIntrospectCommand(program: Command): void {
 					availableOptions: target.options.map((o) => o.long ?? o.short),
 				});
 				process.exit(1);
+				return;
 			}
 			outputSuccess({
 				ok: true,

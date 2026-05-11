@@ -217,4 +217,34 @@ describe("validate-flag", () => {
 		expect(out.ok).toBe(false);
 		expect(out.error).toContain("No flag argument");
 	});
+
+	it("accepts the flag via --check-flag for unambiguous parsing", () => {
+		// --check-flag form sidesteps commander's positional parsing
+		// entirely: works with flags that take args without needing `--`.
+		const r = captureRun(program, [
+			"validate-flag",
+			"--check-flag",
+			"--parent-ticket",
+			"issues",
+			"create",
+		]);
+		expect(r.exitCode).toBe(0);
+		const out = parseJson(r.stdout) as { ok: boolean; flag: string };
+		expect(out.ok).toBe(true);
+		expect(out.flag).toBe("--parent-ticket");
+	});
+
+	it("--check-flag with a missing flag returns ok=false", () => {
+		const r = captureRun(program, [
+			"validate-flag",
+			"--check-flag",
+			"--does-not-exist",
+			"issues",
+			"create",
+		]);
+		expect(r.exitCode).toBe(1);
+		const out = parseJson(r.stdout) as { ok: boolean; flag: string };
+		expect(out.ok).toBe(false);
+		expect(out.flag).toBe("--does-not-exist");
+	});
 });
