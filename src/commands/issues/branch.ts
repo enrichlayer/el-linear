@@ -42,5 +42,13 @@ export function gitCheckoutBranch(branchName: string): void {
 		outputWarning("Not inside a git repository — skipping branch checkout.");
 		return;
 	}
-	execFileSync("git", ["checkout", "-b", branchName], { stdio: "pipe" });
+	// `--` separates the new-branch name from any ref. Without it, a
+	// branch name starting with `-` (server bug, malicious team member
+	// crafting an issue title that survives slugification, or a forked
+	// Linear-compatible API) would be parsed as a git flag rather than
+	// a ref. The default `feature/` prefix from `toBranchName` already
+	// blocks the common case, but the prefix is configurable — empty-
+	// prefix callers would lose the defense without this terminator.
+	// Defense-in-depth (DEV-4064).
+	execFileSync("git", ["checkout", "-b", branchName, "--"], { stdio: "pipe" });
 }
