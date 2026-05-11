@@ -719,7 +719,12 @@ function formatGenericInline(v: unknown): string {
 	const o = asObj(v);
 	if (o) return s(o.name ?? o.displayName ?? o.identifier ?? o.id ?? "{…}");
 	if (typeof v === "string" && v.length > 80) {
-		return `${v.slice(0, 80)}…`;
+		// Route through sanitizeForTerminal (via `s()`) before slicing so that
+		// long strings from the generic-fallback path can't smuggle ANSI
+		// escapes (cursor moves, clear-screen, OSC 8 hyperlinks) into the
+		// user's terminal. Every other branch in this function already goes
+		// through `s()`; this one previously didn't.
+		return `${s(v).slice(0, 80)}…`;
 	}
 	return s(v);
 }

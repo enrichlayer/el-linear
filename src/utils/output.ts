@@ -5,6 +5,7 @@ import {
 	type ResourceKind,
 } from "./formatters/summary.js";
 import { logger } from "./logger.js";
+import { sanitizeForLog } from "./sanitize-for-log.js";
 
 const warningBuffer: string[] = [];
 let rawMode = false;
@@ -163,12 +164,21 @@ export function resetOutputFormat(): void {
 }
 
 function outputError(error: Error): void {
-	const payload = JSON.stringify({ error: error.message }, null, 2);
+	// Run the message and stack through sanitizeForLog so a future SDK
+	// upgrade (or proxy/MITM error body) that embeds `lin_api_…` /
+	// `lin_oauth_…` / `Bearer <payload>` in error text can't leak a token
+	// into stdout, shell history, or CI logs. The wizard already sanitizes
+	// its own log paths; this is the central error path on every command.
+	const payload = JSON.stringify(
+		{ error: sanitizeForLog(error.message) },
+		null,
+		2,
+	);
 	// Write to stdout (same channel as success) so machine callers always
 	// receive exactly one parseable JSON object regardless of stream capture.
 	logger.info(payload);
 	if (process.env.EL_LINEAR_DEBUG ?? process.env.LINCTL_DEBUG) {
-		logger.error(error.stack ?? "");
+		logger.error(sanitizeForLog(error.stack ?? ""));
 	}
 	process.exit(1);
 }

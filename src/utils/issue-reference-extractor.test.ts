@@ -106,6 +106,59 @@ describe("extractIssueReferences", () => {
 		).toEqual([]);
 	});
 
+	it("DOES match an identifier that follows trailing-punctuation URL terminator", () => {
+		// CommonMark's bare-URL rule: strip UNBALANCED trailing brackets
+		// and standard sentence terminators. Pre-fix `\S+` greedy-consumed
+		// everything; a cycle-1 over-correction excluded brackets from the
+		// URL char class outright, which broke balanced-paren URLs
+		// (Wikipedia, Next.js route groups). The balanced-paren trim is
+		// the CommonMark-faithful middle ground.
+		expect(
+			extractIssueReferences("(see https://example.com/foo) DEV-100"),
+		).toEqual([related("DEV-100")]);
+		// No-space case from the original adversarial repro.
+		expect(
+			extractIssueReferences("(see https://example.com/foo)DEV-100 bar"),
+		).toEqual([related("DEV-100")]);
+		// Square brackets too.
+		expect(extractIssueReferences("[https://example.com/foo]DEV-200")).toEqual([
+			related("DEV-200"),
+		]);
+	});
+
+	it("preserves balanced parens INSIDE a bare URL (Wikipedia / Next.js route groups)", () => {
+		// `https://en.wikipedia.org/wiki/Foo_(bar)/DEV-100` should not be
+		// split at the parens. The cycle-1 char-class fix excluded `(`
+		// and `)` from URLs, which clipped the URL at `Foo_`, exposing
+		// `bar)/DEV-100` to identifier extraction (cycle-2 finding).
+		expect(
+			extractIssueReferences(
+				"see https://en.wikipedia.org/wiki/Foo_(bar)/DEV-100 for context",
+			),
+		).toEqual([]);
+		// Next.js route groups: `/(group)/page`
+		expect(
+			extractIssueReferences(
+				"docs at https://nextjs.org/docs/app/(group)/DEV-200/page",
+			),
+		).toEqual([]);
+		// Nested balanced parens.
+		expect(
+			extractIssueReferences("https://example.com/path/(a(b)c)/DEV-300/x"),
+		).toEqual([]);
+	});
+
+	it("strips unbalanced trailing brackets only, not balanced ones", () => {
+		// Closing paren with no opener inside the URL → strip.
+		expect(extractIssueReferences("(https://example.com/foo) DEV-100")).toEqual(
+			[related("DEV-100")],
+		);
+		// Opening paren inside the URL, then trailing close → keep both.
+		expect(
+			extractIssueReferences("see https://example.com/foo(bar) and DEV-200"),
+		).toEqual([related("DEV-200")]);
+	});
+
 	it("does NOT match identifiers inside markdown links (protected range)", () => {
 		// `[label](https://x/DEV-100)` — neither the label nor the URL
 		// path counts. Mirrors the wrapper's protection so the two

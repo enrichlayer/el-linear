@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { type Command, program } from "commander";
 import { setupAttachmentsCommands } from "./commands/attachments.js";
 import { setupBatchCommands } from "./commands/batch.js";
@@ -34,12 +37,24 @@ import {
 import { outputUsageInfo } from "./utils/usage.js";
 import { splitList } from "./utils/validators.js";
 
+// Read the version from package.json at startup so `--version` can never
+// drift from the published release (pre-fix: a stale 1.8.1 literal lived
+// here while package.json was at 1.10.0). `dist/main.js` lives one
+// directory below the package root, so `../package.json` resolves
+// correctly in both `pnpm dev` (tsx) and `node dist/main.js` invocations.
+const __dirname_main = dirname(fileURLToPath(import.meta.url));
+const packageJson = JSON.parse(
+	readFileSync(join(__dirname_main, "..", "package.json"), "utf-8"),
+) as {
+	version: string;
+};
+
 program
 	.name("el-linear")
 	.description(
 		"A pragmatic CLI for Linear.app — deterministic resolution, structured validation, GraphQL escape hatch.",
 	)
-	.version("1.8.1")
+	.version(packageJson.version)
 	.option("--api-token <token>", "Linear API token")
 	.option(
 		"--profile <name>",
