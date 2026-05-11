@@ -223,13 +223,18 @@ export async function revokeToken(
 			},
 			body: "",
 		});
+		// Sanitize at source for symmetry with postForm's error branch — a
+		// misconfigured proxy that echoes the request's Authorization header
+		// in its 5xx body would otherwise surface the bearer token through
+		// `message`. The two call sites in `commands/init/oauth.ts` already
+		// re-sanitize at emission, but defense in depth (DEV-4065).
 		return {
 			ok: res.ok,
 			status: res.status,
-			message: res.ok ? undefined : await res.text(),
+			message: res.ok ? undefined : sanitizeForLog(await res.text()),
 		};
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
-		return { ok: false, status: 0, message };
+		return { ok: false, status: 0, message: sanitizeForLog(message) };
 	}
 }
