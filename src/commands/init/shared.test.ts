@@ -127,6 +127,52 @@ describe("writeToken security guarantees", () => {
 		);
 	});
 
+	it("updateConfig serialises concurrent read-modify-write so neither write is lost (DEV-4066)", async () => {
+		// Two parallel `init <step>` invocations both do:
+		//   readConfig → mutate one slice → writeConfig
+		// Without the lock the slower writer clobbers the faster writer's
+		// already-persisted slice. With updateConfig() the mutator runs
+		// inside withFileLock, so the second invocation re-reads the
+		// freshly-written state and merges on top of it.
+		vi.resetModules();
+		const { readConfig, updateConfig, writeConfig } = await import(
+			"./shared.js"
+		);
+		await writeConfig({});
+
+		// Both mutators add a distinct top-level key. If serialization works,
+		// both keys survive. If not, the slower-finishing mutator wins.
+		const a = updateConfig((current) => ({
+			...current,
+			defaultTeam: "TEAM-A",
+		}));
+		const b = updateConfig((current) => ({
+			...current,
+			defaultLabels: ["from-b"],
+		}));
+		await Promise.all([a, b]);
+
+		const result = await readConfig();
+		expect(result.defaultTeam).toBe("TEAM-A");
+		expect(result.defaultLabels).toEqual(["from-b"]);
+	});
+
+	it("updateConfig releases the lock after the mutator throws", async () => {
+		// If the lock weren't released on throw, the next caller would
+		// either time out or steal a stale lock — both bad. The finally
+		// block in withFileLock guarantees release.
+		vi.resetModules();
+		const { readConfig, updateConfig } = await import("./shared.js");
+		await expect(
+			updateConfig(() => {
+				throw new Error("mutator failure");
+			}),
+		).rejects.toThrow("mutator failure");
+		// Subsequent updateConfig must succeed without blocking.
+		await updateConfig((current) => ({ ...current, defaultTeam: "AFTER" }));
+		expect((await readConfig()).defaultTeam).toBe("AFTER");
+	});
+
 	it("atomic write: SIGINT-equivalent (rename failure) leaves the original file intact", async () => {
 		// We can't actually SIGINT in a test, but we can simulate by mocking
 		// fs.rename to reject — verifying that the original config file is

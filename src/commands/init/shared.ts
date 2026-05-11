@@ -10,6 +10,7 @@ import { randomBytes } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { withFileLock } from "../../auth/oauth-fs.js";
 import type { ElLinearConfig } from "../../config/config.js";
 import {
 	ALIASES_PROGRESS_PATH,
@@ -132,6 +133,32 @@ export async function writeConfig(config: WizardConfig): Promise<void> {
 		`${JSON.stringify(sorted, null, 2)}\n`,
 		0o644,
 	);
+}
+
+/**
+ * Run a read-modify-write update on the active profile's config.json under
+ * an exclusive file lock. The mutator receives the latest on-disk config
+ * (re-read inside the lock), and its return value is written back atomically.
+ *
+ * Use this anywhere two parallel wizard invocations could race a
+ * read → mutate → write sequence. Each `el-linear init <step>` re-reads the
+ * config and merges its slice; without serialization, the slower writer's
+ * mutation would clobber the faster writer's already-persisted changes.
+ *
+ * The interactive prompt phase MUST run outside the lock — prompts can sit
+ * waiting for user input longer than the lock's stale window. Seed prompts
+ * with a cheap pre-read, do the prompts, then call `updateConfig` with a
+ * mutator that re-reads and merges your slice on top of the latest state.
+ */
+export async function updateConfig(
+	mutator: (current: WizardConfig) => WizardConfig | Promise<WizardConfig>,
+): Promise<void> {
+	await ensureConfigDir();
+	await withFileLock(activePaths().configPath, async () => {
+		const current = await readConfig();
+		const next = await mutator(current);
+		await writeConfig(next);
+	});
 }
 
 export async function readToken(): Promise<string | null> {

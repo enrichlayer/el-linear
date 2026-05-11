@@ -28,8 +28,8 @@ import {
 	assignDefined,
 	printStep,
 	readConfig,
+	updateConfig,
 	type WizardConfig,
-	writeConfig,
 } from "./shared.js";
 import { runTokenStep } from "./token.js";
 import { runWorkspaceStep } from "./workspace.js";
@@ -137,14 +137,17 @@ export function setupInitCommands(program: Command): void {
 					tokenResult.viewer.organization.urlKey,
 					existing,
 				);
-				const merged: WizardConfig = assignDefined(existing, {
-					defaultTeam: ws.defaultTeam,
-					teams: { ...(existing.teams ?? {}), ...ws.teams },
-					// Don't clobber a manual urlKey override — same idempotency
-					// rule as the full wizard.
-					workspaceUrlKey: existing.workspaceUrlKey ?? ws.workspaceUrlKey,
-				});
-				await writeConfig(merged);
+				// Re-read inside the lock so a concurrent `init <step>` that
+				// finished while we were prompting isn't clobbered (DEV-4066).
+				await updateConfig((current) =>
+					assignDefined(current, {
+						defaultTeam: ws.defaultTeam,
+						teams: { ...(current.teams ?? {}), ...ws.teams },
+						// Don't clobber a manual urlKey override — same
+						// idempotency rule as the full wizard.
+						workspaceUrlKey: current.workspaceUrlKey ?? ws.workspaceUrlKey,
+					}),
+				);
 				console.log("  ✓ Workspace defaults saved.");
 			}),
 		);
@@ -188,8 +191,11 @@ export function setupInitCommands(program: Command): void {
 					return;
 				}
 
-				const merged = mergeAliasesIntoConfig(existing, updates);
-				await writeConfig(merged);
+				// Re-merge under the lock against the latest on-disk state so
+				// a concurrent step's write isn't lost (DEV-4066).
+				await updateConfig((current) =>
+					mergeAliasesIntoConfig(current, updates),
+				);
 				console.log(`  ✓ Updated aliases for ${updates.size} user(s).`);
 			}),
 		);
@@ -204,15 +210,18 @@ export function setupInitCommands(program: Command): void {
 				const existing = await readConfig();
 				printStep("defaults", "Defaults");
 				const result = await runDefaultsStep(existing);
-				const merged: WizardConfig = assignDefined(existing, {
-					defaultLabels: result.defaultLabels,
-					defaultAssignee: result.defaultAssignee,
-					defaultPriority: result.defaultPriority,
-					statusDefaults: result.statusDefaults,
-					terms: result.terms,
-					cacheTTLSeconds: result.cacheTTLSeconds,
-				});
-				await writeConfig(merged);
+				// Re-read inside the lock so a concurrent `init <step>` that
+				// finished while we were prompting isn't clobbered (DEV-4066).
+				await updateConfig((current) =>
+					assignDefined(current, {
+						defaultLabels: result.defaultLabels,
+						defaultAssignee: result.defaultAssignee,
+						defaultPriority: result.defaultPriority,
+						statusDefaults: result.statusDefaults,
+						terms: result.terms,
+						cacheTTLSeconds: result.cacheTTLSeconds,
+					}),
+				);
 				console.log("  ✓ Defaults saved.");
 			}),
 		);
@@ -257,33 +266,37 @@ async function runFullWizardImpl(options: { force: boolean }): Promise<void> {
 	printStep("4/4", "Defaults");
 	const defaults = await runDefaultsStep(existing);
 
-	// Merge everything and write atomically at the end.
+	// Merge everything and write atomically at the end, under the config
+	// lock so a parallel `init <step>` invocation can't clobber us
+	// (DEV-4066). Re-read inside the lock to merge on the latest state.
 	// Idempotency rule: only write a key when the user explicitly changed it.
-	// `existing.X ?? new.X` preserves any manual override the user may have
+	// `current.X ?? new.X` preserves any manual override the user may have
 	// in config.json (self-hosted Linear urlKey, custom default team, etc.).
 	// `assignDefined` skips undefined values so the resulting object's own-
 	// property set matches what JSON.stringify would actually serialize.
-	let merged: WizardConfig = assignDefined(existing, {
-		// defaults step: result is `existing.X` itself when the user skipped
-		// the edit branch, so direct assignment is safe.
-		defaultLabels: defaults.defaultLabels,
-		defaultAssignee: defaults.defaultAssignee,
-		defaultPriority: defaults.defaultPriority,
-		statusDefaults: defaults.statusDefaults,
-		terms: defaults.terms,
-		cacheTTLSeconds: defaults.cacheTTLSeconds,
-		// workspace step: `ws.defaultTeam` may be the existing value (user
-		// skipped) or a new pick.
-		defaultTeam: ws.defaultTeam,
-		// Always merge the team UUID cache (additive, not destructive).
-		teams: { ...(existing.teams ?? {}), ...ws.teams },
-		// workspaceUrlKey: never clobber an existing manual override.
-		workspaceUrlKey: existing.workspaceUrlKey ?? ws.workspaceUrlKey,
+	await updateConfig((current) => {
+		let merged: WizardConfig = assignDefined(current, {
+			// defaults step: result is `existing.X` itself when the user
+			// skipped the edit branch, so direct assignment is safe.
+			defaultLabels: defaults.defaultLabels,
+			defaultAssignee: defaults.defaultAssignee,
+			defaultPriority: defaults.defaultPriority,
+			statusDefaults: defaults.statusDefaults,
+			terms: defaults.terms,
+			cacheTTLSeconds: defaults.cacheTTLSeconds,
+			// workspace step: `ws.defaultTeam` may be the existing value (user
+			// skipped) or a new pick.
+			defaultTeam: ws.defaultTeam,
+			// Always merge the team UUID cache (additive, not destructive).
+			teams: { ...(current.teams ?? {}), ...ws.teams },
+			// workspaceUrlKey: never clobber an existing manual override.
+			workspaceUrlKey: current.workspaceUrlKey ?? ws.workspaceUrlKey,
+		});
+		if (aliasUpdates.size > 0) {
+			merged = mergeAliasesIntoConfig(merged, aliasUpdates);
+		}
+		return merged;
 	});
-	if (aliasUpdates.size > 0) {
-		merged = mergeAliasesIntoConfig(merged, aliasUpdates);
-	}
-	await writeConfig(merged);
 
 	console.log("\n✓ Setup complete.");
 	console.log("  Token:  ~/.config/el-linear/token (mode 0600)");
