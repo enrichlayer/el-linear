@@ -4,6 +4,18 @@
  * transformed into these shapes at the service boundary.
  */
 
+/**
+ * Linear priority levels — `0` = no priority, `1` = urgent, `2` = high,
+ * `3` = medium (alias: normal), `4` = low. Sourced from Linear's
+ * `Issue.priority` enum; the GraphQL API returns a number in this range.
+ * Use this instead of `number` at every API boundary so an out-of-range
+ * value (`9`) fails to compile.
+ *
+ * The runtime parser is `validatePriority` in `src/utils/validators.ts`
+ * — it narrows arbitrary `string` input to this union.
+ */
+export type LinearPriority = 0 | 1 | 2 | 3 | 4;
+
 // -- Shared reference types (used as nested objects) --
 
 interface TeamRef {
@@ -113,7 +125,7 @@ export interface LinearIssue {
 	identifier: string;
 	labels: LabelRef[];
 	parentIssue?: IssueRef;
-	priority: number;
+	priority: LinearPriority;
 	project?: ProjectRef;
 	projectMilestone?: MilestoneRef;
 	state?: StateRef;

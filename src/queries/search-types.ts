@@ -4,11 +4,13 @@
  * for the rationale (ALL-937).
  */
 
+import type { LinearPriority } from "../types/linear.js";
+
 export interface SearchIssueRef {
 	id: string;
 	identifier: string;
 	title: string;
-	priority: number | null;
+	priority: LinearPriority | null;
 	state: { id: string; name: string } | null;
 	team: { id: string; key: string; name: string } | null;
 	assignee: { id: string; name: string; url: string | null } | null;

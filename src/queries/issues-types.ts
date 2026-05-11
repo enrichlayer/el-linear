@@ -21,6 +21,8 @@
  * Refs ALL-937.
  */
 
+import type { LinearPriority } from "../types/linear.js";
+
 /** A reference to a related entity — id + display fields. */
 export interface IdNameRef {
 	id: string;
@@ -65,9 +67,11 @@ export interface ProjectMilestoneNode {
 	targetDate: string | null;
 }
 
+export type IssueSummaryGenerationStatus = "completed" | "pending" | "failed";
+
 export interface IssueSummary {
 	content: unknown;
-	generationStatus: "completed" | "pending" | "failed" | string;
+	generationStatus: IssueSummaryGenerationStatus;
 }
 
 /**
@@ -83,7 +87,7 @@ export interface IssueNode {
 	description: string | null;
 	summary: IssueSummary | null;
 	branchName: string;
-	priority: number;
+	priority: LinearPriority;
 	estimate: number | null;
 	dueDate: string | null;
 	url: string;
@@ -188,7 +192,7 @@ export interface RelationPeerNode {
 	identifier: string;
 	title: string;
 	state: { id: string; name: string } | null;
-	priority: number | null;
+	priority: LinearPriority | null;
 	assignee: { id: string; name: string } | null;
 	team: { id: string; key: string; name: string } | null;
 }

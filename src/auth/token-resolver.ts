@@ -31,12 +31,20 @@ import {
 	refreshTokens,
 } from "./oauth-token.js";
 
-export interface ActiveAuth {
-	kind: "personal" | "oauth";
-	token: string;
-	/** Original OAuth state, when `kind === "oauth"`. */
-	oauth?: OAuthState;
-}
+/**
+ * Resolved credential for a CLI invocation. Discriminated on `kind` so
+ * `oauth` is non-optional in the `"oauth"` arm and forbidden in the
+ * `"personal"` arm — eliminates the "personal auth with stale oauth field"
+ * foot-gun the flat shape allowed.
+ */
+export type ActiveAuth =
+	| { kind: "personal"; token: string }
+	| {
+			kind: "oauth";
+			token: string;
+			/** Original OAuth state — refresh-time bookkeeping. */
+			oauth: OAuthState;
+	  };
 
 export interface GetActiveAuthOptions {
 	apiToken?: string;

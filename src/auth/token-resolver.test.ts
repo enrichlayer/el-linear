@@ -139,6 +139,36 @@ describe("getActiveAuth", () => {
 	it("propagates the personal-token resolver's error when nothing is configured", async () => {
 		await expect(getActiveAuth()).rejects.toThrow(/No API token found/);
 	});
+
+	it("kind narrows the oauth field (DEV-4068 T8)", async () => {
+		// Regression: pre-DEV-4068, ActiveAuth was a flat shape with
+		// `oauth?: OAuthState`, so `auth.oauth` was optionally present
+		// regardless of kind. Now it's a discriminated union:
+		// `{ kind: "oauth", oauth: OAuthState } | { kind: "personal" }`,
+		// so `auth.oauth` is non-optional in the oauth arm and absent
+		// in the personal arm.
+		await writeOAuthState(freshState({ expiresAt: NOW + 24 * 60 * 60 * 1000 }));
+		const oauthAuth = await getActiveAuth({ now: () => NOW });
+		expect(oauthAuth.kind).toBe("oauth");
+		if (oauthAuth.kind === "oauth") {
+			// Type-level: oauth is non-optional here. Runtime: it's populated.
+			expect(oauthAuth.oauth.clientId).toBeDefined();
+		}
+
+		// Now switch to personal to confirm the opposite arm.
+		await fs.rm(`${TEST_HOME}/.config/el-linear`, {
+			recursive: true,
+			force: true,
+		});
+		process.env.LINEAR_API_TOKEN = "personal-tok";
+		const personalAuth = await getActiveAuth();
+		expect(personalAuth.kind).toBe("personal");
+		if (personalAuth.kind === "personal") {
+			// Type-level: `oauth` is not a property of the personal arm.
+			// @ts-expect-error -- oauth is not present on the personal arm
+			void personalAuth.oauth;
+		}
+	});
 });
 
 describe("ensureFreshAccessToken", () => {
