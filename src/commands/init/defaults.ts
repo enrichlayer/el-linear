@@ -9,7 +9,7 @@
 import { confirm, input, select } from "@inquirer/prompts";
 import { parseCsvList, type WizardConfig } from "./shared.js";
 
-export interface DefaultsStepResult {
+interface DefaultsStepResult {
 	defaultLabels: string[] | undefined;
 	/**
 	 * Default assignee identifier (alias / display name / email / UUID — same

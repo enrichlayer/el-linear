@@ -6,7 +6,7 @@
 
 import type { LinearPriority } from "../types/linear.js";
 
-export interface SearchIssueRef {
+interface SearchIssueRef {
 	id: string;
 	identifier: string;
 	title: string;
@@ -17,19 +17,19 @@ export interface SearchIssueRef {
 	project: { id: string; name: string } | null;
 }
 
-export interface SearchProjectRef {
+interface SearchProjectRef {
 	id: string;
 	name: string;
 	state: string;
 }
 
-export interface SearchInitiativeRef {
+interface SearchInitiativeRef {
 	id: string;
 	name: string;
 	status: string | null;
 }
 
-export interface SearchDocumentRef {
+interface SearchDocumentRef {
 	id: string;
 	title: string;
 	slugId: string | null;

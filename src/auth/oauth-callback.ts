@@ -20,10 +20,10 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 import { type CallbackParams, parseCallbackUrl } from "./oauth-client.js";
 
 export const DEFAULT_CALLBACK_PATH = "/oauth/callback";
-export const DEFAULT_LISTEN_HOST = "127.0.0.1";
-export const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_LISTEN_HOST = "127.0.0.1";
+const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 
-export interface CallbackOptions {
+interface CallbackOptions {
 	port: number;
 	expectedState: string;
 	host?: string;

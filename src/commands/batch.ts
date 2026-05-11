@@ -5,9 +5,7 @@ import {
 	resolveTeam,
 } from "../config/resolver.js";
 import type { LinearIssue } from "../types/linear.js";
-import { GraphQLIssuesService } from "../utils/graphql-issues-service.js";
-import { createGraphQLService } from "../utils/graphql-service.js";
-import { createLinearService } from "../utils/linear-service.js";
+import { createIssuesService } from "../utils/issues-service-bootstrap.js";
 import { logger } from "../utils/logger.js";
 import {
 	handleAsyncCommand,
@@ -53,9 +51,7 @@ async function resolveTargetIssues(
 	options: OptionValues,
 	rootOpts: Record<string, unknown>,
 ): Promise<LinearIssue[]> {
-	const graphQLService = await createGraphQLService(rootOpts);
-	const linearService = await createLinearService(rootOpts);
-	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
+	const { issuesService } = await createIssuesService(rootOpts);
 
 	if (options.issues) {
 		const ids = splitList(options.issues);
@@ -166,9 +162,7 @@ async function handleBatchAssign(
 		return;
 	}
 
-	const graphQLService = await createGraphQLService(rootOpts);
-	const linearService = await createLinearService(rootOpts);
-	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
+	const { issuesService } = await createIssuesService(rootOpts);
 
 	const { results } = await executeBatch(issues, (issue) =>
 		issuesService.updateIssue({ id: issue.identifier, assigneeId }, "adding"),
@@ -226,9 +220,7 @@ async function handleBatchLabel(
 		return;
 	}
 
-	const graphQLService = await createGraphQLService(rootOpts);
-	const linearService = await createLinearService(rootOpts);
-	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
+	const { issuesService } = await createIssuesService(rootOpts);
 
 	const removeLower = removeLabels.map((l) => l.toLowerCase());
 
@@ -300,9 +292,7 @@ async function handleBatchMove(
 		return;
 	}
 
-	const graphQLService = await createGraphQLService(rootOpts);
-	const linearService = await createLinearService(rootOpts);
-	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
+	const { issuesService } = await createIssuesService(rootOpts);
 
 	const { results } = await executeBatch(issues, (issue) =>
 		issuesService.updateIssue(
@@ -354,9 +344,7 @@ async function handleBatchStatus(
 		return;
 	}
 
-	const graphQLService = await createGraphQLService(rootOpts);
-	const linearService = await createLinearService(rootOpts);
-	const issuesService = new GraphQLIssuesService(graphQLService, linearService);
+	const { issuesService } = await createIssuesService(rootOpts);
 
 	const { results } = await executeBatch(issues, (issue) =>
 		issuesService.updateIssue(

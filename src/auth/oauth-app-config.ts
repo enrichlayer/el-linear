@@ -14,9 +14,9 @@ import {
 	validateScopes,
 } from "./oauth-client.js";
 
-export const TEAM_OAUTH_CONFIG_ENV = "EL_LINEAR_OAUTH_CONFIG";
+const TEAM_OAUTH_CONFIG_ENV = "EL_LINEAR_OAUTH_CONFIG";
 
-export interface TeamOAuthConfig {
+interface TeamOAuthConfig {
 	clientId: string;
 	redirectPort: number;
 	scopes: OAuthScope[];

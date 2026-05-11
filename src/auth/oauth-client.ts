@@ -56,7 +56,7 @@ export const LINEAR_AUTHORIZE_URL = "https://linear.app/oauth/authorize";
 export const LINEAR_TOKEN_URL = "https://api.linear.app/oauth/token";
 export const LINEAR_REVOKE_URL = "https://api.linear.app/oauth/revoke";
 
-export interface PkcePair {
+interface PkcePair {
 	verifier: string;
 	challenge: string;
 	method: "S256";
@@ -88,7 +88,7 @@ export function generateState(): string {
 	return toBase64Url(randomBytes(16));
 }
 
-export interface AuthorizeUrlInput {
+interface AuthorizeUrlInput {
 	clientId: string;
 	redirectUri: string;
 	scopes: readonly string[];

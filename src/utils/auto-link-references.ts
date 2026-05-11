@@ -13,10 +13,11 @@ import {
 	extractIssueReferences,
 	type IssueReference,
 	type IssueRelationType,
+	specificity,
 } from "./issue-reference-extractor.js";
 import type { LinearService } from "./linear-service.js";
 
-export interface AutoLinkLinked {
+interface AutoLinkLinked {
 	identifier: string;
 	/** True when source/target were swapped on the create (e.g. "blocked by X" → X→source) */
 	reverse: boolean;
@@ -24,14 +25,14 @@ export interface AutoLinkLinked {
 	type: IssueRelationType;
 }
 
-export interface AutoLinkSkipped {
+interface AutoLinkSkipped {
 	existingType: string;
 	identifier: string;
 	/** Type that would have been created had the reference been new */
 	inferredType: IssueRelationType;
 }
 
-export interface AutoLinkFailed {
+interface AutoLinkFailed {
 	identifier: string;
 	reason: string;
 }
@@ -68,16 +69,6 @@ interface ExistingRelations {
 	byIdentifier: Map<string, string>;
 	/** Map from referenced issue UUID → existing relation type (for de-dup post-resolution) */
 	byUuid: Map<string, string>;
-}
-
-function specificity(ref: IssueReference): number {
-	if (ref.type === "duplicate") {
-		return 3;
-	}
-	if (ref.type === "blocks") {
-		return 2;
-	}
-	return 1;
 }
 
 /**

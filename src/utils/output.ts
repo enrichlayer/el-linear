@@ -12,7 +12,7 @@ let rawMode = false;
 let jqFilter: string | null = null;
 let fieldsFilter: string[] | null = null;
 
-export type OutputFormat = "json" | "summary";
+type OutputFormat = "json" | "summary";
 let outputFormat: OutputFormat = "json";
 
 export function setRawMode(enabled: boolean): void {
@@ -156,11 +156,6 @@ function drainWarnings(): string[] {
 
 export function resetWarnings(): void {
 	warningBuffer.length = 0;
-}
-
-/** @internal Test seam — call between tests that toggle `setOutputFormat`. */
-export function resetOutputFormat(): void {
-	outputFormat = "json";
 }
 
 function outputError(error: Error): void {

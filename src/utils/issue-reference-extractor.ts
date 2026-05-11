@@ -69,10 +69,12 @@ function inferRelation(textBefore: string): {
 }
 
 /**
- * Specificity ranking — used when the same identifier appears more than once in the text
- * with different qualifiers. The strongest non-default inference wins.
+ * Specificity ranking — used when the same identifier appears more than once
+ * in the text with different qualifiers. The strongest non-default inference
+ * wins. Exported because `auto-link-references` does the same merge over its
+ * own description+comments fan-in (DEV-4070 deduplication).
  */
-function specificity(ref: IssueReference): number {
+export function specificity(ref: IssueReference): number {
 	if (ref.type === "duplicate") {
 		return 3;
 	}

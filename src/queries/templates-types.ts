@@ -7,13 +7,13 @@
  * what the API actually returns, not the connection convention.
  */
 
-export interface TemplateTeamRef {
+interface TemplateTeamRef {
 	id: string;
 	key: string;
 	name: string;
 }
 
-export interface TemplateCreatorRef {
+interface TemplateCreatorRef {
 	id: string;
 	name: string;
 }

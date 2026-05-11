@@ -7,17 +7,17 @@
  * full rationale and pattern (ALL-937).
  */
 
-export interface DocumentCreatorRef {
+interface DocumentCreatorRef {
 	id: string;
 	name: string;
 }
 
-export interface DocumentProjectRef {
+interface DocumentProjectRef {
 	id: string;
 	name: string;
 }
 
-export interface DocumentIssueRef {
+interface DocumentIssueRef {
 	id: string;
 	identifier: string;
 	title: string;

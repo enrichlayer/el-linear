@@ -3,13 +3,13 @@
  * See `./issues-types.ts` for the rationale (ALL-937).
  */
 
-export interface ProjectTeamRef {
+interface ProjectTeamRef {
 	id: string;
 	key: string;
 	name: string;
 }
 
-export interface ProjectBaseNode {
+interface ProjectBaseNode {
 	id: string;
 	name: string;
 	teams: { nodes: ProjectTeamRef[] };
@@ -19,17 +19,17 @@ export interface ProjectBaseNode {
  * Mirrors the project selection set used by `SEARCH_PROJECTS_BY_NAME_QUERY`
  * and `CREATE_PROJECT_MUTATION` — base fields + state.
  */
-export interface ProjectWithStateNode extends ProjectBaseNode {
+interface ProjectWithStateNode extends ProjectBaseNode {
 	state: string;
 }
 
-export interface ProjectIssueRef {
+interface ProjectIssueRef {
 	id: string;
 	identifier: string;
 	title: string;
 }
 
-export interface ProjectWithIssuesNode extends ProjectBaseNode {
+interface ProjectWithIssuesNode extends ProjectBaseNode {
 	issues: { nodes: ProjectIssueRef[] };
 }
 
@@ -63,11 +63,11 @@ export interface UpdateProjectResponse {
 	};
 }
 
-export interface ProjectArchiveEntity {
+interface ProjectArchiveEntity {
 	id: string;
 }
 
-export interface ProjectArchivePayload {
+interface ProjectArchivePayload {
 	success: boolean;
 	lastSyncId: number;
 	entity: ProjectArchiveEntity | null;

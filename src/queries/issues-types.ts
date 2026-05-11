@@ -24,24 +24,24 @@
 import type { LinearPriority } from "../types/linear.js";
 
 /** A reference to a related entity — id + display fields. */
-export interface IdNameRef {
+interface IdNameRef {
 	id: string;
 	name: string;
 }
 
-export interface IdKeyNameRef {
+interface IdKeyNameRef {
 	id: string;
 	key: string;
 	name: string;
 }
 
-export interface IdIdentifierTitleRef {
+interface IdIdentifierTitleRef {
 	id: string;
 	identifier: string;
 	title: string;
 }
 
-export interface AssigneeNode {
+interface AssigneeNode {
 	id: string;
 	name: string;
 	url?: string;
@@ -55,13 +55,13 @@ export interface CommentNode {
 	user: AssigneeNode | null;
 }
 
-export interface CycleNode {
+interface CycleNode {
 	id: string;
 	name: string | null;
 	number: number;
 }
 
-export interface ProjectMilestoneNode {
+interface ProjectMilestoneNode {
 	id: string;
 	name: string;
 	targetDate: string | null;
@@ -74,9 +74,9 @@ export interface ProjectMilestoneNode {
  * the typical `=== "completed"` check keeps working safely. Widen the
  * union here when Linear documents a new state.
  */
-export type IssueSummaryGenerationStatus = "completed" | "pending" | "failed";
+type IssueSummaryGenerationStatus = "completed" | "pending" | "failed";
 
-export interface IssueSummary {
+interface IssueSummary {
 	content: unknown;
 	generationStatus: IssueSummaryGenerationStatus;
 }
@@ -139,13 +139,6 @@ export interface SearchIssuesResponse {
 	searchIssues: { nodes: IssueNode[] };
 }
 
-/**
- * Response shape for `FILTERED_SEARCH_ISSUES_QUERY`. Same shape as
- * `GetIssuesResponse` (both return `issues.nodes`) but kept as a
- * named alias so the call site documents intent.
- */
-export type FilteredSearchIssuesResponse = GetIssuesResponse;
-
 /** Response shape for `CREATE_ISSUE_MUTATION`. */
 export interface CreateIssueResponse {
 	issueCreate: {
@@ -166,7 +159,7 @@ export interface IssueArchiveEntity {
 	id: string;
 }
 
-export interface IssueArchivePayload {
+interface IssueArchivePayload {
 	success: boolean;
 	lastSyncId: number;
 	entity: IssueArchiveEntity | null;
@@ -238,7 +231,7 @@ export interface BatchResolveProjectMilestoneRef {
 	name: string;
 }
 
-export interface BatchResolveProjectNode {
+interface BatchResolveProjectNode {
 	id: string;
 	name: string;
 	/** Present on `BATCH_RESOLVE_FOR_CREATE_QUERY`. */
@@ -254,7 +247,7 @@ export interface BatchResolveLabelNode {
 	team: { id: string } | null;
 }
 
-export interface BatchResolveIssueForUpdate {
+interface BatchResolveIssueForUpdate {
 	id: string;
 	identifier: string;
 	team: { id: string; key: string } | null;
@@ -339,7 +332,7 @@ export interface ScanIssuesResponse {
 	};
 }
 
-export interface IssueStateSpanNode {
+interface IssueStateSpanNode {
 	state: { id: string; name: string; type: string };
 	startedAt: string;
 	endedAt: string | null;

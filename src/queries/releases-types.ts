@@ -3,19 +3,19 @@
  * See `./issues-types.ts` for the rationale (ALL-937).
  */
 
-export interface ReleaseStageRef {
+interface ReleaseStageRef {
 	id: string;
 	name: string;
 	type: string;
 	color: string | null;
 }
 
-export interface ReleasePipelineRef {
+interface ReleasePipelineRef {
 	id: string;
 	name: string;
 }
 
-export interface ReleaseDocumentRef {
+interface ReleaseDocumentRef {
 	id: string;
 	title: string;
 	slugId: string;
@@ -61,7 +61,7 @@ export interface CreatedReleaseNode {
 	updatedAt: string;
 }
 
-export interface ReleasePipelineNode {
+interface ReleasePipelineNode {
 	id: string;
 	name: string;
 	stages: { nodes: ReleaseStageRef[] };
