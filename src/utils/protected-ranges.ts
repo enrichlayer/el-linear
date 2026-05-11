@@ -64,8 +64,14 @@ const BARE_URL_REGEX = /https?:\/\/[^\s<>"]+/g;
  * `s.length` if all close-brackets are balanced. Used to truncate
  * a bare-URL match at the first unbalanced `)`, `]`, or `}` —
  * exactly the position CommonMark treats as the URL terminator.
+ *
+ * Exported for direct unit testing. Depth counters per bracket type
+ * are independent — pathological interleavings like `[(a]b)` don't
+ * trigger an unbalance, which errs toward keeping a URL whole rather
+ * than over-truncating (no real-world URL nests bracket types this
+ * way).
  */
-function firstUnbalancedClose(s: string): number {
+export function firstUnbalancedClose(s: string): number {
 	let parenDepth = 0;
 	let brackDepth = 0;
 	let braceDepth = 0;
@@ -96,7 +102,10 @@ function trimBareUrlTrailingPunct(url: string): string {
 	let trimmed = url.slice(0, firstUnbalancedClose(url));
 	// Then: strip standard trailing sentence-terminators (`.`, `,`, `;`,
 	// `:`, `!`, `?`). These never appear in legitimate URL paths at the
-	// very end, but they're commonly adjacent to URLs in prose.
+	// very end, but they're commonly adjacent to URLs in prose. The
+	// char class deliberately excludes `)`, `]`, `}` — those are
+	// already handled by firstUnbalancedClose above, where the
+	// balanced/unbalanced check lives.
 	while (trimmed.length > 0 && /[.,;:!?]$/.test(trimmed)) {
 		trimmed = trimmed.slice(0, -1);
 	}
