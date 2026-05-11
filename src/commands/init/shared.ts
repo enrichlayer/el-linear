@@ -112,9 +112,11 @@ export async function ensureConfigDir(): Promise<void> {
 	}
 }
 
-export async function readConfig(): Promise<WizardConfig> {
+export async function readConfig(
+	configPath: string = activePaths().configPath,
+): Promise<WizardConfig> {
 	try {
-		const raw = await fs.readFile(activePaths().configPath, "utf8");
+		const raw = await fs.readFile(configPath, "utf8");
 		return JSON.parse(raw) as WizardConfig;
 	} catch (err) {
 		if ((err as NodeJS.ErrnoException).code === "ENOENT") {
@@ -124,15 +126,14 @@ export async function readConfig(): Promise<WizardConfig> {
 	}
 }
 
-export async function writeConfig(config: WizardConfig): Promise<void> {
+export async function writeConfig(
+	config: WizardConfig,
+	configPath: string = activePaths().configPath,
+): Promise<void> {
 	await ensureConfigDir();
 	// Stable key order so byte-identical config produces byte-identical output.
 	const sorted = sortKeys(config);
-	await atomicWrite(
-		activePaths().configPath,
-		`${JSON.stringify(sorted, null, 2)}\n`,
-		0o644,
-	);
+	await atomicWrite(configPath, `${JSON.stringify(sorted, null, 2)}\n`, 0o644);
 }
 
 /**
@@ -149,15 +150,22 @@ export async function writeConfig(config: WizardConfig): Promise<void> {
  * waiting for user input longer than the lock's stale window. Seed prompts
  * with a cheap pre-read, do the prompts, then call `updateConfig` with a
  * mutator that re-reads and merges your slice on top of the latest state.
+ *
+ * The active-profile path is snapshotted ONCE at entry and threaded through
+ * `readConfig` + `writeConfig`. A theoretical mid-update profile switch
+ * (`--profile` is bound by the commander preAction before any subcommand
+ * runs, so this can't happen via the CLI today) can't cause a lock-A /
+ * read-or-write-B mismatch.
  */
 export async function updateConfig(
 	mutator: (current: WizardConfig) => WizardConfig | Promise<WizardConfig>,
 ): Promise<void> {
 	await ensureConfigDir();
-	await withFileLock(activePaths().configPath, async () => {
-		const current = await readConfig();
+	const configPath = activePaths().configPath;
+	await withFileLock(configPath, async () => {
+		const current = await readConfig(configPath);
 		const next = await mutator(current);
-		await writeConfig(next);
+		await writeConfig(next, configPath);
 	});
 }
 

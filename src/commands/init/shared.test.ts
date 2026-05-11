@@ -157,6 +157,57 @@ describe("writeToken security guarantees", () => {
 		expect(result.defaultLabels).toEqual(["from-b"]);
 	});
 
+	it("updateConfig locks and reads/writes the same snapshot path even if active profile changes mid-update", async () => {
+		// Guard against a future call site that could swap profiles between
+		// the lock acquisition and the read+write inside the closure. If the
+		// snapshot weren't honored, the lock and the file ops would diverge
+		// onto different profile dirs — silently corrupting state.
+		// Implementation: updateConfig captures activePaths().configPath once
+		// at entry; readConfig + writeConfig accept that path as an arg.
+		vi.resetModules();
+		const { readConfig, updateConfig, writeConfig } = await import(
+			"./shared.js"
+		);
+		const paths = await import("../../config/paths.js");
+		await writeConfig({});
+		// Capture the path that was active when we started.
+		const originalPath = paths.resolveActiveProfile().configPath;
+
+		// Inside the mutator, simulate a "profile switch" by repointing
+		// future resolveActiveProfile() calls at a different path. The
+		// snapshot taken at updateConfig entry should still bind the
+		// lock + read + write to the ORIGINAL path.
+		const switchedPath = path.join(
+			path.dirname(originalPath),
+			"profiles",
+			"alternate",
+			"config.json",
+		);
+		await fs.mkdir(path.dirname(switchedPath), { recursive: true });
+		const resolveSpy = vi
+			.spyOn(paths, "resolveActiveProfile")
+			.mockReturnValueOnce(paths.resolveActiveProfile()); // first call: real
+
+		await updateConfig((current) => {
+			// Simulate the profile change in flight by overriding subsequent
+			// resolves. Without the snapshot, the inner writeConfig would
+			// land on switchedPath.
+			resolveSpy.mockReturnValue({
+				name: "alternate",
+				configPath: switchedPath,
+				tokenPath: path.join(path.dirname(switchedPath), "token"),
+			});
+			return { ...current, defaultTeam: "OK" };
+		});
+
+		// Critical assertion: the write hit the ORIGINAL path, not the
+		// switched-to one.
+		const onDisk = await readConfig(originalPath);
+		expect(onDisk.defaultTeam).toBe("OK");
+		await expect(fs.access(switchedPath)).rejects.toThrow();
+		resolveSpy.mockRestore();
+	});
+
 	it("updateConfig releases the lock after the mutator throws", async () => {
 		// If the lock weren't released on throw, the next caller would
 		// either time out or steal a stale lock — both bad. The finally
