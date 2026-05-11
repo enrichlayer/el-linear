@@ -439,6 +439,53 @@ describe("--format summary", () => {
 		const written = stdoutSpy.mock.calls.map((c) => c[0] as string).join("");
 		expect(written.endsWith("\n")).toBe(true);
 	});
+
+	// --fields strips signature fields (e.g. `title` for an issue).
+	// Pre-fix, `inferKindFromPayload` ran on the post-filter payload and
+	// fell through to "generic" — the issue formatter never fired. The
+	// fix captures the kind from the pre-filter payload (ALL-933 composition).
+	it("composes with --fields: still renders as issue summary when title is stripped", async () => {
+		const { outputSuccess, setFieldsFilter } = await import("./output.js");
+		setFieldsFilter(["identifier", "url"]);
+		outputSuccess({
+			identifier: "DEV-1",
+			title: "Fix bug",
+			state: { name: "Todo" },
+			assignee: { name: "Alice" },
+			url: "https://linear.app/acme/issue/DEV-1",
+		});
+		const written = stdoutSpy.mock.calls.map((c) => c[0] as string).join("");
+		// Issue formatter renders a header line with the identifier and title.
+		// If we'd fallen through to the generic formatter, we'd see
+		// `identifier:` as a key/value line.
+		expect(written).toContain("DEV-1");
+		expect(written).not.toMatch(/^identifier:/m);
+	});
+
+	it("composes with --fields: list envelope still renders as issue table", async () => {
+		const { outputSuccess, setFieldsFilter } = await import("./output.js");
+		setFieldsFilter(["identifier"]);
+		outputSuccess({
+			data: [
+				{
+					identifier: "DEV-1",
+					title: "First",
+					state: { name: "Todo" },
+					assignee: { name: "Alice" },
+				},
+				{
+					identifier: "DEV-2",
+					title: "Second",
+					state: { name: "Done" },
+					assignee: { name: "Bob" },
+				},
+			],
+			meta: { count: 2 },
+		});
+		const written = stdoutSpy.mock.calls.map((c) => c[0] as string).join("");
+		// Issue-list table header — generic fallback would dump key/value pairs.
+		expect(written).toMatch(/ID\s+TITLE\s+STATE\s+ASSIGNEE/);
+	});
 });
 
 describe("setOutputFormat", () => {
