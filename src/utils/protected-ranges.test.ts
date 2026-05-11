@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { findProtectedRanges, firstUnbalancedClose } from "./protected-ranges.js";
+import {
+	findProtectedRanges,
+	firstUnbalancedClose,
+} from "./protected-ranges.js";
 
 describe("firstUnbalancedClose", () => {
 	it("returns string length when every close bracket has a matching opener", () => {
