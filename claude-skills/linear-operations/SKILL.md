@@ -58,6 +58,24 @@ el-linear issues read DEV-123 --format summary 2>&1
 
 The summary formatter exists exactly because every consumer (humans and LLMs) was reinventing the same `python -c` / `jq` extraction in shell. Pick the canonical path; the per-resource format is a stable contract.
 
+### Extracting one description section: `--field`
+
+When you need a single named section out of an issue's markdown description (e.g. "Done when", "Out of scope", "Why we need this"), use `issues read --field`. It matches `##`/`###` headers and bold pseudo-headers (`**Done when**`) case-insensitively, prints just that section's text, and exits non-zero when the section is missing — the canonical replacement for piping into `python3 -c "...desc.find(...)"`.
+
+```bash
+# ✅ One section, plain text, scriptable
+el-linear issues read DEV-123 --field "Done when" 2>&1
+
+# ❌ Don't do this
+el-linear issues read DEV-123 2>&1 | python3 -c "import json,sys; print(json.load(sys.stdin)['description'].split('## Done when')[1].split('##')[0])"
+```
+
+`--field` is single-issue only — for batch extraction, fall back to `--jq` on the full JSON.
+
+### When you must reach outside el-linear: prefer `jq` over `python3 -c`
+
+For tools that aren't `el-linear` (e.g. `gh`, `glab`, `kubectl`), prefer `jq` for JSON extraction in one-shot shell commands. `python3 -c "import json,sys; ..."` produces longer, harder-to-read pipelines, and tends to attract incremental complexity (try/except, fallbacks) that `jq` handles inline. Reach for python only when the transformation genuinely needs control flow that's painful in `jq` (e.g. multi-step assembly with intermediate state).
+
 ### Coverage
 
 `--format summary` is implemented for:
