@@ -153,7 +153,7 @@ describe("enrichValidationErrors", () => {
 		expect(result.errors[0]).toContain('--project "Refactor Sprint"');
 	});
 
-	it("appends assignee suggestions to a Missing --assignee error using alias when available", async () => {
+	it("appends assignee suggestions using alias > email > quoted-displayName", async () => {
 		const result: ValidationResult = {
 			errors: [
 				"Missing --assignee. Every issue must have an assignee.\n  Use `el-linear users list --active` to find valid assignees.",
@@ -161,15 +161,38 @@ describe("enrichValidationErrors", () => {
 			warnings: [],
 			normalizedLabels: null,
 		};
+		// Hand-build members so we can test all three branches:
+		//   - Dima: alias exists in mock config → "dima"
+		//   - Kamal: no alias, has email → "kamal@example.com"
+		//   - Pat: no alias, no email, displayName has a space → quoted "Pat Q"
 		const services = makeServices({
 			id: "team-dev-uuid",
 			key: "DEV",
 			name: "Dev",
 			members: {
-				nodes: membersPayload([
-					{ name: "Dima", displayName: "Dima Y" },
-					{ name: "Kamal", displayName: "Kamal M" },
-				]),
+				nodes: [
+					{
+						id: "u0",
+						name: "Dima",
+						displayName: "Dima Y",
+						email: "dima@example.com",
+						active: true,
+					},
+					{
+						id: "u1",
+						name: "Kamal",
+						displayName: "Kamal M",
+						email: "kamal@example.com",
+						active: true,
+					},
+					{
+						id: "u2",
+						name: "Pat",
+						displayName: "Pat Q",
+						email: undefined,
+						active: true,
+					},
+				],
 			},
 		});
 
@@ -179,9 +202,9 @@ describe("enrichValidationErrors", () => {
 			asServices(services),
 		);
 
-		// Dima has an alias in the mock config → use alias; Kamal has none → use displayName.
 		expect(result.errors[0]).toContain("--assignee dima");
-		expect(result.errors[0]).toContain("--assignee Kamal M");
+		expect(result.errors[0]).toContain("--assignee kamal@example.com");
+		expect(result.errors[0]).toContain('--assignee "Pat Q"');
 	});
 
 	it("appends label suggestions plus verb-based type inference to a Missing --labels error", async () => {
@@ -382,5 +405,75 @@ describe("enrichValidationErrors", () => {
 		expect(joined).toContain('--project "Sprint 12"');
 		expect(joined).toContain("--assignee dima");
 		expect(joined).toContain('Inferred from title: type label "bug"');
+	});
+
+	it("appends a single copy-pasteable retry command after the last error", async () => {
+		// Three missing fields → three suggestion blocks, but only ONE retry
+		// command line at the end of the last error.
+		const result: ValidationResult = {
+			errors: [
+				"Missing --project. Every issue must belong to a project.",
+				"Missing --assignee. Every issue must have an assignee.",
+				"Missing --labels. At least one label is required, including a type label.",
+			],
+			warnings: [],
+			normalizedLabels: null,
+		};
+		const services = makeServices({
+			id: "team-dev-uuid",
+			key: "DEV",
+			name: "Dev",
+			projects: { nodes: projectsPayload(["Customer API"]) },
+			members: { nodes: membersPayload([{ name: "Dima" }]) },
+			labels: { nodes: labelsPayload(["bug", "backend"]) },
+		});
+
+		await enrichValidationErrors(
+			result,
+			{ team: "DEV", title: "Fix login flow" },
+			asServices(services),
+		);
+
+		const joined = result.errors.join("\n");
+		// Exactly one retry line emitted, on the last error.
+		expect((joined.match(/Retry with:/g) ?? []).length).toBe(1);
+		expect(result.errors[2]).toContain("Retry with:");
+		expect(result.errors[0]).not.toContain("Retry with:");
+
+		// The retry line itself is a single shell-safe el-linear invocation
+		// with the top suggestion for each missing field, plus title and team.
+		const retry = result.errors[2].split("Retry with:")[1];
+		expect(retry).toContain("el-linear issues create 'Fix login flow'");
+		expect(retry).toContain("--team 'DEV'");
+		expect(retry).toContain("--project 'Customer API'");
+		expect(retry).toContain("--assignee dima");
+		// Verb "Fix" infers type=bug; domain hint comes from labels payload.
+		expect(retry).toContain("--labels 'bug,backend'");
+		expect(retry).toContain("--description ");
+	});
+
+	it("skips the retry line when suggestion data is empty (no fabrication)", async () => {
+		// Project is missing AND the team has no active projects → we don't
+		// emit a retry line with `--project '<fill in>'`. Better to give the
+		// agent no retry than a wrong one.
+		const result: ValidationResult = {
+			errors: ["Missing --project. ..."],
+			warnings: [],
+			normalizedLabels: null,
+		};
+		const services = makeServices({
+			id: "team-dev-uuid",
+			key: "DEV",
+			name: "Dev",
+			projects: { nodes: [] },
+		});
+
+		await enrichValidationErrors(
+			result,
+			{ team: "DEV", title: "Fix x" },
+			asServices(services),
+		);
+
+		expect(result.errors[0]).not.toContain("Retry with:");
 	});
 });

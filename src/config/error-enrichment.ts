@@ -130,17 +130,37 @@ async function resolveTeamUuid(
 }
 
 /**
- * Look up an alias for a member name from config. Falls back to displayName
- * (or name) when no alias is configured.
+ * Best shell-safe token to identify this user on the command line.
+ *
+ * Preference order:
+ *   1. Config alias (always single-token, e.g. "dima")
+ *   2. Email (stable, no spaces)
+ *   3. Quoted displayName (last resort — wrapped in double quotes so a name
+ *      like `Kamal M` doesn't get split by the shell on retry)
+ *
+ * The retryability is the point: the suggestion must paste back into the
+ * same `el-linear issues create ... --assignee <token>` without further
+ * escaping by the caller.
  */
-function aliasOrDisplay(name: string, displayName?: string): string {
+function bestAssigneeToken(
+	name: string,
+	displayName: string | undefined,
+	email: string | undefined,
+): string {
 	const config = loadConfig();
 	for (const [alias, configName] of Object.entries(config.members.aliases)) {
 		if (configName.toLowerCase() === name.toLowerCase()) {
 			return alias;
 		}
 	}
-	return displayName || name;
+	if (email && email.trim().length > 0) {
+		return email;
+	}
+	const label = displayName || name;
+	if (/\s/.test(label)) {
+		return `"${label.replace(/"/g, '\\"')}"`;
+	}
+	return label;
 }
 
 function formatProjectSuggestions(projects: GqlNode[]): string {
@@ -159,7 +179,10 @@ function formatAssigneeSuggestions(members: GqlNode[]): string {
 	}
 	const lines = members
 		.filter((m): m is GqlNode & { name: string } => Boolean(m.name))
-		.map((m) => `    --assignee ${aliasOrDisplay(m.name, m.displayName)}`);
+		.map(
+			(m) =>
+				`    --assignee ${bestAssigneeToken(m.name, m.displayName, m.email)}`,
+		);
 	return `  Suggestions (active team members):\n${lines.join("\n")}`;
 }
 
@@ -286,6 +309,98 @@ export async function enrichValidationErrors(
 			inferred,
 		});
 	}
+
+	// Append a single copy-pasteable retry command after the last enriched
+	// error, so the agent has one concrete line to run instead of having to
+	// stitch together fragments from each error's suggestion block.
+	const retry = formatRetryCommand({
+		title: options.title,
+		team: options.team,
+		classifications,
+		projects,
+		members,
+		labels,
+		typeLabels,
+		inferred,
+	});
+	if (retry) {
+		const lastIdx = result.errors.length - 1;
+		result.errors[lastIdx] = `${result.errors[lastIdx]}\n\n${retry}`;
+	}
+}
+
+interface RetryContext {
+	classifications: ReturnType<typeof classifyError>[];
+	inferred: { verb: string; type: string } | null;
+	labels: GqlNode[];
+	members: GqlNode[];
+	projects: GqlNode[];
+	team: string | undefined;
+	title: string | undefined;
+	typeLabels: string[];
+}
+
+/**
+ * Build one copy-pasteable `el-linear issues create ...` command using the
+ * top-ranked suggestion for each missing field. Returns null when there's
+ * nothing useful to retry with (no team, or every suggestion source was empty).
+ *
+ * All values are shell-quoted with single quotes (POSIX), so titles, project
+ * names, and display names with spaces or special characters paste safely.
+ */
+function formatRetryCommand(ctx: RetryContext): string | null {
+	if (!ctx.team) {
+		return null;
+	}
+	const parts: string[] = ["el-linear issues create"];
+	parts.push(shellQuote(ctx.title ?? "<title>"));
+	parts.push(`--team ${shellQuote(ctx.team)}`);
+
+	const missing = new Set(
+		ctx.classifications.filter((c): c is NonNullable<typeof c> => c !== null),
+	);
+
+	if (missing.has("project")) {
+		const top = ctx.projects.find((p) => p.name);
+		if (!top?.name) {
+			return null;
+		}
+		parts.push(`--project ${shellQuote(top.name)}`);
+	}
+
+	if (missing.has("assignee")) {
+		const top = ctx.members.find((m) => m.name);
+		if (!top?.name) {
+			return null;
+		}
+		// Token is already shell-safe (alias, email, or pre-quoted display name).
+		parts.push(
+			`--assignee ${bestAssigneeToken(top.name, top.displayName, top.email)}`,
+		);
+	}
+
+	if (missing.has("labels") || missing.has("type-label")) {
+		const typeLabel =
+			ctx.inferred && ctx.typeLabels.includes(ctx.inferred.type)
+				? ctx.inferred.type
+				: ctx.typeLabels[0];
+		if (!typeLabel) {
+			return null;
+		}
+		const domain = pickDomainHint(ctx.labels, ctx.typeLabels);
+		const labelArg =
+			domain === "<domain>" ? typeLabel : `${typeLabel},${domain}`;
+		parts.push(`--labels ${shellQuote(labelArg)}`);
+	}
+
+	parts.push("--description '<describe the change and the motivation>'");
+
+	return `  Retry with:\n    ${parts.join(" ")}`;
+}
+
+/** POSIX single-quote escape: 'foo' → 'foo', it's → 'it'\''s'. */
+function shellQuote(value: string): string {
+	return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 interface DecorateContext {
