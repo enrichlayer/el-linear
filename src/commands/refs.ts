@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import type { Command, OptionValues } from "commander";
 import { createGraphQLService } from "../utils/graphql-service.js";
 import { extractIssueReferences } from "../utils/issue-reference-extractor.js";
@@ -74,6 +74,33 @@ export async function wrapRefsCore(
 	return wrapIssueReferencesAsLinks(input.text, validIds, urlKey, input.target);
 }
 
+/**
+ * Return `path` if it resolves to an existing regular file on disk, else
+ * `null`. Used by `handleWrap` to disambiguate the `el-linear refs wrap <arg>`
+ * shape between "wrap this literal text" and "wrap the contents of this file".
+ *
+ * Concerns intentionally NOT addressed:
+ *   - Symlinks → resolved transparently by `statSync` (followSymlinks=true).
+ *   - Directories → returned as null (statSync().isFile() is false).
+ *   - Permission-denied / EACCES → returned as null; the caller falls back to
+ *     treating the arg as text. The eventual `readFileSync` would surface the
+ *     real error if the user did mean a file.
+ *
+ * Reference: DEV-4077 (vertical-int/tools MR !516 / !517 incident reports).
+ */
+function pathIfExistingFile(candidate: string): string | null {
+	if (!candidate || candidate.includes("\n")) return null;
+	try {
+		if (existsSync(candidate) && statSync(candidate).isFile()) {
+			return candidate;
+		}
+	} catch {
+		// EACCES / EPERM / ELOOP → treat as not-a-file; downstream text path
+		// either passes through harmlessly or raises a more useful error.
+	}
+	return null;
+}
+
 interface HandleWrapOptions extends OptionValues {
 	file?: string;
 	target?: string;
@@ -95,15 +122,33 @@ async function handleWrap(
 	// `validate` is `true` by default and `false` when `--no-validate` is passed.
 	const validate = options.validate !== false;
 
-	// Input precedence: positional args > --file > stdin. Positional args are
-	// the most direct path (`el-linear refs wrap "DEV-100 ..."`) and match what
-	// users naturally try; --file and stdin remain for piped / large bodies.
-	const text =
-		textArgs.length > 0
-			? textArgs.join(" ")
-			: typeof options.file === "string" && options.file.length > 0
-				? readFileSync(options.file, "utf8")
-				: await readAllStdin();
+	// Input precedence: positional args > --file > stdin. A single positional
+	// arg that resolves to an existing file is treated as a file path (the
+	// natural `el-linear refs wrap body.md` shape that users hit blind);
+	// otherwise positional args are joined as text. This auto-detect closes
+	// DEV-4077: the published v1.8.1 rejected `wrap <file>` outright, and the
+	// v1.10.0 source treated it as literal text — producing silently wrong
+	// output instead of an error. With this change, either form works.
+	let text: string;
+	if (textArgs.length === 1) {
+		const positionalFile = pathIfExistingFile(textArgs[0]);
+		if (positionalFile !== null) {
+			if (typeof options.file === "string" && options.file.length > 0) {
+				throw new Error(
+					`Both a positional file path (${positionalFile}) and --file ${options.file} were provided. Use one or the other.`,
+				);
+			}
+			text = readFileSync(positionalFile, "utf8");
+		} else {
+			text = textArgs[0];
+		}
+	} else if (textArgs.length > 1) {
+		text = textArgs.join(" ");
+	} else if (typeof options.file === "string" && options.file.length > 0) {
+		text = readFileSync(options.file, "utf8");
+	} else {
+		text = await readAllStdin();
+	}
 
 	const rootOpts = getRootOpts(command);
 
@@ -149,14 +194,17 @@ export function setupRefsCommands(program: Command): void {
 		.command("wrap")
 		.description(
 			"Wrap recognized Linear issue identifiers in input text as links. " +
-				"Reads input from positional args, --file, or stdin (in that order). " +
+				"Input precedence: positional args > --file > stdin. A single positional " +
+				"arg that resolves to an existing file is read as a file (so " +
+				"`el-linear refs wrap body.md` works the same as `--file body.md`); " +
+				"otherwise positional args are joined as literal text. " +
 				"Writes the result to stdout. By default, each candidate identifier " +
 				"is validated against the workspace; unresolvable ones are left as " +
 				"plain text.",
 		)
 		.argument(
 			"[text...]",
-			"input text — overrides stdin/--file; multiple positional args are joined with a single space",
+			"input text OR a path to a file. A single positional arg that exists as a file is read; otherwise positional args are joined as literal text with a single space.",
 		)
 		.option("--file <path>", "read input from a file instead of stdin")
 		.option(

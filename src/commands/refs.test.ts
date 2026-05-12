@@ -377,4 +377,76 @@ describe("refs wrap (CLI integration)", () => {
 		expect(captured).toBe(`positional [DEV-100](${url("DEV-100")})`);
 		expect(captured).not.toContain("DEV-999");
 	});
+
+	it("reads a single positional arg as a file when it exists on disk (DEV-4077)", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "linctl-refs-"));
+		const file = join(dir, "body.md");
+		writeFileSync(file, "see DEV-100 for context", "utf8");
+		setupResolverWith(["DEV-100"]);
+
+		try {
+			await runCommand(program, ["refs", "wrap", file]);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+
+		// Same output as if --file <path> had been used; previously this either
+		// errored ("too many arguments" on v1.8.1) or silently wrapped the path
+		// string itself (v1.10.0). Now the file is read.
+		expect(captured).toBe(`see [DEV-100](${url("DEV-100")}) for context`);
+	});
+
+	it("treats a single positional arg as text when it doesn't exist as a file", async () => {
+		setupResolverWith(["DEV-100"]);
+
+		await runCommand(program, [
+			"refs",
+			"wrap",
+			"DEV-100 in plain text that doesn't exist as a path",
+		]);
+
+		expect(captured).toBe(
+			`[DEV-100](${url("DEV-100")}) in plain text that doesn't exist as a path`,
+		);
+	});
+
+	it("errors when both a positional file path AND --file are provided (DEV-4077)", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "linctl-refs-"));
+		const file1 = join(dir, "one.md");
+		const file2 = join(dir, "two.md");
+		writeFileSync(file1, "DEV-100", "utf8");
+		writeFileSync(file2, "DEV-200", "utf8");
+		setupResolverWith(["DEV-100", "DEV-200"]);
+
+		let caught: Error | undefined;
+		try {
+			await runCommand(program, ["refs", "wrap", file1, "--file", file2]);
+		} catch (err) {
+			caught = err as Error;
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+
+		expect(caught).toBeDefined();
+		expect(caught?.message).toMatch(/both a positional file path/i);
+	});
+
+	it("treats multi-arg positional input as text even if first arg is an existing file", async () => {
+		// Multi-arg form is unambiguously text — never auto-promote to file.
+		const dir = mkdtempSync(join(tmpdir(), "linctl-refs-"));
+		const file = join(dir, "body.md");
+		writeFileSync(file, "ignored file content DEV-999", "utf8");
+		setupResolverWith(["DEV-100"]);
+
+		try {
+			await runCommand(program, ["refs", "wrap", file, "and", "DEV-100"]);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+
+		// File contents NOT included; the path string is joined with the rest as text.
+		expect(captured).toContain(`[DEV-100](${url("DEV-100")})`);
+		expect(captured).not.toContain("DEV-999");
+		expect(captured).not.toContain("ignored file content");
+	});
 });
