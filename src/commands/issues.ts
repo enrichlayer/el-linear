@@ -214,6 +214,20 @@ function sortIssues(
 	return sorted;
 }
 
+/**
+ * Map commander's `options.project` (string | false | undefined) onto the
+ * `SearchIssueArgs.project` discriminant. Commander turns `--no-project`
+ * into `false`; a missing flag is `undefined`; a string is the project
+ * name or UUID to filter to.
+ */
+function resolveProjectFlag(
+	value: string | false | undefined,
+): SearchIssueArgs["project"] {
+	if (value === false) return { kind: "none" };
+	if (value) return { kind: "id", id: value };
+	return undefined;
+}
+
 async function handleListIssues(
 	options: OptionValues,
 	command: Command,
@@ -238,8 +252,7 @@ async function handleListIssues(
 			assigneeId: options.assignee
 				? await resolveAssignee(options.assignee, rootOpts)
 				: undefined,
-			projectId: options.project || undefined,
-			noProject: options.project === false,
+			project: resolveProjectFlag(options.project),
 			labelNames: options.labels ? splitList(options.labels) : undefined,
 			status: options.status ? splitList(options.status) : undefined,
 			priority: options.priority
@@ -281,8 +294,7 @@ async function handleSearchIssues(
 		assigneeId: options.assignee
 			? await resolveAssignee(options.assignee, rootOpts)
 			: undefined,
-		projectId: options.project || undefined,
-		noProject: options.project === false,
+		project: resolveProjectFlag(options.project),
 		status: options.status ? splitList(options.status) : undefined,
 		labelNames: options.labels ? splitList(options.labels) : undefined,
 		priority: options.priority
