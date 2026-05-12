@@ -351,7 +351,16 @@ el-linear projects add-team "Project Name" ENG 2>&1
 
 ### Discovery Before Creation
 
-Always check if a project exists before creating: `el-linear projects list --limit 50`.
+Always check if a project exists before creating: `el-linear projects list --limit 200`.
+
+**Default `--limit` is 25.** In workspaces with many projects, a missing match is silent — the project may simply be past the page boundary. Use `--limit 200` (or higher) for any project lookup intended to be exhaustive.
+
+**If the user names a project that doesn't surface, do not substitute a different one.** Broaden the search before claiming the project doesn't exist:
+
+1. Bump `--limit`.
+2. Search across all teams, not the team-filtered subset — projects often span multiple teams, and filtering by `.teams[].key == "X"` will drop them.
+3. If the user gave a Linear project URL like `https://linear.app/<workspace>/project/<slug>-<id>/...`, that URL is itself an identifier — pass it directly to `--project`, or parse the slug/UUID suffix.
+4. If still missing, **ask** before falling back to a different project.
 
 ---
 
