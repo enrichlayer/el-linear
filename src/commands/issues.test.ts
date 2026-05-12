@@ -175,8 +175,7 @@ describe("issues commands", () => {
 			expect(mockSearchIssues).toHaveBeenCalledWith({
 				teamId: "team-id-DEV",
 				assigneeId: undefined,
-				projectId: undefined,
-				noProject: false,
+				project: undefined,
 				labelNames: undefined,
 				status: undefined,
 				priority: undefined,
@@ -187,6 +186,30 @@ describe("issues commands", () => {
 				data: filteredIssues,
 				meta: { count: 2, team: "DEV" },
 			});
+		});
+
+		it("--project filters with kind=id discriminant (DEV-4068 T4)", async () => {
+			mockSearchIssues.mockResolvedValue([]);
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, ["issues", "list", "--project", "Auth"]);
+			expect(mockSearchIssues).toHaveBeenCalledWith(
+				expect.objectContaining({
+					project: { kind: "id", id: "Auth" },
+				}),
+			);
+		});
+
+		it("--no-project filters with kind=none discriminant (DEV-4068 T4)", async () => {
+			mockSearchIssues.mockResolvedValue([]);
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, ["issues", "list", "--no-project"]);
+			expect(mockSearchIssues).toHaveBeenCalledWith(
+				expect.objectContaining({
+					project: { kind: "none" },
+				}),
+			);
 		});
 	});
 
