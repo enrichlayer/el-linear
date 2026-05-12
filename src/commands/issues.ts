@@ -713,6 +713,9 @@ async function handleUpdateIssue(
 	if (options.label && !options.labels) {
 		options.labels = options.label;
 	}
+	if (options.parent && !options.parentTicket) {
+		options.parentTicket = options.parent;
+	}
 	// Resolve --description-file before validation
 	if (options.descriptionFile) {
 		options.description = readDescriptionFile(options.descriptionFile);
@@ -1026,6 +1029,7 @@ export function setupIssuesCommands(program: Command): void {
 		.option("--cycle <cycle>", "cycle name or ID")
 		.option("--status <status>", "status name or ID")
 		.option("--parent-ticket <parentId>", "parent issue ID or identifier")
+		.option("--parent <parentId>", "alias for --parent-ticket")
 		.option(
 			"--subscriber <subscribers>",
 			"subscribers (comma-separated names, aliases, or UUIDs)",
@@ -1077,6 +1081,10 @@ export function setupIssuesCommands(program: Command): void {
 					// Normalize --label alias to --labels
 					if (options.label && !options.labels) {
 						options.labels = options.label;
+					}
+					// Normalize --parent alias to --parent-ticket
+					if (options.parent && !options.parentTicket) {
+						options.parentTicket = options.parent;
 					}
 					const title = options.title || titleArg;
 					// --from-template lets Linear copy the template's title, so a
@@ -1147,6 +1155,7 @@ export function setupIssuesCommands(program: Command): void {
 		)
 		.option("--clear-labels", "remove all labels from issue")
 		.option("--parent-ticket <parentId>", "set parent issue")
+		.option("--parent <parentId>", "alias for --parent-ticket")
 		.option("--clear-parent-ticket", "clear parent relationship")
 		.option("--project-milestone <milestone>", "set project milestone")
 		.option("--clear-project-milestone", "clear project milestone")

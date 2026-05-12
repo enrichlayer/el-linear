@@ -965,6 +965,29 @@ describe("issues commands", () => {
 				}),
 			);
 		});
+
+		it("accepts --parent as alias for --parent-ticket", async () => {
+			mockCreateIssue.mockResolvedValue({ id: "new-issue-id" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Task",
+				"--team",
+				"DEV",
+				"--parent",
+				"DEV-7",
+				...requiredArgs,
+			]);
+
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({
+					parentId: "DEV-7",
+				}),
+			);
+		});
 	});
 
 	describe("issues update", () => {
@@ -987,6 +1010,28 @@ describe("issues commands", () => {
 				),
 			);
 			expect(process.exit).toHaveBeenCalledWith(1);
+		});
+
+		it("accepts --parent as alias for --parent-ticket on update", async () => {
+			mockUpdateIssue.mockResolvedValue({ id: "uuid", identifier: "DEV-1" });
+			mockLinearService.resolveIssueId.mockResolvedValue("issue-uuid");
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"update",
+				"DEV-1",
+				"--parent",
+				"DEV-9",
+			]);
+
+			expect(mockUpdateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({
+					parentId: "DEV-9",
+				}),
+				expect.anything(),
+			);
 		});
 
 		it("errors when --project-milestone and --clear-project-milestone are both used", async () => {
