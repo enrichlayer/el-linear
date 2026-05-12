@@ -54,13 +54,6 @@ import { isUuid } from "./uuid.js";
 const TEAM_KEY_REGEX = /^[A-Z0-9]+$/i;
 
 /**
- * Arguments accepted by `GraphQLIssuesService.searchIssues`. Two
- * modes:
- *   - When `query` is set, runs Linear's full-text search and
- *     post-filters the results with the structured filters below.
- *   - When `query` is unset, runs a structured filter directly.
- */
-/**
  * Project filter for `SearchIssueArgs`. Discriminated on `kind` so the
  * "filter by project" and "filter to issues with no project" cases are
  * mutually exclusive at the type level — the old `projectId?: string;
@@ -70,6 +63,13 @@ const TEAM_KEY_REGEX = /^[A-Z0-9]+$/i;
  */
 export type SearchIssueProject = { kind: "id"; id: string } | { kind: "none" };
 
+/**
+ * Arguments accepted by `GraphQLIssuesService.searchIssues`. Two
+ * modes:
+ *   - When `query` is set, runs Linear's full-text search and
+ *     post-filters the results with the structured filters below.
+ *   - When `query` is unset, runs a structured filter directly.
+ */
 export interface SearchIssueArgs {
 	/** Free-text search term. When set, `searchIssues` uses Linear's
 	 * native full-text search. */
@@ -584,6 +584,21 @@ export class GraphQLIssuesService {
 			resolveResult,
 		);
 
+		// Map the public discriminant back to the internal filter shape:
+		// `{ kind: "id", id }` → `{ kind: "id", id: <resolvedUuid> }`
+		// `{ kind: "none" }`  → pass through
+		// undefined            → undefined (filter off)
+		// Reused by both the full-text and structured search paths so
+		// `--no-project` (`{ kind: "none" }`) participates in both — pre-fix,
+		// the full-text branch silently dropped `noProject` because only
+		// the resolved `projectId` was forwarded.
+		const projectFilter: SearchIssueProject | undefined =
+			args.project?.kind === "id" && finalProjectId
+				? { kind: "id", id: finalProjectId }
+				: args.project?.kind === "none"
+					? { kind: "none" }
+					: undefined;
+
 		const limit = args.limit ?? 10;
 
 		if (args.query) {
@@ -603,22 +618,12 @@ export class GraphQLIssuesService {
 			return this.applySearchFilters(results, {
 				teamId: finalTeamId,
 				assigneeId: finalAssigneeId,
-				projectId: finalProjectId,
+				project: projectFilter,
 				status: args.status,
 				labelNames: args.labelNames,
 				priority: args.priority,
 			});
 		}
-		// Map the discriminant back to the internal filter shape:
-		// `{ kind: "id", id }` → `{ kind: "id", id: <resolvedUuid> }`
-		// `{ kind: "none" }`  → pass through
-		// undefined            → undefined (filter off)
-		const projectFilter: SearchIssueProject | undefined =
-			args.project?.kind === "id" && finalProjectId
-				? { kind: "id", id: finalProjectId }
-				: args.project?.kind === "none"
-					? { kind: "none" }
-					: undefined;
 		const filter = this.buildSearchFilter({
 			teamId: finalTeamId,
 			assigneeId: finalAssigneeId,
@@ -1105,7 +1110,7 @@ export class GraphQLIssuesService {
 		filters: {
 			teamId?: string;
 			assigneeId?: string;
-			projectId?: string;
+			project?: SearchIssueProject;
 			status?: string[];
 			labelNames?: string[];
 			priority?: LinearPriority[];
@@ -1122,10 +1127,21 @@ export class GraphQLIssuesService {
 				(issue: LinearIssue) => issue.assignee?.id === filters.assigneeId,
 			);
 		}
-		if (filters.projectId) {
-			filtered = filtered.filter(
-				(issue: LinearIssue) => issue.project?.id === filters.projectId,
-			);
+		if (filters.project) {
+			switch (filters.project.kind) {
+				case "id": {
+					const id = filters.project.id;
+					filtered = filtered.filter(
+						(issue: LinearIssue) => issue.project?.id === id,
+					);
+					break;
+				}
+				case "none":
+					filtered = filtered.filter((issue: LinearIssue) => !issue.project);
+					break;
+				default:
+					return filters.project satisfies never;
+			}
 		}
 		if (filters.status && filters.status.length > 0) {
 			filtered = filtered.filter((issue: LinearIssue) =>

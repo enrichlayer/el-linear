@@ -5,6 +5,7 @@ import {
 	resolveTeam,
 } from "../config/resolver.js";
 import type { LinearIssue } from "../types/linear.js";
+import type { SearchIssueArgs } from "../utils/graphql-issues-service.js";
 import { createIssuesService } from "../utils/issues-service-bootstrap.js";
 import { logger } from "../utils/logger.js";
 import {
@@ -60,12 +61,18 @@ async function resolveTargetIssues(
 
 	if (options.filter) {
 		const filters = parseFilterString(options.filter);
-		const searchArgs: Record<string, unknown> = {
+		// Typed as SearchIssueArgs (not Record<string, unknown>) so a future
+		// rename of any field — like the DEV-4068 T4 `projectId` → `project`
+		// migration — surfaces here at compile time instead of silently
+		// dropping the filter.
+		const searchArgs: SearchIssueArgs = {
 			teamId: filters.team ? resolveTeam(filters.team) : undefined,
 			assigneeId: filters.assignee
 				? await resolveAssignee(filters.assignee, rootOpts)
 				: undefined,
-			projectId: filters.project || undefined,
+			project: filters.project
+				? { kind: "id", id: filters.project }
+				: undefined,
 			labelNames: filters.label ? splitList(filters.label) : undefined,
 			status: filters.status ? splitList(filters.status) : undefined,
 			limit: 50,
