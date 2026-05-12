@@ -1,4 +1,5 @@
 import { type IssueLabel, LinearClient } from "@linear/sdk";
+import type { LinearCredential } from "../auth/linear-credential.js";
 import { getActiveAuth } from "../auth/token-resolver.js";
 import { resolveUserDisplayName } from "../config/resolver.js";
 import type {
@@ -42,24 +43,14 @@ function nonEmptyFilter(
 }
 
 /**
- * Constructor arg shapes for `LinearService`. Three variants:
- *   - `string` → personal API token (legacy; sent without `Bearer` prefix).
- *   - `{apiKey: string}` → personal API token (explicit).
- *   - `{oauthToken: string}` → OAuth access token (sent as
- *     `Authorization: Bearer <token>` via the SDK's accessToken option).
- *
- * The string variant exists because hundreds of call sites and tests pass
- * a plain string. We continue to support it indefinitely.
+ * Constructor arg for `LinearService`. Re-exported alias of the shared
+ * `LinearCredential` union (`{ apiKey } | { oauthToken }`). See
+ * `src/auth/linear-credential.ts` for the contract. The bare-string
+ * legacy arm was dropped in DEV-4068 T7.
  */
-export type LinearServiceAuth =
-	| string
-	| { apiKey: string }
-	| { oauthToken: string };
+export type LinearServiceAuth = LinearCredential;
 
 function buildLinearClient(auth: LinearServiceAuth): LinearClient {
-	if (typeof auth === "string") {
-		return new LinearClient({ apiKey: auth });
-	}
 	if ("oauthToken" in auth) {
 		// Linear's SDK natively supports OAuth via the `accessToken` option,
 		// which causes the underlying transport to send

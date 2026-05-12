@@ -11,16 +11,16 @@ const { GraphQLService } = await import("./graphql-service.js");
 const { LinearService } = await import("./linear-service.js");
 
 function createService() {
-	const graphQLService = new GraphQLService("token");
-	const linearService = new LinearService("token");
+	const graphQLService = new GraphQLService({ apiKey: "token" });
+	const linearService = new LinearService({ apiKey: "token" });
 	return new GraphQLIssuesService(graphQLService, linearService);
 }
 
 describe("GraphQLIssuesService", () => {
 	describe("archive/delete issue", () => {
 		it("archives a resolved issue id", async () => {
-			const graphQLService = new GraphQLService("token");
-			const linearService = new LinearService("token");
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
 			vi.spyOn(linearService, "resolveIssueId").mockResolvedValue("uuid-1");
 			const rawRequest = vi
 				.spyOn(graphQLService, "rawRequest")
@@ -49,8 +49,8 @@ describe("GraphQLIssuesService", () => {
 		});
 
 		it("deletes an issue with permanent deletion flag", async () => {
-			const graphQLService = new GraphQLService("token");
-			const linearService = new LinearService("token");
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
 			vi.spyOn(linearService, "resolveIssueId").mockResolvedValue("uuid-1");
 			const rawRequest = vi
 				.spyOn(graphQLService, "rawRequest")
@@ -96,8 +96,8 @@ describe("GraphQLIssuesService", () => {
 		});
 
 		it("falls back to LinearService when GraphQL match fails", async () => {
-			const graphQLService = new GraphQLService("token");
-			const linearService = new LinearService("token");
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
 			const resolveTeamIdSpy = vi
 				.spyOn(linearService, "resolveTeamId")
 				.mockResolvedValue("prefix-resolved-uuid");

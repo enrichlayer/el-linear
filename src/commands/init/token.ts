@@ -76,7 +76,7 @@ function viewerIsValid(viewer: unknown): viewer is ViewerResponse["viewer"] {
 export async function validateToken(
 	token: string,
 ): Promise<ViewerResponse["viewer"]> {
-	const service = new GraphQLService(token);
+	const service = new GraphQLService({ apiKey: token });
 	let data: ViewerResponse;
 	try {
 		data = await service.rawRequest<ViewerResponse>(VIEWER_QUERY);
