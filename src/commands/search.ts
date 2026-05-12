@@ -33,6 +33,23 @@ const VALID_TYPES = new Set([
 	"document",
 	"template",
 ]);
+/**
+ * `SemanticSearchResult`-valid types only (drops "template" — templates
+ * come from a separate query, not `semanticSearch`). Used to filter
+ * unknown types out of the response BEFORE they reach
+ * `transformSearchResult` — the transformer's switch has a
+ * `satisfies never` exhaustiveness guard that would otherwise return
+ * the raw row on a never-typed default branch.
+ */
+const SEMANTIC_TYPES = new Set<SemanticSearchResult["type"]>([
+	"issue",
+	"project",
+	"initiative",
+	"document",
+]);
+function isKnownSemanticResult(r: { type: string }): r is SemanticSearchResult {
+	return SEMANTIC_TYPES.has(r.type as SemanticSearchResult["type"]);
+}
 const WHITESPACE_RE = /\s+/;
 
 function transformSearchResult(
@@ -159,11 +176,20 @@ function extractSemanticResults(
 	requestedTypes: string[] | null,
 	onlyTemplates: boolean,
 ): Record<string, unknown>[] {
-	let results = semanticResult.semanticSearch?.results ?? [];
+	// Always drop rows with unknown `type` first — defends the transformer
+	// against future Linear API expansions adding a new variant before
+	// SemanticSearchResult's union is widened. Without this, an unknown
+	// type would reach the transformer's `satisfies never` default and
+	// pass through as a raw row.
+	let results = (semanticResult.semanticSearch?.results ?? []).filter(
+		isKnownSemanticResult,
+	);
 
 	if (requestedTypes && !onlyTemplates) {
-		const semanticTypes = requestedTypes.filter((t) => t !== "template");
-		results = results.filter((r) => semanticTypes.includes(r.type));
+		const semanticTypes = new Set(
+			requestedTypes.filter((t) => t !== "template"),
+		);
+		results = results.filter((r) => semanticTypes.has(r.type));
 	}
 
 	return results.map(transformSearchResult);

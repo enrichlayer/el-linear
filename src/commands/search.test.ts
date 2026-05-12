@@ -118,4 +118,32 @@ describe("search", () => {
 			runCommand(program, ["search", "test", "--type", "bogus"]),
 		).rejects.toThrow('Invalid type "bogus"');
 	});
+
+	it("drops rows with unknown type before reaching the transformer (DEV-4068 T1)", async () => {
+		// Linear adds a hypothetical new "milestone" type before the union
+		// is widened. Without the pre-filter the transformer's `satisfies
+		// never` default branch would let the raw row pass through.
+		mockRawRequest.mockResolvedValue({
+			semanticSearch: {
+				results: [
+					{
+						type: "issue",
+						issue: { id: "i1", identifier: "DEV-1", title: "x" },
+					},
+					{ type: "milestone", milestone: { id: "m1", name: "Q4" } },
+					{
+						type: "project",
+						project: { id: "p1", name: "Auth", state: "started" },
+					},
+				],
+			},
+		});
+		await runCommand(program, ["search", "anything"]);
+		const callArgs = mockOutputSuccess.mock.calls[0][0];
+		expect(callArgs.data).toHaveLength(2);
+		expect(callArgs.data.map((r: { type: string }) => r.type)).toEqual([
+			"issue",
+			"project",
+		]);
+	});
 });
