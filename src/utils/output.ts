@@ -67,11 +67,29 @@ function emitSummary(payload: unknown, kind: ResourceKind): void {
 }
 
 /**
+ * Resource-specific extra metadata that may be added to a list response
+ * alongside the canonical `count` (e.g. `query` on search, `team` on
+ * filtered list). Excludes `count` at the type level — callers can't
+ * accidentally pass a string `count` and have it silently overridden;
+ * the only way to set `count` is via `data.length` inside `outputList`.
+ *
+ * Implementation note: `count?: never` together with `Record<string, unknown>`
+ * lets TypeScript accept any other key while disallowing the literal
+ * `count` key. The `never`-typed property is impossible to assign, which
+ * is what we want for the "no count here" contract.
+ */
+export type ListExtraMeta = Record<string, unknown> & {
+	count?: never;
+};
+
+/**
  * Metadata envelope for list responses. Always includes `count`; resources
  * may add their own keys (e.g. `query` on search, `team` on filtered list).
  *
- * Mirrors the wire contract the CLI exposes — `meta.count` is what every
- * downstream `jq` pipeline reads to know whether the list is empty.
+ * `meta.count` is the cardinality of `data[]` — downstream `jq` pipelines
+ * read it both for emptiness checks (`.meta.count == 0`) and for the
+ * actual magnitude (e.g. logging "found N issues"). A boolean isEmpty
+ * would lose the magnitude signal, so `count: number` stays.
  */
 export interface ListMeta extends Record<string, unknown> {
 	count: number;
@@ -99,14 +117,11 @@ export interface CliListEnvelope<T> {
  *
  * @param data    The array payload.
  * @param extraMeta Optional resource-specific meta keys (e.g. `query`,
- *                  `team`). `count` is computed from `data.length`; a
- *                  caller-supplied `count` in `extraMeta` is overridden
- *                  to preserve the invariant.
+ *                  `team`). The type excludes `count` — `count` is
+ *                  always computed from `data.length` to preserve the
+ *                  wire-contract invariant.
  */
-export function outputList<T>(
-	data: T[],
-	extraMeta?: Record<string, unknown>,
-): void {
+export function outputList<T>(data: T[], extraMeta?: ListExtraMeta): void {
 	const meta: ListMeta = { ...extraMeta, count: data.length };
 	const envelope: CliListEnvelope<T> = { data, meta };
 	outputSuccess(envelope);
@@ -118,8 +133,17 @@ export function outputList<T>(
  * the resource object itself (no `data`/`meta` wrapping). Same emit
  * path as `outputSuccess` and `outputList`; this overload exists so
  * call sites can document their intent at the type level.
+ *
+ * The conditional return type rejects array inputs at the type level —
+ * a caller that meant `outputList` and passed an array gets a compile
+ * error pointing them at the right helper. Runtime behavior on an array
+ * is unchanged (it'd still emit JSON), but the type catches the foot-gun.
  */
-export function outputSingle<T>(data: T): void {
+export function outputSingle<T>(
+	data: T extends readonly unknown[]
+		? "outputSingle does not accept arrays — use outputList(data) instead"
+		: T,
+): void {
 	outputSuccess(data);
 }
 

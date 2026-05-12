@@ -598,11 +598,14 @@ describe("outputList / outputSingle (DEV-4068 T6)", () => {
 		});
 	});
 
-	it("outputList computes count from data.length even if extraMeta tries to override", () => {
-		// Defense-in-depth: meta.count must reflect data.length (the invariant
-		// downstream jq pipelines depend on). A caller passing `count: 999`
-		// in extraMeta shouldn't lie about list length.
+	it("outputList rejects extraMeta containing `count` at the type level (DEV-4068 T6 cycle-1)", () => {
+		// Type-only test — `extraMeta.count` is `never`, so the literal
+		// fails to assign. Defense at the contract level: callers can't
+		// pass `count: 999` and have it silently overridden — the type
+		// catches the lie before it reaches runtime.
+		// @ts-expect-error -- count is excluded from ListExtraMeta
 		outputList([{ id: 1 }], { count: 999, query: "x" });
+		// Runtime: count is always data.length even if the type were bypassed.
 		expect(lastEmittedJson()).toEqual({
 			data: [{ id: 1 }],
 			meta: { count: 1, query: "x" },
@@ -641,5 +644,20 @@ describe("outputList / outputSingle (DEV-4068 T6)", () => {
 			data: { id: number }[];
 			meta: { count: number } & Record<string, unknown>;
 		}>();
+	});
+
+	it("outputSingle rejects array inputs at the type level (DEV-4068 T6 cycle-1)", () => {
+		// Type-only test — passing an array to outputSingle is a foot-gun
+		// (caller probably meant outputList). The conditional return type
+		// narrows the parameter against `readonly unknown[]` and emits a
+		// helpful error string.
+		// @ts-expect-error -- arrays must use outputList, not outputSingle
+		outputSingle([1, 2, 3]);
+		// @ts-expect-error -- typed-array case also rejected
+		outputSingle<{ id: number }[]>([{ id: 1 }]);
+		// Sanity: scalar / object inputs still accepted.
+		outputSingle({ id: 1 });
+		outputSingle("a string");
+		outputSingle(42);
 	});
 });
