@@ -37,18 +37,24 @@ interface SearchDocumentRef {
 }
 
 /**
- * Mirrors a single semanticSearch result. The discriminator is `type`,
- * but Linear returns *all* sub-objects nullable per row — only the one
- * matching `type` is populated. Modelled as fully-optional sub-objects
- * to match runtime reality.
+ * A single semanticSearch result. Discriminated union on `type` — given
+ * a row, only the field named by `type` is meaningful (the other three
+ * are absent / null on the wire). Consumers `switch (r.type)` and access
+ * the corresponding payload directly; the compiler statically rejects
+ * cross-arm access like `r.project` in a `case "issue"` branch.
+ *
+ * The payload itself is `| null` because Linear can return null when
+ * the underlying entity was deleted between indexing and query time —
+ * that's an orthogonal concern from the discriminant.
+ *
+ * The four `type` literals match Linear's `semanticSearch.results.type`
+ * enum verbatim — keep in lock-step with the GraphQL schema's enum.
  */
-export interface SemanticSearchResult {
-	type: string;
-	issue: SearchIssueRef | null;
-	project: SearchProjectRef | null;
-	initiative: SearchInitiativeRef | null;
-	document: SearchDocumentRef | null;
-}
+export type SemanticSearchResult =
+	| { type: "issue"; issue: SearchIssueRef | null }
+	| { type: "project"; project: SearchProjectRef | null }
+	| { type: "initiative"; initiative: SearchInitiativeRef | null }
+	| { type: "document"; document: SearchDocumentRef | null };
 
 export interface SemanticSearchResponse {
 	semanticSearch: {
