@@ -66,6 +66,63 @@ function emitSummary(payload: unknown, kind: ResourceKind): void {
 	logger.info(dispatchSummary(kind, payload));
 }
 
+/**
+ * Metadata envelope for list responses. Always includes `count`; resources
+ * may add their own keys (e.g. `query` on search, `team` on filtered list).
+ *
+ * Mirrors the wire contract the CLI exposes — `meta.count` is what every
+ * downstream `jq` pipeline reads to know whether the list is empty.
+ */
+export interface ListMeta extends Record<string, unknown> {
+	count: number;
+}
+
+/**
+ * Canonical JSON envelope for a list response. Pre-DEV-4068 T6, every
+ * call site built this object literal inline and `outputSuccess(data:
+ * unknown)` accepted it without type-checking. Use `outputList<T>` to
+ * route a list through the same emit path with a real per-element type
+ * (so e.g. `data: T[]` and `--fields` consumers stay in lock-step).
+ */
+export interface CliListEnvelope<T> {
+	data: T[];
+	meta: ListMeta;
+}
+
+/**
+ * Typed wrapper around `outputSuccess` for list responses — builds the
+ * `{ data, meta: { count, ...extraMeta } }` envelope and emits it. The
+ * 81 existing inline `outputSuccess({ data, meta: { count, ... } })`
+ * call sites can migrate to this incrementally; both go through the
+ * same `outputSuccess` emit path so JSON / summary / --raw / --fields /
+ * --jq behavior is identical.
+ *
+ * @param data    The array payload.
+ * @param extraMeta Optional resource-specific meta keys (e.g. `query`,
+ *                  `team`). `count` is computed from `data.length`; a
+ *                  caller-supplied `count` in `extraMeta` is overridden
+ *                  to preserve the invariant.
+ */
+export function outputList<T>(
+	data: T[],
+	extraMeta?: Record<string, unknown>,
+): void {
+	const meta: ListMeta = { ...extraMeta, count: data.length };
+	const envelope: CliListEnvelope<T> = { data, meta };
+	outputSuccess(envelope);
+}
+
+/**
+ * Typed wrapper around `outputSuccess` for a single-resource response.
+ * Pure passthrough — the envelope contract for single resources is just
+ * the resource object itself (no `data`/`meta` wrapping). Same emit
+ * path as `outputSuccess` and `outputList`; this overload exists so
+ * call sites can document their intent at the type level.
+ */
+export function outputSingle<T>(data: T): void {
+	outputSuccess(data);
+}
+
 export function outputSuccess(data: unknown): void {
 	const warnings = drainWarnings();
 	let output: unknown;

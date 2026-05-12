@@ -1,6 +1,17 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	expectTypeOf,
+	it,
+	vi,
+} from "vitest";
+import {
+	type CliListEnvelope,
 	handleAsyncCommand,
+	outputList,
+	outputSingle,
 	outputSuccess,
 	outputWarning,
 	resetWarnings,
@@ -555,5 +566,80 @@ describe("setOutputFormat", () => {
 		expect(getOutputFormat()).toBe("summary");
 		setOutputFormat("json");
 		expect(getOutputFormat()).toBe("json");
+	});
+});
+
+describe("outputList / outputSingle (DEV-4068 T6)", () => {
+	let stdoutSpy: ReturnType<typeof vi.spyOn>;
+
+	beforeEach(() => {
+		resetWarnings();
+		stdoutSpy = vi
+			.spyOn(process.stdout, "write")
+			.mockImplementation(() => true);
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	function lastEmittedJson(): unknown {
+		const lastCall = stdoutSpy.mock.calls.at(-1);
+		if (!lastCall) throw new Error("no stdout writes recorded");
+		const text = String(lastCall[0]).trim();
+		return JSON.parse(text);
+	}
+
+	it("outputList builds `{ data, meta: { count } }` envelope from an array", () => {
+		outputList([{ id: 1 }, { id: 2 }]);
+		expect(lastEmittedJson()).toEqual({
+			data: [{ id: 1 }, { id: 2 }],
+			meta: { count: 2 },
+		});
+	});
+
+	it("outputList computes count from data.length even if extraMeta tries to override", () => {
+		// Defense-in-depth: meta.count must reflect data.length (the invariant
+		// downstream jq pipelines depend on). A caller passing `count: 999`
+		// in extraMeta shouldn't lie about list length.
+		outputList([{ id: 1 }], { count: 999, query: "x" });
+		expect(lastEmittedJson()).toEqual({
+			data: [{ id: 1 }],
+			meta: { count: 1, query: "x" },
+		});
+	});
+
+	it("outputList preserves extraMeta keys alongside count", () => {
+		outputList([{ id: 1 }, { id: 2 }, { id: 3 }], {
+			query: "fix bug",
+			team: "DEV",
+		});
+		expect(lastEmittedJson()).toEqual({
+			data: [{ id: 1 }, { id: 2 }, { id: 3 }],
+			meta: { count: 3, query: "fix bug", team: "DEV" },
+		});
+	});
+
+	it("outputList emits an empty list as `{ data: [], meta: { count: 0 } }`", () => {
+		outputList([]);
+		expect(lastEmittedJson()).toEqual({ data: [], meta: { count: 0 } });
+	});
+
+	it("outputSingle passes through unchanged (no envelope wrapping)", () => {
+		outputSingle({ id: "DEV-1", title: "issue" });
+		expect(lastEmittedJson()).toEqual({ id: "DEV-1", title: "issue" });
+	});
+
+	it("outputList is type-parameterized over its element type", () => {
+		// Compile-time only: outputList<T> threads T through to
+		// CliListEnvelope<T>. Inferring `T` from the array literal lets the
+		// resource-specific shape participate in `--fields` / `jq` typing.
+		expectTypeOf<typeof outputList<{ id: number }>>()
+			.parameter(0)
+			.toEqualTypeOf<{ id: number }[]>();
+		expectTypeOf<CliListEnvelope<{ id: number }>>().toEqualTypeOf<{
+			data: { id: number }[];
+			meta: { count: number } & Record<string, unknown>;
+		}>();
 	});
 });
