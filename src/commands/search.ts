@@ -40,7 +40,7 @@ function transformSearchResult(
 ): Record<string, unknown> {
 	switch (r.type) {
 		case "issue": {
-			const issue = r.issue;
+			const { issue } = r;
 			return {
 				type: "issue",
 				identifier: issue?.identifier,
@@ -81,7 +81,10 @@ function transformSearchResult(
 			};
 		}
 		default:
-			return { type: r.type, id: null };
+			// Exhaustiveness check: SemanticSearchResult is a closed union, so
+			// `r` is `never` here — adding a new arm to the union forces a new
+			// case branch (the compiler error makes it impossible to forget).
+			return r satisfies never;
 	}
 }
 
