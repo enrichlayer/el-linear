@@ -20,7 +20,7 @@ describe("GraphQLService", () => {
 		mockRawRequest.mockResolvedValue({
 			data: { issue: { id: "123", title: "Test" } },
 		});
-		const service = new GraphQLService("test-token");
+		const service = new GraphQLService({ apiKey: "test-token" });
 
 		const result = await service.rawRequest("query { issue { id title } }");
 		expect(result).toEqual({ issue: { id: "123", title: "Test" } });
@@ -28,7 +28,7 @@ describe("GraphQLService", () => {
 
 	it("passes variables to the underlying client", async () => {
 		mockRawRequest.mockResolvedValue({ data: {} });
-		const service = new GraphQLService("test-token");
+		const service = new GraphQLService({ apiKey: "test-token" });
 
 		await service.rawRequest("query ($id: String!) { issue(id: $id) { id } }", {
 			id: "abc",
@@ -45,7 +45,7 @@ describe("GraphQLService", () => {
 		mockRawRequest.mockRejectedValue({
 			response: { errors: [{ message: "Field 'foo' not found" }] },
 		});
-		const service = new GraphQLService("test-token");
+		const service = new GraphQLService({ apiKey: "test-token" });
 
 		await expect(service.rawRequest("{ foo }")).rejects.toThrow(
 			"Field 'foo' not found",
@@ -56,7 +56,7 @@ describe("GraphQLService", () => {
 		mockRawRequest.mockRejectedValue({
 			response: { errors: [{}] },
 		});
-		const service = new GraphQLService("test-token");
+		const service = new GraphQLService({ apiKey: "test-token" });
 
 		await expect(service.rawRequest("{ foo }")).rejects.toThrow(
 			"GraphQL query failed",
@@ -65,7 +65,7 @@ describe("GraphQLService", () => {
 
 	it("wraps non-GraphQL errors with request context", async () => {
 		mockRawRequest.mockRejectedValue({ message: "Network timeout" });
-		const service = new GraphQLService("test-token");
+		const service = new GraphQLService({ apiKey: "test-token" });
 
 		await expect(service.rawRequest("{ foo }")).rejects.toThrow(
 			"GraphQL request failed: Network timeout",
@@ -74,7 +74,7 @@ describe("GraphQLService", () => {
 
 	it("string constructor passes apiKey to LinearClient (personal-token path)", () => {
 		linearClientCtorSpy.mockReset();
-		new GraphQLService("personal-token");
+		new GraphQLService({ apiKey: "personal-token" });
 		expect(linearClientCtorSpy).toHaveBeenCalledWith(
 			expect.objectContaining({ apiKey: "personal-token" }),
 		);

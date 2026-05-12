@@ -22,7 +22,7 @@ vi.stubGlobal("fetch", mockFetch);
 const { FileService } = await import("./file-service.js");
 
 function createService() {
-	return new FileService("test-api-token");
+	return new FileService({ apiKey: "test-api-token" });
 }
 
 describe("FileService", () => {

@@ -1,5 +1,6 @@
 import { access, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname } from "node:path";
+import type { LinearCredential } from "../auth/linear-credential.js";
 import type { FileDownloadResult, FileUploadResult } from "../types/linear.js";
 import { extractFilenameFromUrl, isLinearUploadUrl } from "./embed-parser.js";
 
@@ -45,22 +46,14 @@ function getMimeType(filePath: string): string {
 }
 
 /**
- * Constructor arg shapes for `FileService`:
- *   - `string` → personal API token (legacy; sent as `Authorization: <token>`).
- *   - `{apiKey: string}` → personal API token (explicit).
- *   - `{oauthToken: string}` → OAuth access token (sent as
- *     `Authorization: Bearer <token>`).
- *
- * The string variant exists because dozens of tests construct `FileService`
- * with a plain string. We continue to support it indefinitely.
+ * Constructor arg for `FileService`. Re-exported alias of the shared
+ * `LinearCredential` union (`{ apiKey } | { oauthToken }`). See
+ * `src/auth/linear-credential.ts` for the contract. The bare-string
+ * legacy arm was dropped in DEV-4068 T7.
  */
-export type FileServiceAuth =
-	| string
-	| { apiKey: string }
-	| { oauthToken: string };
+export type FileServiceAuth = LinearCredential;
 
 function buildAuthHeader(auth: FileServiceAuth): string {
-	if (typeof auth === "string") return auth;
 	if ("oauthToken" in auth) return `Bearer ${auth.oauthToken}`;
 	return auth.apiKey;
 }

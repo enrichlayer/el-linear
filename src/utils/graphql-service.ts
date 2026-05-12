@@ -1,4 +1,5 @@
 import { LinearClient } from "@linear/sdk";
+import type { LinearCredential } from "../auth/linear-credential.js";
 import { getActiveAuth } from "../auth/token-resolver.js";
 import type { GraphQLResponseData, GraphQLVariables } from "../types/linear.js";
 import type { AuthOptions } from "./auth.js";
@@ -11,25 +12,20 @@ interface GraphQLRawClient {
 }
 
 /**
- * Constructor arg shapes for `GraphQLService`. Three variants:
- *   - `string` → personal API token (legacy; sent without `Bearer` prefix).
- *   - `{apiKey: string}` → personal API token (explicit).
- *   - `{oauthToken: string}` → OAuth access token (sent as
- *     `Authorization: Bearer <token>` via the SDK's accessToken option).
+ * Constructor arg for `GraphQLService`. Re-exported alias of the shared
+ * `LinearCredential` union (`{ apiKey } | { oauthToken }`). Kept as a
+ * named local export so call sites that already import
+ * `GraphQLServiceAuth` keep compiling — the alias collapses through to
+ * the shared shape.
  *
- * The string variant exists because hundreds of call sites and tests pass
- * a plain string. We continue to support it indefinitely.
+ * The bare-string legacy arm was dropped in DEV-4068 T7. Tests now
+ * construct with `{ apiKey: "test-token" }` (mechanical rewrite, no
+ * semantic change — same `Authorization: <token>` header is emitted).
  */
-export type GraphQLServiceAuth =
-	| string
-	| { apiKey: string }
-	| { oauthToken: string };
+export type GraphQLServiceAuth = LinearCredential;
 
 function buildLinearClient(auth: GraphQLServiceAuth): LinearClient {
 	const baseHeaders = { "public-file-urls-expire-in": "3600" };
-	if (typeof auth === "string") {
-		return new LinearClient({ apiKey: auth, headers: baseHeaders });
-	}
 	if ("oauthToken" in auth) {
 		// Linear's SDK natively supports OAuth via the `accessToken` option,
 		// which causes the underlying graphql-request client to send

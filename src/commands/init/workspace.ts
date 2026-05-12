@@ -43,7 +43,7 @@ export async function runWorkspaceStep(
 	workspaceUrlKey: string,
 	existing: WizardConfig,
 ): Promise<WorkspaceStepResult> {
-	const service = new GraphQLService(token);
+	const service = new GraphQLService({ apiKey: token });
 
 	// Fetch teams once so we can populate both the picker and the cached id map.
 	const data = await service.rawRequest<TeamsResponse>(TEAMS_QUERY);

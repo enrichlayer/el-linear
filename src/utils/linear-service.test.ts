@@ -33,7 +33,7 @@ const { LinearService } = await import("./linear-service.js");
 describe("LinearService", () => {
 	describe("resolveIssueId", () => {
 		it("returns UUID directly", async () => {
-			const service = new LinearService("token");
+			const service = new LinearService({ apiKey: "token" });
 			const result = await service.resolveIssueId(
 				"f47ac10b-58cc-4372-a567-0e02b2c3d479",
 			);
@@ -42,14 +42,14 @@ describe("LinearService", () => {
 
 		it("resolves identifier like DEV-123", async () => {
 			mockIssues.mockResolvedValue({ nodes: [{ id: "resolved-uuid" }] });
-			const service = new LinearService("token");
+			const service = new LinearService({ apiKey: "token" });
 			const result = await service.resolveIssueId("DEV-123");
 			expect(result).toBe("resolved-uuid");
 		});
 
 		it("throws when identifier not found", async () => {
 			mockIssues.mockResolvedValue({ nodes: [] });
-			const service = new LinearService("token");
+			const service = new LinearService({ apiKey: "token" });
 			await expect(service.resolveIssueId("DEV-999")).rejects.toThrow(
 				'Issue "DEV-999" not found',
 			);
@@ -71,7 +71,7 @@ describe("LinearService", () => {
 		const noMatch = { nodes: [] };
 
 		it("returns UUID directly", async () => {
-			const service = new LinearService("token");
+			const service = new LinearService({ apiKey: "token" });
 			const result = await service.resolveTeamId(
 				"f47ac10b-58cc-4372-a567-0e02b2c3d479",
 			);
@@ -80,7 +80,7 @@ describe("LinearService", () => {
 
 		it("resolves by exact team key via server-side filter", async () => {
 			mockTeams.mockResolvedValueOnce({ nodes: [{ id: "dev-uuid" }] });
-			const service = new LinearService("token");
+			const service = new LinearService({ apiKey: "token" });
 			const result = await service.resolveTeamId("dev");
 			expect(result).toBe("dev-uuid");
 		});
@@ -89,7 +89,7 @@ describe("LinearService", () => {
 			mockTeams
 				.mockResolvedValueOnce(noMatch) // key lookup
 				.mockResolvedValueOnce({ nodes: [{ id: "inf-uuid" }] }); // name lookup
-			const service = new LinearService("token");
+			const service = new LinearService({ apiKey: "token" });
 			const result = await service.resolveTeamId("infra");
 			expect(result).toBe("inf-uuid");
 		});
@@ -99,7 +99,7 @@ describe("LinearService", () => {
 				.mockResolvedValueOnce(noMatch) // key lookup
 				.mockResolvedValueOnce(noMatch) // name lookup
 				.mockResolvedValueOnce(allTeams); // fetch all for prefix
-			const service = new LinearService("token");
+			const service = new LinearService({ apiKey: "token" });
 			const result = await service.resolveTeamId("front");
 			expect(result).toBe("fe-uuid");
 		});
@@ -109,7 +109,7 @@ describe("LinearService", () => {
 				.mockResolvedValueOnce(noMatch) // key lookup
 				.mockResolvedValueOnce(noMatch) // name lookup
 				.mockResolvedValueOnce(allTeams); // fetch all for prefix
-			const service = new LinearService("token");
+			const service = new LinearService({ apiKey: "token" });
 			const result = await service.resolveTeamId("em");
 			expect(result).toBe("emw-uuid");
 		});
@@ -126,7 +126,7 @@ describe("LinearService", () => {
 					pageInfo: { hasNextPage: false },
 					fetchNext: vi.fn(),
 				});
-			const service = new LinearService("token");
+			const service = new LinearService({ apiKey: "token" });
 			await expect(service.resolveTeamId("in")).rejects.toThrow("Candidates:");
 		});
 
@@ -135,7 +135,7 @@ describe("LinearService", () => {
 				.mockResolvedValueOnce(noMatch)
 				.mockResolvedValueOnce(noMatch)
 				.mockResolvedValueOnce(allTeams);
-			const service = new LinearService("token");
+			const service = new LinearService({ apiKey: "token" });
 			await expect(service.resolveTeamId("NOPE")).rejects.toThrow(
 				"Available teams:",
 			);
@@ -144,7 +144,7 @@ describe("LinearService", () => {
 
 	describe("resolveStatusId", () => {
 		it("returns UUID directly", async () => {
-			const service = new LinearService("token");
+			const service = new LinearService({ apiKey: "token" });
 			const result = await service.resolveStatusId(
 				"f47ac10b-58cc-4372-a567-0e02b2c3d479",
 			);
@@ -153,14 +153,14 @@ describe("LinearService", () => {
 
 		it("resolves by name", async () => {
 			mockWorkflowStates.mockResolvedValue({ nodes: [{ id: "status-uuid" }] });
-			const service = new LinearService("token");
+			const service = new LinearService({ apiKey: "token" });
 			const result = await service.resolveStatusId("In Progress");
 			expect(result).toBe("status-uuid");
 		});
 
 		it("throws when status not found", async () => {
 			mockWorkflowStates.mockResolvedValue({ nodes: [] });
-			const service = new LinearService("token");
+			const service = new LinearService({ apiKey: "token" });
 			await expect(service.resolveStatusId("Nonexistent")).rejects.toThrow(
 				'Status "Nonexistent" not found',
 			);
@@ -168,7 +168,7 @@ describe("LinearService", () => {
 
 		it("includes team context in error message", async () => {
 			mockWorkflowStates.mockResolvedValue({ nodes: [] });
-			const service = new LinearService("token");
+			const service = new LinearService({ apiKey: "token" });
 			await expect(
 				service.resolveStatusId("Nonexistent", "team-id"),
 			).rejects.toThrow("for team team-id");
@@ -178,7 +178,7 @@ describe("LinearService", () => {
 			mockWorkflowStates
 				.mockResolvedValueOnce({ nodes: [] }) // Triage not found
 				.mockResolvedValueOnce({ nodes: [{ id: "backlog-uuid" }] }); // Backlog found
-			const service = new LinearService("token");
+			const service = new LinearService({ apiKey: "token" });
 			const result = await service.resolveStatusId("Triage", "team-id");
 			expect(result).toBe("backlog-uuid");
 		});
@@ -187,7 +187,7 @@ describe("LinearService", () => {
 			mockWorkflowStates
 				.mockResolvedValueOnce({ nodes: [] }) // Triage not found
 				.mockResolvedValueOnce({ nodes: [] }); // Backlog also not found
-			const service = new LinearService("token");
+			const service = new LinearService({ apiKey: "token" });
 			await expect(
 				service.resolveStatusId("Triage", "team-id"),
 			).rejects.toThrow('Status "Triage" for team team-id not found.');
@@ -196,7 +196,7 @@ describe("LinearService", () => {
 
 	describe("resolveProjectId", () => {
 		it("returns UUID directly", async () => {
-			const service = new LinearService("token");
+			const service = new LinearService({ apiKey: "token" });
 			const result = await service.resolveProjectId(
 				"f47ac10b-58cc-4372-a567-0e02b2c3d479",
 			);
@@ -205,14 +205,14 @@ describe("LinearService", () => {
 
 		it("resolves by name", async () => {
 			mockProjects.mockResolvedValue({ nodes: [{ id: "project-uuid" }] });
-			const service = new LinearService("token");
+			const service = new LinearService({ apiKey: "token" });
 			const result = await service.resolveProjectId("My Project");
 			expect(result).toBe("project-uuid");
 		});
 
 		it("throws when project not found", async () => {
 			mockProjects.mockResolvedValue({ nodes: [] });
-			const service = new LinearService("token");
+			const service = new LinearService({ apiKey: "token" });
 			await expect(service.resolveProjectId("Nonexistent")).rejects.toThrow(
 				'Project "Nonexistent" not found',
 			);
@@ -227,7 +227,7 @@ describe("LinearService", () => {
 					{ id: "1", key: "BE", name: "Backend", description: "Core API" },
 				],
 			});
-			const service = new LinearService("token");
+			const service = new LinearService({ apiKey: "token" });
 			const result = await service.getTeams();
 			expect(result[0].name).toBe("Backend");
 			expect(result[1].name).toBe("Frontend");
@@ -254,7 +254,7 @@ describe("LinearService", () => {
 					},
 				],
 			});
-			const service = new LinearService("token");
+			const service = new LinearService({ apiKey: "token" });
 			const result = await service.getUsers();
 			expect(result[0].name).toBe("Alice");
 			expect(result[1].name).toBe("Zara");

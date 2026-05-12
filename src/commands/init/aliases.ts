@@ -52,7 +52,7 @@ export interface User {
 }
 
 export async function fetchAllUsers(token: string): Promise<User[]> {
-	const service = new GraphQLService(token);
+	const service = new GraphQLService({ apiKey: token });
 	const out: User[] = [];
 	let after: string | undefined;
 	for (;;) {
