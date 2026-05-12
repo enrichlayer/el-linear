@@ -66,6 +66,87 @@ function emitSummary(payload: unknown, kind: ResourceKind): void {
 	logger.info(dispatchSummary(kind, payload));
 }
 
+/**
+ * Resource-specific extra metadata that may be added to a list response
+ * alongside the canonical `count` (e.g. `query` on search, `team` on
+ * filtered list). Excludes `count` at the type level — callers can't
+ * accidentally pass a string `count` and have it silently overridden;
+ * the only way to set `count` is via `data.length` inside `outputList`.
+ *
+ * Implementation note: `count?: never` together with `Record<string, unknown>`
+ * lets TypeScript accept any other key while disallowing the literal
+ * `count` key. The `never`-typed property is impossible to assign, which
+ * is what we want for the "no count here" contract.
+ */
+export type ListExtraMeta = Record<string, unknown> & {
+	count?: never;
+};
+
+/**
+ * Metadata envelope for list responses. Always includes `count`; resources
+ * may add their own keys (e.g. `query` on search, `team` on filtered list).
+ *
+ * `meta.count` is the cardinality of `data[]` — downstream `jq` pipelines
+ * read it both for emptiness checks (`.meta.count == 0`) and for the
+ * actual magnitude (e.g. logging "found N issues"). A boolean isEmpty
+ * would lose the magnitude signal, so `count: number` stays.
+ */
+export interface ListMeta extends Record<string, unknown> {
+	count: number;
+}
+
+/**
+ * Canonical JSON envelope for a list response. Pre-DEV-4068 T6, every
+ * call site built this object literal inline and `outputSuccess(data:
+ * unknown)` accepted it without type-checking. Use `outputList<T>` to
+ * route a list through the same emit path with a real per-element type
+ * (so e.g. `data: T[]` and `--fields` consumers stay in lock-step).
+ */
+export interface CliListEnvelope<T> {
+	data: T[];
+	meta: ListMeta;
+}
+
+/**
+ * Typed wrapper around `outputSuccess` for list responses — builds the
+ * `{ data, meta: { count, ...extraMeta } }` envelope and emits it. The
+ * 81 existing inline `outputSuccess({ data, meta: { count, ... } })`
+ * call sites can migrate to this incrementally; both go through the
+ * same `outputSuccess` emit path so JSON / summary / --raw / --fields /
+ * --jq behavior is identical.
+ *
+ * @param data    The array payload.
+ * @param extraMeta Optional resource-specific meta keys (e.g. `query`,
+ *                  `team`). The type excludes `count` — `count` is
+ *                  always computed from `data.length` to preserve the
+ *                  wire-contract invariant.
+ */
+export function outputList<T>(data: T[], extraMeta?: ListExtraMeta): void {
+	const meta: ListMeta = { ...extraMeta, count: data.length };
+	const envelope: CliListEnvelope<T> = { data, meta };
+	outputSuccess(envelope);
+}
+
+/**
+ * Typed wrapper around `outputSuccess` for a single-resource response.
+ * Pure passthrough — the envelope contract for single resources is just
+ * the resource object itself (no `data`/`meta` wrapping). Same emit
+ * path as `outputSuccess` and `outputList`; this overload exists so
+ * call sites can document their intent at the type level.
+ *
+ * The conditional return type rejects array inputs at the type level —
+ * a caller that meant `outputList` and passed an array gets a compile
+ * error pointing them at the right helper. Runtime behavior on an array
+ * is unchanged (it'd still emit JSON), but the type catches the foot-gun.
+ */
+export function outputSingle<T>(
+	data: T extends readonly unknown[]
+		? "outputSingle does not accept arrays — use outputList(data) instead"
+		: T,
+): void {
+	outputSuccess(data);
+}
+
 export function outputSuccess(data: unknown): void {
 	const warnings = drainWarnings();
 	let output: unknown;

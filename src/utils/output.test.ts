@@ -1,6 +1,17 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	expectTypeOf,
+	it,
+	vi,
+} from "vitest";
+import {
+	type CliListEnvelope,
 	handleAsyncCommand,
+	outputList,
+	outputSingle,
 	outputSuccess,
 	outputWarning,
 	resetWarnings,
@@ -555,5 +566,98 @@ describe("setOutputFormat", () => {
 		expect(getOutputFormat()).toBe("summary");
 		setOutputFormat("json");
 		expect(getOutputFormat()).toBe("json");
+	});
+});
+
+describe("outputList / outputSingle (DEV-4068 T6)", () => {
+	let stdoutSpy: ReturnType<typeof vi.spyOn>;
+
+	beforeEach(() => {
+		resetWarnings();
+		stdoutSpy = vi
+			.spyOn(process.stdout, "write")
+			.mockImplementation(() => true);
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	function lastEmittedJson(): unknown {
+		const lastCall = stdoutSpy.mock.calls.at(-1);
+		if (!lastCall) throw new Error("no stdout writes recorded");
+		const text = String(lastCall[0]).trim();
+		return JSON.parse(text);
+	}
+
+	it("outputList builds `{ data, meta: { count } }` envelope from an array", () => {
+		outputList([{ id: 1 }, { id: 2 }]);
+		expect(lastEmittedJson()).toEqual({
+			data: [{ id: 1 }, { id: 2 }],
+			meta: { count: 2 },
+		});
+	});
+
+	it("outputList rejects extraMeta containing `count` at the type level (DEV-4068 T6 cycle-1)", () => {
+		// Type-only test — `extraMeta.count` is `never`, so the literal
+		// fails to assign. Defense at the contract level: callers can't
+		// pass `count: 999` and have it silently overridden — the type
+		// catches the lie before it reaches runtime.
+		// @ts-expect-error -- count is excluded from ListExtraMeta
+		outputList([{ id: 1 }], { count: 999, query: "x" });
+		// Runtime: count is always data.length even if the type were bypassed.
+		expect(lastEmittedJson()).toEqual({
+			data: [{ id: 1 }],
+			meta: { count: 1, query: "x" },
+		});
+	});
+
+	it("outputList preserves extraMeta keys alongside count", () => {
+		outputList([{ id: 1 }, { id: 2 }, { id: 3 }], {
+			query: "fix bug",
+			team: "DEV",
+		});
+		expect(lastEmittedJson()).toEqual({
+			data: [{ id: 1 }, { id: 2 }, { id: 3 }],
+			meta: { count: 3, query: "fix bug", team: "DEV" },
+		});
+	});
+
+	it("outputList emits an empty list as `{ data: [], meta: { count: 0 } }`", () => {
+		outputList([]);
+		expect(lastEmittedJson()).toEqual({ data: [], meta: { count: 0 } });
+	});
+
+	it("outputSingle passes through unchanged (no envelope wrapping)", () => {
+		outputSingle({ id: "DEV-1", title: "issue" });
+		expect(lastEmittedJson()).toEqual({ id: "DEV-1", title: "issue" });
+	});
+
+	it("outputList is type-parameterized over its element type", () => {
+		// Compile-time only: outputList<T> threads T through to
+		// CliListEnvelope<T>. Inferring `T` from the array literal lets the
+		// resource-specific shape participate in `--fields` / `jq` typing.
+		expectTypeOf<typeof outputList<{ id: number }>>()
+			.parameter(0)
+			.toEqualTypeOf<{ id: number }[]>();
+		expectTypeOf<CliListEnvelope<{ id: number }>>().toEqualTypeOf<{
+			data: { id: number }[];
+			meta: { count: number } & Record<string, unknown>;
+		}>();
+	});
+
+	it("outputSingle rejects array inputs at the type level (DEV-4068 T6 cycle-1)", () => {
+		// Type-only test — passing an array to outputSingle is a foot-gun
+		// (caller probably meant outputList). The conditional return type
+		// narrows the parameter against `readonly unknown[]` and emits a
+		// helpful error string.
+		// @ts-expect-error -- arrays must use outputList, not outputSingle
+		outputSingle([1, 2, 3]);
+		// @ts-expect-error -- typed-array case also rejected
+		outputSingle<{ id: number }[]>([{ id: 1 }]);
+		// Sanity: scalar / object inputs still accepted.
+		outputSingle({ id: 1 });
+		outputSingle("a string");
+		outputSingle(42);
 	});
 });
