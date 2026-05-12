@@ -7,7 +7,7 @@ import {
 	UPDATE_COMMENT_MUTATION,
 } from "../queries/comments.js";
 import type {
-	CommentNode,
+	CommentResourceNode,
 	CreateCommentResponse,
 	ListCommentsResponse,
 	UpdateCommentResponse,
@@ -62,7 +62,9 @@ async function fetchSelfUserId(
 	}
 }
 
-function transformComment(comment: CommentNode): Record<string, unknown> {
+function transformComment(
+	comment: CommentResourceNode,
+): Record<string, unknown> {
 	return {
 		id: comment.id,
 		body: comment.body,

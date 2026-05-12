@@ -47,7 +47,18 @@ interface AssigneeNode {
 	url?: string;
 }
 
-export interface CommentNode {
+/**
+ * Comment shape as embedded inside `COMPLETE_ISSUE_WITH_COMMENTS_FRAGMENT`
+ * (i.e. comments fetched as part of an issue query). Distinct from
+ * `comments-types.ts:CommentResourceNode`, which is the shape returned by
+ * the standalone comment queries (`LIST_COMMENTS_QUERY`,
+ * `CREATE_COMMENT_MUTATION`, `UPDATE_COMMENT_MUTATION`). The two have
+ * incompatible `user` shapes — this one allows `null` and uses the
+ * issue-page \"assignee\"-style fields, while the standalone resource
+ * shape always populates `user` and includes the comment-author-only
+ * `CommentUserRef` fields (DEV-4068 T2).
+ */
+export interface IssueCommentNode {
 	id: string;
 	body: string;
 	createdAt: string;
@@ -116,7 +127,7 @@ export interface IssueNode {
  * `IssueNode` but with the comments connection materialized.
  */
 export interface IssueWithCommentsNode extends IssueNode {
-	comments: { nodes: CommentNode[] };
+	comments: { nodes: IssueCommentNode[] };
 }
 
 /** Response shape for `GET_ISSUE_BY_ID_QUERY`. */
