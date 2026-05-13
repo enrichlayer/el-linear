@@ -10,13 +10,17 @@ import fs from "node:fs/promises";
 import { TEAM_OAUTH_CONFIG_PATH } from "../config/paths.js";
 import {
 	DEFAULT_SCOPES,
+	type OAuthActor,
 	type OAuthScope,
+	validateActorScopes,
+	validateOAuthActor,
 	validateScopes,
 } from "./oauth-client.js";
 
 const TEAM_OAUTH_CONFIG_ENV = "EL_LINEAR_OAUTH_CONFIG";
 
 interface TeamOAuthConfig {
+	actor: OAuthActor;
 	clientId: string;
 	redirectPort: number;
 	scopes: OAuthScope[];
@@ -30,6 +34,7 @@ interface TeamOAuthConfig {
 
 interface TeamOAuthConfigFile {
 	linearOAuth?: {
+		actor?: unknown;
 		clientId?: unknown;
 		redirectPort?: unknown;
 		scopes?: unknown;
@@ -80,18 +85,29 @@ export async function readTeamOAuthConfig(
 
 	const redirectPort = parseRedirectPort(linearOAuth.redirectPort, sourcePath);
 	const scopes = parseScopes(linearOAuth.scopes, sourcePath);
+	const actor = parseActor(linearOAuth.actor, sourcePath);
+	validateActorScopes(actor, scopes);
 	const passwordManagerPath = parsePasswordManagerPath(
 		linearOAuth.passwordManagerPath,
 		sourcePath,
 	);
 
 	return {
+		actor,
 		clientId,
 		redirectPort,
 		scopes,
 		passwordManagerPath,
 		sourcePath,
 	};
+}
+
+function parseActor(value: unknown, sourcePath: string): OAuthActor {
+	if (value === undefined) return "user";
+	if (typeof value !== "string") {
+		throw new Error(`${sourcePath} linearOAuth.actor must be "user" or "app".`);
+	}
+	return validateOAuthActor(value);
 }
 
 function parseRedirectPort(value: unknown, sourcePath: string): number {

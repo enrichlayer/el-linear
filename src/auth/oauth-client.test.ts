@@ -7,6 +7,8 @@ import {
 	generatePkce,
 	generateState,
 	parseCallbackUrl,
+	validateActorScopes,
+	validateOAuthActor,
 	validateScopes,
 } from "./oauth-client.js";
 
@@ -90,6 +92,20 @@ describe("buildAuthorizeUrl", () => {
 		);
 		expect(url.searchParams.get("prompt")).toBe("consent");
 	});
+
+	it("adds actor=app when app actor mode is requested", () => {
+		const url = new URL(
+			buildAuthorizeUrl({
+				clientId: "c",
+				redirectUri: "http://l/cb",
+				scopes: ["read", "app:assignable"],
+				state: "s",
+				codeChallenge: "ch",
+				actor: "app",
+			}),
+		);
+		expect(url.searchParams.get("actor")).toBe("app");
+	});
 });
 
 describe("parseCallbackUrl", () => {
@@ -140,6 +156,35 @@ describe("validateScopes", () => {
 
 	it("throws when no scopes are supplied", () => {
 		expect(() => validateScopes([])).toThrow(/at least one/i);
+	});
+});
+
+describe("validateOAuthActor", () => {
+	it("defaults to user", () => {
+		expect(validateOAuthActor(undefined)).toBe("user");
+	});
+
+	it("accepts user and app", () => {
+		expect(validateOAuthActor("user")).toBe("user");
+		expect(validateOAuthActor("app")).toBe("app");
+	});
+
+	it("rejects unknown actors", () => {
+		expect(() => validateOAuthActor("application")).toThrow(/actor/i);
+	});
+});
+
+describe("validateActorScopes", () => {
+	it("rejects admin for app actor", () => {
+		expect(() => validateActorScopes("app", ["read", "admin"])).toThrow(
+			/admin/,
+		);
+	});
+
+	it("requires app actor for app-only scopes", () => {
+		expect(() => validateActorScopes("user", ["app:assignable"])).toThrow(
+			/--actor app/,
+		);
 	});
 });
 

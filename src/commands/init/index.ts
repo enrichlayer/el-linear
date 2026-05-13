@@ -17,6 +17,10 @@
 
 import type { Command } from "commander";
 import {
+	type OAuthActor,
+	validateOAuthActor,
+} from "../../auth/oauth-client.js";
+import {
 	type AliasUpdate,
 	mergeAliasesIntoConfig,
 	runAliasesImport,
@@ -84,6 +88,11 @@ export function setupInitCommands(program: Command): void {
 			"Authorize via OAuth 2.0 (PKCE) — alternative to a personal API token",
 		)
 		.option("--force", "ignore existing tokens; re-authorize unconditionally")
+		.option(
+			"--actor <actor>",
+			"OAuth actor: user (default) or app for agents/service accounts",
+			validateOAuthActor,
+		)
 		.option("--revoke", "revoke and remove the stored OAuth tokens")
 		.option(
 			"--no-browser",
@@ -101,6 +110,7 @@ export function setupInitCommands(program: Command): void {
 		.action(
 			withCleanExit(
 				async (options: {
+					actor?: OAuthActor;
 					force?: boolean;
 					revoke?: boolean;
 					browser?: boolean;
@@ -114,6 +124,7 @@ export function setupInitCommands(program: Command): void {
 						return;
 					}
 					await runOAuthStep({
+						actor: options.actor,
 						force: options.force ?? false,
 						// commander's `--no-browser` produces `browser: false`.
 						noBrowser: options.browser === false,

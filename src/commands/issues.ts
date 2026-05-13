@@ -100,6 +100,9 @@ function isImageFile(filename: string): boolean {
 }
 
 function validateUpdateOptions(options: OptionValues): void {
+	if (options.delegate && options.clearDelegate) {
+		throw new Error("Cannot use --delegate and --clear-delegate together");
+	}
 	if (options.parentTicket && options.clearParentTicket) {
 		throw new Error(
 			"Cannot use --parent-ticket and --clear-parent-ticket together",
@@ -136,6 +139,7 @@ function buildUpdateArgs(
 	issueId: string,
 	options: OptionValues,
 	assigneeId?: string,
+	delegateId?: string | null,
 ): UpdateIssueArgs {
 	let labelIds: string[] | undefined;
 	if (options.clearLabels) {
@@ -161,6 +165,7 @@ function buildUpdateArgs(
 		statusId: options.status,
 		priority: priorityInput ? validatePriority(priorityInput) : undefined,
 		assigneeId,
+		delegateId,
 		projectId: options.project,
 		labelIds,
 		parentId:
@@ -254,6 +259,7 @@ async function handleListIssues(
 		options.labels ||
 		options.status ||
 		options.assignee ||
+		options.delegate ||
 		options.project ||
 		options.project === false ||
 		options.priority;
@@ -263,6 +269,9 @@ async function handleListIssues(
 			teamId: options.team ? resolveTeam(options.team) : undefined,
 			assigneeId: options.assignee
 				? await resolveAssignee(options.assignee, rootOpts)
+				: undefined,
+			delegateId: options.delegate
+				? resolveMember(options.delegate as string)
 				: undefined,
 			project: resolveProjectFlag(options.project),
 			labelNames: options.labels ? splitList(options.labels) : undefined,
@@ -308,6 +317,9 @@ async function handleSearchIssues(
 		teamId: options.team ? resolveTeam(options.team) : undefined,
 		assigneeId: options.assignee
 			? await resolveAssignee(options.assignee, rootOpts)
+			: undefined,
+		delegateId: options.delegate
+			? resolveMember(options.delegate as string)
 			: undefined,
 		project: resolveProjectFlag(options.project),
 		status: options.status ? splitList(options.status) : undefined,
@@ -370,6 +382,7 @@ async function resolveCreateInputs(
 	teamInput: string;
 	teamId: string;
 	assigneeId: string | undefined;
+	delegateId: string | undefined;
 	labelIds: string[];
 	status: string | undefined;
 	subscriberIds: string[] | undefined;
@@ -458,6 +471,9 @@ async function resolveCreateInputs(
 	const assigneeId = effectiveAssignee
 		? await resolveAssignee(effectiveAssignee, rootOpts)
 		: undefined;
+	const delegateId = options.delegate
+		? resolveMember(options.delegate as string)
+		: undefined;
 
 	let labelIds: string[] = [];
 	if (options.labels) {
@@ -491,6 +507,7 @@ async function resolveCreateInputs(
 		teamInput,
 		teamId,
 		assigneeId,
+		delegateId,
 		labelIds,
 		status,
 		subscriberIds,
@@ -554,6 +571,7 @@ async function handleCreateIssue(
 		teamInput,
 		teamId,
 		assigneeId,
+		delegateId,
 		labelIds,
 		status,
 		subscriberIds,
@@ -601,6 +619,7 @@ async function handleCreateIssue(
 				teamInput,
 				description: prepared.description,
 				assigneeId,
+				delegateId,
 				priority,
 				projectId: options.project,
 				statusId: status,
@@ -779,6 +798,22 @@ async function handleRelatedIssues(
 	});
 }
 
+async function handleStartIssue(
+	issueId: string,
+	_options: OptionValues,
+	command: Command,
+): Promise<void> {
+	const rootOpts = getRootOpts(command);
+	const { issuesService } = await createIssuesService(rootOpts);
+	const result = await issuesService.startIssue(issueId);
+	outputSuccess({
+		...result.issue,
+		started: result.started,
+		...(result.previousState ? { previousState: result.previousState } : {}),
+		...(result.targetState ? { targetState: result.targetState } : {}),
+	});
+}
+
 async function handleUpdateIssue(
 	issueId: string,
 	options: OptionValues,
@@ -845,7 +880,12 @@ async function handleUpdateIssue(
 	const assigneeId = options.assignee
 		? await resolveAssignee(options.assignee, rootOpts)
 		: undefined;
-	const updateArgs = buildUpdateArgs(issueId, options, assigneeId);
+	const delegateId = options.clearDelegate
+		? null
+		: options.delegate
+			? resolveMember(options.delegate as string)
+			: undefined;
+	const updateArgs = buildUpdateArgs(issueId, options, assigneeId, delegateId);
 	const result = await withProjectResolverEnrichment(
 		() => issuesService.updateIssue(updateArgs, options.labelBy || "adding"),
 		{
@@ -1011,6 +1051,10 @@ export function setupIssuesCommands(program: Command): void {
 		.option("-l, --limit <number>", "limit results", "25")
 		.option("--team <team>", "filter by team key (EL: resolves names)")
 		.option("--assignee <assignee>", "filter by assignee (name, alias, or ID)")
+		.option(
+			"--delegate <delegate>",
+			"filter by delegated agent (name, alias, or ID)",
+		)
 		.option("--project <project>", "filter by project name or ID")
 		.option("--no-project", "filter issues with no project assigned")
 		.option("--labels <labels>", "filter by labels (comma-separated names)")
@@ -1034,7 +1078,7 @@ export function setupIssuesCommands(program: Command): void {
 		)
 		.option(
 			"--fields <fields>",
-			"columns for table/csv (comma-separated: identifier,title,status,priority,assignee,project,team,labels,updated)",
+			"columns for table/csv (comma-separated: identifier,title,status,priority,assignee,delegate,project,team,labels,updated)",
 		)
 		.action(handleAsyncCommand(handleListIssues));
 
@@ -1043,6 +1087,10 @@ export function setupIssuesCommands(program: Command): void {
 		.description("Search issues.")
 		.option("--team <team>", "filter by team key, name, or ID")
 		.option("--assignee <assignee>", "filter by assignee (name, alias, or ID)")
+		.option(
+			"--delegate <delegate>",
+			"filter by delegated agent (name, alias, or ID)",
+		)
 		.option("--project <project>", "filter by project name or ID")
 		.option("--no-project", "filter issues with no project assigned")
 		.option("--status <status>", "filter by status (comma-separated)")
@@ -1090,6 +1138,10 @@ export function setupIssuesCommands(program: Command): void {
 		.option(
 			"-a, --assignee <assignee>",
 			"assign to user (name, alias, or UUID)",
+		)
+		.option(
+			"--delegate <delegate>",
+			"delegate implementation to an agent app user (name, alias, or UUID)",
 		)
 		.option(
 			"--no-assignee",
@@ -1228,6 +1280,11 @@ export function setupIssuesCommands(program: Command): void {
 			"new priority: name (none/urgent/high/medium/normal/low) or number (0-4)",
 		)
 		.option("--assignee <assignee>", "new assignee (name, alias, or UUID)")
+		.option(
+			"--delegate <delegate>",
+			"delegate implementation to an agent app user (name, alias, or UUID)",
+		)
+		.option("--clear-delegate", "remove the issue delegate")
 		.option("--project <project>", "new project (name or ID)")
 		.option("--labels <labels>", "labels (comma-separated names or IDs)")
 		.option("--label <labels>", "alias for --labels")
@@ -1301,6 +1358,17 @@ export function setupIssuesCommands(program: Command): void {
 			"\nBoth UUID and identifiers like ABC-123 are supported.",
 		)
 		.action(handleAsyncCommand(handleHistoryIssue));
+
+	issues
+		.command("start <issueId>")
+		.description(
+			"Move an issue to the team's first started workflow state, unless it is already started or terminal.",
+		)
+		.addHelpText(
+			"after",
+			"\nBoth UUID and identifiers like ABC-123 are supported.",
+		)
+		.action(handleAsyncCommand(handleStartIssue));
 
 	issues
 		.command("relate <issueId>")

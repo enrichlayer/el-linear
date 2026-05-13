@@ -31,8 +31,10 @@ import {
 	DEFAULT_SCOPES,
 	generatePkce,
 	generateState,
+	type OAuthActor,
 	type OAuthScope,
 	SCOPE_DESCRIPTIONS,
+	validateActorScopes,
 	validateScopes,
 } from "../../auth/oauth-client.js";
 import { promptForPastedCode } from "../../auth/oauth-headless.js";
@@ -80,6 +82,8 @@ interface ViewerResponse {
 }
 
 export interface OAuthStepOptions {
+	/** OAuth actor mode: `user` (default) or `app` for agents/service accounts. */
+	actor?: OAuthActor;
 	/** Force re-authorization even if existing state is valid. */
 	force?: boolean;
 	/** Skip the localhost listener; use the headless code-paste prompt. */
@@ -199,6 +203,7 @@ async function handleExistingState(
 }
 
 interface RegistrationAnswers {
+	actor: OAuthActor;
 	clientId: string;
 	clientSecret?: string;
 	port: number;
@@ -216,6 +221,7 @@ function extractPortFromRedirect(state: OAuthState | null): number | null {
 
 /** Walk the user through their OAuth-app registration values. */
 async function promptRegistration(defaults: {
+	actor: OAuthActor;
 	port?: number;
 }): Promise<RegistrationAnswers> {
 	logLine("");
@@ -227,9 +233,12 @@ async function promptRegistration(defaults: {
 	);
 	logLine(
 		TS(
-			"Then paste the client_id (and client_secret, if your app is configured as confidential).",
+			`Then paste the client_id (and client_secret, if your app is configured as confidential). Actor: ${defaults.actor}.`,
 		),
 	);
+	if (defaults.actor === "user") {
+		logLine(TS("Use --actor app for agent/service-account app user tokens."));
+	}
 	logLine("");
 
 	const port = Number.parseInt(
@@ -271,31 +280,42 @@ async function promptRegistration(defaults: {
 		validate: (selections) =>
 			selections.length > 0 || "Pick at least one scope",
 	})) as OAuthScope[];
+	const validatedScopes = validateScopes(scopes);
+	validateActorScopes(defaults.actor, validatedScopes);
 
 	return {
+		actor: defaults.actor,
 		clientId,
 		clientSecret: clientSecret || undefined,
 		port,
-		scopes: validateScopes(scopes),
+		scopes: validatedScopes,
 	};
 }
 
 async function resolveRegistration(defaults: {
+	actor?: OAuthActor;
 	manualPort: number;
 	requestedPort?: number;
 }): Promise<RegistrationAnswers> {
 	const teamConfig = await readTeamOAuthConfig();
 	if (!teamConfig) {
-		return promptRegistration({ port: defaults.manualPort });
+		return promptRegistration({
+			actor: defaults.actor ?? "user",
+			port: defaults.manualPort,
+		});
 	}
 
+	const actor = defaults.actor ?? teamConfig.actor;
 	const port = defaults.requestedPort ?? teamConfig.redirectPort;
 	logLine("");
 	logLine(TS(`Using Linear OAuth app defaults from ${teamConfig.sourcePath}.`));
+	logLine(TS(`Actor: ${actor}.`));
 	logLine(TS(`Callback URL: http://localhost:${port}${DEFAULT_CALLBACK_PATH}`));
 	logLine("");
+	validateActorScopes(actor, teamConfig.scopes);
 
 	return {
+		actor,
 		clientId: teamConfig.clientId,
 		port,
 		scopes: teamConfig.scopes,
@@ -368,6 +388,7 @@ export async function runOAuthStep(
 	}
 
 	const reg = await resolveRegistration({
+		actor: options.actor,
 		manualPort:
 			options.port ?? extractPortFromRedirect(existing) ?? DEFAULT_PORT,
 		requestedPort: options.port,
@@ -382,6 +403,7 @@ export async function runOAuthStep(
 		scopes: reg.scopes,
 		state,
 		codeChallenge: pkce.challenge,
+		actor: reg.actor,
 	});
 
 	logLine("");
@@ -446,6 +468,7 @@ export async function runOAuthStep(
 
 	const newState: OAuthState = {
 		v: OAUTH_STATE_VERSION,
+		actor: reg.actor,
 		clientId: reg.clientId,
 		clientSecret: reg.clientSecret,
 		registeredRedirectUri: redirectUri,
@@ -459,6 +482,7 @@ export async function runOAuthStep(
 
 	logLine(TS("Validating against viewer…"));
 	const viewer = await validateViewer(newState.accessToken);
+	newState.viewerId = viewer.id;
 	await writeOAuthState(newState);
 	logLine(
 		TS(

@@ -68,6 +68,19 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Native Linear agent delegation.** Issues now surface Linear's
+  `delegate` field in JSON output, and `issues create`, `issues update`,
+  `issues list`, and `issues search` accept `--delegate` for agent app
+  users. `issues update --clear-delegate` removes the delegate.
+- **Agent start helper.** `issues start <issueId>` moves an issue to the
+  first workflow state of type `started` for the issue's team, leaving
+  already-started or terminal issues unchanged.
+- **OAuth app actor mode.** `init oauth --actor app` authorizes as the
+  Linear app user for agent/service-account workflows, stores the
+  resulting `viewerId` in `oauth.json`, and validates app-only scope rules.
+
 ### Changed
 
 - **Split `commands/issues.ts` into focused modules.** The 1865-line

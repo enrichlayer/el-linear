@@ -10,9 +10,11 @@ import {
 	FILTERED_SEARCH_ISSUES_QUERY,
 	GET_ISSUE_BY_ID_QUERY,
 	GET_ISSUE_BY_IDENTIFIER_QUERY,
+	GET_ISSUE_START_CONTEXT_QUERY,
 	GET_ISSUE_TEAM_QUERY,
 	GET_ISSUES_QUERY,
 	SEARCH_ISSUES_QUERY,
+	TEAM_STARTED_STATUSES_QUERY,
 	UPDATE_ISSUE_MUTATION,
 } from "../queries/issues.js";
 import type {
@@ -31,9 +33,11 @@ import type {
 	GetIssueTeamResponse,
 	IssueArchiveEntity,
 	IssueNode,
+	IssueStartContextResponse,
 	IssueWithCommentsNode,
 	ResolveLabelsByNameResponse,
 	SearchIssuesResponse,
+	TeamStartedStatusesResponse,
 	UpdateIssueResponse,
 } from "../queries/issues-types.js";
 import { CREATE_LABEL_MUTATION } from "../queries/labels.js";
@@ -84,6 +88,8 @@ export interface SearchIssueArgs {
 	project?: SearchIssueProject;
 	/** Assignee name, email, alias, or UUID. */
 	assigneeId?: string;
+	/** Agent user name, email, alias, or UUID delegated to the issue. */
+	delegateId?: string;
 	/** Issue states to include (e.g. `["Todo", "In Progress"]`). */
 	status?: string[];
 	/** Label names to require (intersection). */
@@ -115,6 +121,8 @@ interface IssueMutationFields {
 	description?: string;
 	/** Assignee name, email, alias, or UUID. */
 	assigneeId?: string;
+	/** Agent user name, email, alias, or UUID delegated to work on the issue. */
+	delegateId?: string | null;
 	/** Linear priority: 0 (none), 1 (urgent), 2 (high), 3 (medium), 4 (low). */
 	priority?: LinearPriority;
 	/** Project name or UUID. */
@@ -176,6 +184,13 @@ export interface IssueArchiveOperationResult {
 	id: string;
 	entity?: IssueArchiveEntity;
 	lastSyncId: number;
+}
+
+export interface StartIssueResult {
+	issue: LinearIssue;
+	previousState?: { id: string; name: string; type: string };
+	started: boolean;
+	targetState?: { id: string; name: string };
 }
 
 interface SummaryWalkNode {
@@ -252,6 +267,67 @@ export class GraphQLIssuesService {
 		return this.transformIssueData(issueData);
 	}
 
+	async startIssue(issueId: string): Promise<StartIssueResult> {
+		const resolvedIssueId = await this.linearService.resolveIssueId(issueId);
+		const context =
+			await this.graphQLService.rawRequest<IssueStartContextResponse>(
+				GET_ISSUE_START_CONTEXT_QUERY,
+				{ id: resolvedIssueId },
+			);
+		const issue = context.issue;
+		if (!issue) {
+			throw notFoundError("Issue", issueId);
+		}
+
+		const previousState = issue.state
+			? {
+					id: issue.state.id,
+					name: issue.state.name,
+					type: issue.state.type,
+				}
+			: undefined;
+		if (
+			previousState &&
+			["started", "completed", "canceled"].includes(previousState.type)
+		) {
+			return {
+				issue: await this.getIssueById(resolvedIssueId),
+				previousState,
+				started: false,
+			};
+		}
+		if (!issue.team?.id) {
+			throw new Error(
+				`Issue ${issue.identifier} has no team; cannot start it.`,
+			);
+		}
+
+		const statuses =
+			await this.graphQLService.rawRequest<TeamStartedStatusesResponse>(
+				TEAM_STARTED_STATUSES_QUERY,
+				{ teamId: issue.team.id },
+			);
+		const startedStatus = statuses.team?.states.nodes
+			.slice()
+			.sort((a, b) => a.position - b.position)[0];
+		if (!startedStatus) {
+			throw new Error(
+				`Team ${issue.team.key} has no workflow status of type "started".`,
+			);
+		}
+
+		const updated = await this.updateIssue(
+			{ id: resolvedIssueId, statusId: startedStatus.id },
+			"adding",
+		);
+		return {
+			issue: updated,
+			previousState,
+			started: true,
+			targetState: { id: startedStatus.id, name: startedStatus.name },
+		};
+	}
+
 	async updateIssue(
 		args: UpdateIssueArgs,
 		labelMode = "overwriting",
@@ -306,9 +382,13 @@ export class GraphQLIssuesService {
 		if (assigneeId && !isUuid(assigneeId)) {
 			assigneeId = await this.linearService.resolveUserId(assigneeId);
 		}
+		let delegateId = normalizedArgs.delegateId;
+		if (delegateId && !isUuid(delegateId)) {
+			delegateId = await this.linearService.resolveUserId(delegateId);
+		}
 
 		const updateInput = this.buildUpdateInput(
-			{ ...normalizedArgs, assigneeId },
+			{ ...normalizedArgs, assigneeId, delegateId },
 			{
 				statusId: resolvedStatusId,
 				projectId: finalProjectId,
@@ -461,9 +541,13 @@ export class GraphQLIssuesService {
 		if (assigneeId && !isUuid(assigneeId)) {
 			assigneeId = await this.linearService.resolveUserId(assigneeId);
 		}
+		let delegateId = normalizedArgs.delegateId;
+		if (delegateId && !isUuid(delegateId)) {
+			delegateId = await this.linearService.resolveUserId(delegateId);
+		}
 
 		const createInput = this.buildCreateInput(
-			{ ...normalizedArgs, assigneeId },
+			{ ...normalizedArgs, assigneeId, delegateId },
 			resolved,
 		);
 		return this.executeCreateMutation(createInput);
@@ -576,6 +660,13 @@ export class GraphQLIssuesService {
 		) {
 			resolveVariables.assigneeEmail = args.assigneeId;
 		}
+		if (
+			args.delegateId &&
+			!isUuid(args.delegateId) &&
+			args.delegateId.includes("@")
+		) {
+			resolveVariables.delegateEmail = args.delegateId;
+		}
 
 		let resolveResult: BatchResolveResult = {};
 		if (Object.keys(resolveVariables).length > 0) {
@@ -596,6 +687,10 @@ export class GraphQLIssuesService {
 
 		const finalAssigneeId = this.resolveAssigneeId(
 			args.assigneeId,
+			resolveResult,
+		);
+		const finalDelegateId = await this.resolveDelegateId(
+			args.delegateId,
 			resolveResult,
 		);
 
@@ -633,6 +728,7 @@ export class GraphQLIssuesService {
 			return this.applySearchFilters(results, {
 				teamId: finalTeamId,
 				assigneeId: finalAssigneeId,
+				delegateId: finalDelegateId,
 				project: projectFilter,
 				status: args.status,
 				labelNames: args.labelNames,
@@ -642,6 +738,7 @@ export class GraphQLIssuesService {
 		const filter = this.buildSearchFilter({
 			teamId: finalTeamId,
 			assigneeId: finalAssigneeId,
+			delegateId: finalDelegateId,
 			project: projectFilter,
 			status: args.status,
 			labelNames: args.labelNames,
@@ -1021,6 +1118,9 @@ export class GraphQLIssuesService {
 		if (args.assigneeId) {
 			input.assigneeId = args.assigneeId;
 		}
+		if (args.delegateId) {
+			input.delegateId = args.delegateId;
+		}
 		if (args.priority !== undefined) {
 			input.priority = args.priority;
 		}
@@ -1086,6 +1186,9 @@ export class GraphQLIssuesService {
 		if (args.assigneeId !== undefined) {
 			input.assigneeId = args.assigneeId;
 		}
+		if (args.delegateId !== undefined) {
+			input.delegateId = args.delegateId;
+		}
 		if (resolved.projectId !== undefined) {
 			input.projectId = resolved.projectId;
 		}
@@ -1125,6 +1228,7 @@ export class GraphQLIssuesService {
 		filters: {
 			teamId?: string;
 			assigneeId?: string;
+			delegateId?: string;
 			project?: SearchIssueProject;
 			status?: string[];
 			labelNames?: string[];
@@ -1140,6 +1244,11 @@ export class GraphQLIssuesService {
 		if (filters.assigneeId) {
 			filtered = filtered.filter(
 				(issue: LinearIssue) => issue.assignee?.id === filters.assigneeId,
+			);
+		}
+		if (filters.delegateId) {
+			filtered = filtered.filter(
+				(issue: LinearIssue) => issue.delegate?.id === filters.delegateId,
 			);
 		}
 		if (filters.project) {
@@ -1183,6 +1292,7 @@ export class GraphQLIssuesService {
 	private buildSearchFilter(filters: {
 		teamId?: string;
 		assigneeId?: string;
+		delegateId?: string;
 		project?: SearchIssueProject;
 		status?: string[];
 		labelNames?: string[];
@@ -1194,6 +1304,9 @@ export class GraphQLIssuesService {
 		}
 		if (filters.assigneeId) {
 			filter.assignee = { id: { eq: filters.assigneeId } };
+		}
+		if (filters.delegateId) {
+			filter.delegate = { id: { eq: filters.delegateId } };
 		}
 		if (filters.project) {
 			switch (filters.project.kind) {
@@ -1239,6 +1352,23 @@ export class GraphQLIssuesService {
 		const userNodes = resolveResult.users?.nodes;
 		if (!userNodes?.length) {
 			throw notFoundError("User", assigneeId);
+		}
+		return userNodes[0].id;
+	}
+
+	private async resolveDelegateId(
+		delegateId: string | undefined,
+		resolveResult: BatchResolveResult,
+	): Promise<string | undefined> {
+		if (!delegateId || isUuid(delegateId)) {
+			return delegateId;
+		}
+		if (!delegateId.includes("@")) {
+			return this.linearService.resolveUserId(delegateId);
+		}
+		const userNodes = resolveResult.delegates?.nodes;
+		if (!userNodes?.length) {
+			throw notFoundError("Delegate", delegateId);
 		}
 		return userNodes[0].id;
 	}
@@ -1463,7 +1593,13 @@ export class GraphQLIssuesService {
 		issue: IssueNode,
 	): Pick<
 		LinearIssue,
-		"state" | "assignee" | "team" | "project" | "cycle" | "projectMilestone"
+		| "state"
+		| "assignee"
+		| "delegate"
+		| "team"
+		| "project"
+		| "cycle"
+		| "projectMilestone"
 	> {
 		return {
 			state: issue.state
@@ -1477,6 +1613,16 @@ export class GraphQLIssuesService {
 							issue.assignee.name,
 						),
 						url: issue.assignee.url ?? undefined,
+					}
+				: undefined,
+			delegate: issue.delegate
+				? {
+						id: issue.delegate.id,
+						name: resolveUserDisplayName(
+							issue.delegate.id,
+							issue.delegate.name,
+						),
+						url: issue.delegate.url ?? undefined,
 					}
 				: undefined,
 			team: issue.team

@@ -48,6 +48,7 @@ password manager:
 ```json
 {
   "linearOAuth": {
+    "actor": "user",
     "clientId": "your-linear-oauth-client-id",
     "redirectPort": 8765,
     "scopes": ["read", "write", "issues:create", "comments:create"],
@@ -58,6 +59,8 @@ password manager:
 
 Fields:
 
+- `actor` — optional OAuth actor, either `user` or `app`. Defaults to `user`.
+  Use `app` for Linear agent/service-account app users.
 - `clientId` — required Linear OAuth client ID. This is not a secret.
 - `redirectPort` — optional localhost callback port. Defaults to `8765`.
 - `scopes` — optional scope list. Defaults to `read`, `write`,
@@ -65,6 +68,9 @@ Fields:
 - `passwordManagerPath` — optional human/script metadata showing where the
   config came from. el-linear does not execute password-manager commands from
   this value.
+
+When `actor` is `app`, `scopes` may include `app:assignable` and
+`app:mentionable`, but must not include `admin`.
 
 The default path is `~/.config/el-linear/team-oauth.json`. Set
 `EL_LINEAR_OAUTH_CONFIG=/path/to/team-oauth.json` to use another file.
