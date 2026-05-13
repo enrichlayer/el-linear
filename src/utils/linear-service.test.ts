@@ -218,7 +218,7 @@ describe("LinearService", () => {
 			);
 		});
 
-		it("resolves a Linear project URL via slugId filter", async () => {
+		it("resolves a Linear project URL via slugId filter (includeArchived)", async () => {
 			mockProjects.mockResolvedValue({ nodes: [{ id: "slug-uuid" }] });
 			const service = new LinearService({ apiKey: "token" });
 			const result = await service.resolveProjectId(
@@ -230,6 +230,9 @@ describe("LinearService", () => {
 					filter: {
 						slugId: { eq: "tools-and-standardization-40815d9beb16" },
 					},
+					// URLs in the wild commonly point at archived projects; the
+					// slugId path must resolve them so the caller can inspect.
+					includeArchived: true,
 				}),
 			);
 		});

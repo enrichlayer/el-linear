@@ -355,7 +355,7 @@ Always check if a project exists before creating: `el-linear projects list`.
 
 The CLI emits a `results_truncated` warning in `_warnings` when the result set hits `--limit` — bump `--limit` (the suggested next size is in the warning text) or narrow via `--name` / `--state` and retry. Linear URLs and bare slug-ids (`https://linear.app/<workspace>/project/<slug>-<12-hex>/...` or bare `<slug>-<12-hex>`) resolve directly when passed to `--project` — no need to extract a human-readable name yourself.
 
-**If the user names a project that doesn't surface, do not substitute a different one.** Broaden the search (drop `--team`, check archived projects); if it still doesn't appear, **ask** the user before falling back. Substituting a wrong project silently is worse than asking one extra question.
+**If the user names a project that doesn't surface, do not substitute a different one.** Broaden the search (drop `--state` / `--active` / `--name` filters, then bump `--limit`); if it still doesn't appear, **ask** the user before falling back. Substituting a wrong project silently is worse than asking one extra question.
 
 ---
 

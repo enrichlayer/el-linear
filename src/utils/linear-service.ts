@@ -594,9 +594,20 @@ export class LinearService {
 		}
 		const slugId = parseProjectSlugId(projectInput);
 		if (slugId) {
+			// `as Record<string, unknown>` — `@linear/sdk`'s typed ProjectFilter
+			// lags Linear's schema and doesn't yet expose `slugId`. The field is
+			// present on the server; the cast is here until the SDK ships the
+			// typing. Don't "clean up" without verifying the typed shape exists.
+			//
+			// `includeArchived: true` — URLs in the wild often point at archived
+			// projects (someone digs up an old link); silently 404-ing them is
+			// worse than resolving to an archived project, which the caller can
+			// inspect via the returned UUID. Name resolution stays active-only
+			// because names collide more readily than slug-ids do.
 			const bySlug = await this.client.projects({
 				filter: { slugId: { eq: slugId } } as Record<string, unknown>,
 				first: 1,
+				includeArchived: true,
 			});
 			if (bySlug.nodes.length > 0) {
 				return bySlug.nodes[0].id;
