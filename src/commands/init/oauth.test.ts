@@ -209,6 +209,40 @@ describe("runOAuthStep — first-time happy path", () => {
 		expect(body.has("client_secret")).toBe(false);
 	});
 
+	it("authorizes app actor tokens and persists the app viewer id", async () => {
+		vi.mocked(input)
+			.mockResolvedValueOnce("8765")
+			.mockResolvedValueOnce("agent-client");
+		vi.mocked(password).mockResolvedValueOnce("");
+		vi.mocked(checkbox).mockResolvedValueOnce(["read", "app:assignable"]);
+		mockRawRequest.mockResolvedValueOnce({ viewer: VALID_VIEWER });
+
+		const fetchImpl = vi.fn<FetchLike>(async () =>
+			jsonResponse({
+				access_token: "app-access",
+				token_type: "Bearer",
+				expires_in: 86400,
+				scope: "read,app:assignable",
+			}),
+		);
+		const openBrowser = vi.fn(async (_url: string) => undefined);
+
+		const result = await runOAuthStep({
+			actor: "app",
+			fetchImpl,
+			openBrowser,
+			runLocalhostCallbackImpl: async ({ expectedState }) => ({
+				code: "AUTH-APP",
+				state: expectedState,
+			}),
+		});
+
+		expect(result.state.actor).toBe("app");
+		expect(result.state.viewerId).toBe(VALID_VIEWER.id);
+		const authorizeUrl = new URL(openBrowser.mock.calls[0][0]);
+		expect(authorizeUrl.searchParams.get("actor")).toBe("app");
+	});
+
 	it("lets --port override the team OAuth redirect port", async () => {
 		await fs.mkdir(`${TEST_HOME}/.config/el-linear`, {
 			recursive: true,

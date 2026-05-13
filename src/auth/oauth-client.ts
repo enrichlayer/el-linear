@@ -39,6 +39,12 @@ export const ALL_SCOPES = [
 ] as const;
 
 export type OAuthScope = (typeof ALL_SCOPES)[number];
+export type OAuthActor = "user" | "app";
+
+const APP_ONLY_SCOPES = new Set<OAuthScope>([
+	"app:assignable",
+	"app:mentionable",
+]);
 
 export const SCOPE_DESCRIPTIONS: Record<OAuthScope, string> = {
 	read: "Read access to the user's account.",
@@ -94,6 +100,8 @@ interface AuthorizeUrlInput {
 	scopes: readonly string[];
 	state: string;
 	codeChallenge: string;
+	/** `app` makes mutations appear as the OAuth app user. */
+	actor?: OAuthActor;
 	/** "consent" forces the consent screen even for previously-authorized users. */
 	prompt?: "consent";
 }
@@ -113,6 +121,9 @@ export function buildAuthorizeUrl(input: AuthorizeUrlInput): string {
 	url.searchParams.set("state", input.state);
 	url.searchParams.set("code_challenge", input.codeChallenge);
 	url.searchParams.set("code_challenge_method", "S256");
+	if (input.actor && input.actor !== "user") {
+		url.searchParams.set("actor", input.actor);
+	}
 	if (input.prompt) {
 		url.searchParams.set("prompt", input.prompt);
 	}
@@ -166,4 +177,32 @@ export function validateScopes(scopes: readonly string[]): OAuthScope[] {
 		throw new Error("At least one OAuth scope is required.");
 	}
 	return out;
+}
+
+export function validateOAuthActor(value: string | undefined): OAuthActor {
+	if (!value) {
+		return "user";
+	}
+	const trimmed = value.trim().toLowerCase();
+	if (trimmed === "user" || trimmed === "app") {
+		return trimmed;
+	}
+	throw new Error('OAuth actor must be either "user" or "app".');
+}
+
+export function validateActorScopes(
+	actor: OAuthActor,
+	scopes: readonly OAuthScope[],
+): void {
+	if (actor === "app" && scopes.includes("admin")) {
+		throw new Error(
+			'OAuth actor "app" cannot request the admin scope. Remove admin or use actor "user".',
+		);
+	}
+	const hasAppOnlyScope = scopes.some((scope) => APP_ONLY_SCOPES.has(scope));
+	if (actor !== "app" && hasAppOnlyScope) {
+		throw new Error(
+			'Scopes app:assignable/app:mentionable require OAuth actor "app". Re-run with `--actor app` or set linearOAuth.actor to "app".',
+		);
+	}
 }

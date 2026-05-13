@@ -12,12 +12,14 @@ import {
 	GET_ISSUE_BY_ID_QUERY,
 	GET_ISSUE_BY_IDENTIFIER_QUERY,
 	GET_ISSUE_RELATIONS_QUERY,
+	GET_ISSUE_START_CONTEXT_QUERY,
 	GET_ISSUE_STATE_HISTORY_QUERY,
 	GET_ISSUE_TEAM_QUERY,
 	GET_ISSUES_QUERY,
 	ISSUE_RELATION_CREATE_MUTATION,
 	SCAN_ISSUES_QUERY,
 	SEARCH_ISSUES_QUERY,
+	TEAM_STARTED_STATUSES_QUERY,
 	UPDATE_ISSUE_MUTATION,
 } from "./issues.js";
 
@@ -94,6 +96,7 @@ describe("BATCH_RESOLVE_FOR_SEARCH_QUERY", () => {
 		expect(vars).toContain("teamName");
 		expect(vars).toContain("projectName");
 		expect(vars).toContain("assigneeEmail");
+		expect(vars).toContain("delegateEmail");
 	});
 
 	it("returns teams, projects, and users data", () => {
@@ -102,6 +105,7 @@ describe("BATCH_RESOLVE_FOR_SEARCH_QUERY", () => {
 			true,
 		);
 		expect(containsField(BATCH_RESOLVE_FOR_SEARCH_QUERY, "users")).toBe(true);
+		expect(BATCH_RESOLVE_FOR_SEARCH_QUERY).toContain("delegates: users");
 	});
 });
 
@@ -265,6 +269,23 @@ describe("GET_ISSUE_TEAM_QUERY", () => {
 		expect(containsField(GET_ISSUE_TEAM_QUERY, "team")).toBe(true);
 		// Should NOT contain full issue fields
 		expect(containsField(GET_ISSUE_TEAM_QUERY, "title")).toBe(false);
+	});
+});
+
+describe("GET_ISSUE_START_CONTEXT_QUERY", () => {
+	it("fetches issue workflow context", () => {
+		expect(extractVariables(GET_ISSUE_START_CONTEXT_QUERY)).toContain("id");
+		expect(containsField(GET_ISSUE_START_CONTEXT_QUERY, "state")).toBe(true);
+		expect(containsField(GET_ISSUE_START_CONTEXT_QUERY, "type")).toBe(true);
+		expect(containsField(GET_ISSUE_START_CONTEXT_QUERY, "team")).toBe(true);
+	});
+});
+
+describe("TEAM_STARTED_STATUSES_QUERY", () => {
+	it("fetches started workflow states for a team", () => {
+		expect(extractVariables(TEAM_STARTED_STATUSES_QUERY)).toContain("teamId");
+		expect(TEAM_STARTED_STATUSES_QUERY).toContain('eq: "started"');
+		expect(containsField(TEAM_STARTED_STATUSES_QUERY, "position")).toBe(true);
 	});
 });
 

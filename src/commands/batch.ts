@@ -2,6 +2,7 @@ import type { Command, OptionValues } from "commander";
 import {
 	resolveAssignee,
 	resolveLabels,
+	resolveMember,
 	resolveTeam,
 } from "../config/resolver.js";
 import type { LinearIssue } from "../types/linear.js";
@@ -24,7 +25,7 @@ interface BatchResult {
 
 /**
  * Parse the --filter string into structured search arguments.
- * Format: "status:Backlog team:DEV label:Bug assignee:Alice project:Sprint12"
+ * Format: "status:Backlog team:DEV label:Bug assignee:Alice delegate:Claude project:Sprint12"
  */
 function parseFilterString(filter: string): Record<string, string> {
 	const result: Record<string, string> = {};
@@ -69,6 +70,9 @@ async function resolveTargetIssues(
 			teamId: filters.team ? resolveTeam(filters.team) : undefined,
 			assigneeId: filters.assignee
 				? await resolveAssignee(filters.assignee, rootOpts)
+				: undefined,
+			delegateId: filters.delegate
+				? resolveMember(filters.delegate)
 				: undefined,
 			project: filters.project
 				? { kind: "id", id: filters.project }

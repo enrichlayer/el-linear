@@ -28,6 +28,14 @@ const ISSUE_ASSIGNEE_FRAGMENT = `
   }
 `;
 
+const ISSUE_DELEGATE_FRAGMENT = `
+  delegate {
+    id
+    name
+    url
+  }
+`;
+
 const ISSUE_TEAM_FRAGMENT = `
   team {
     id
@@ -106,6 +114,7 @@ export const COMPLETE_ISSUE_FRAGMENT = `
   ${ISSUE_CORE_FIELDS}
   ${ISSUE_STATE_FRAGMENT}
   ${ISSUE_ASSIGNEE_FRAGMENT}
+  ${ISSUE_DELEGATE_FRAGMENT}
   ${ISSUE_TEAM_FRAGMENT}
   ${ISSUE_PROJECT_FRAGMENT}
   ${ISSUE_LABELS_FRAGMENT}
