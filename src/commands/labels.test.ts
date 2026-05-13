@@ -29,6 +29,7 @@ vi.mock("../utils/output.js", async () => ({
 	handleAsyncCommand: (await import("../__tests__/test-helpers.js"))
 		.passthroughHandleAsyncCommand,
 	outputSuccess: mockOutputSuccess,
+	warnIfTruncated: vi.fn(),
 }));
 
 vi.mock("../config/resolver.js", () => ({

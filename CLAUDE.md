@@ -90,6 +90,15 @@ behavior change — multi-profile is purely opt-in.
 
   Bare "we want a custom field set" is not a sufficient reason — `client.issues({ ... })` already lets you destructure exactly the fields you need.
 
+- **Always prefer deterministic CLI behavior over skill markdown.** This is the default — the skill is a last resort. When the same outcome can be achieved by code in this CLI or by a markdown rule in `claude-skills/`, code wins, every time. A rule in `SKILL.md` relies on every agent reading and following it — probabilistic, and it fails silently when the agent skims past the section. A check or affordance in the CLI runs every time, returns structured output, and is unit-testable. Before adding a step to a skill ("do X, then check Y, then ask Z"), ask whether the CLI could: (a) make X automatic, (b) detect Y and emit a structured warning, or (c) refuse Z with a typed error. If yes, file a Linear issue or write the code first; the skill should only fill the gaps the tool genuinely can't close. Concrete patterns that belong in the tool, not the skill:
+
+  - **Pagination / truncation cues** — emit `pageInfo.hasNextPage` or a `results_truncated` warning when `nodes.length === limit`, instead of telling agents to "bump `--limit`".
+  - **Identifier shapes** — accept the formats users actually paste (URLs, slugs, short UUID prefixes) in resolvers, instead of telling agents to parse them in markdown.
+  - **Disambiguation** — return a structured `ambiguous` error with candidate matches, instead of telling agents to "ask the user."
+  - **Title / label conventions** — enforce in `issue-validation.ts` so the create call rejects bad shapes (or enriches the error with suggestions), instead of documenting "use this verb."
+
+  **Skill prose is reserved for non-deterministic, judgment-based problems** that the tool genuinely cannot encode: when to broaden a search, who to ask, what to do when a CLI call returns ambiguous results, when to escalate to the user vs. proceed. If a rule can be expressed as "the CLI does X, then if Y, do Z" with no human judgment in the middle, it belongs in the CLI. Reverse pressure: when a skill PR is proposed, the default reviewer question is **"why isn't this in the CLI?"** — and the burden is on the skill change to justify why a deterministic implementation isn't feasible.
+
 ## Common tasks
 
 ### Add a Linear command

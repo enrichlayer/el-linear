@@ -27,7 +27,11 @@ import type { GraphQLService } from "../utils/graphql-service.js";
 import { createGraphQLService } from "../utils/graphql-service.js";
 import { createLinearService } from "../utils/linear-service.js";
 import { logger } from "../utils/logger.js";
-import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
+import {
+	handleAsyncCommand,
+	outputSuccess,
+	warnIfTruncated,
+} from "../utils/output.js";
 import { getRootOpts } from "../utils/root-opts.js";
 import {
 	type ColumnDef,
@@ -647,6 +651,7 @@ export function setupProjectsCommands(program: Command): void {
 						logger.info(`\n${result.length} projects`);
 					}
 				} else {
+					warnIfTruncated(result.length, limit);
 					outputSuccess({ data: result, meta: { count: result.length } });
 				}
 			}),

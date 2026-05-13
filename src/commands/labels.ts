@@ -16,7 +16,11 @@ import type {
 import { cached, resolveCacheTTL } from "../utils/disk-cache.js";
 import { createGraphQLService } from "../utils/graphql-service.js";
 import { createLinearService } from "../utils/linear-service.js";
-import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
+import {
+	handleAsyncCommand,
+	outputSuccess,
+	warnIfTruncated,
+} from "../utils/output.js";
 import { getRootOpts } from "../utils/root-opts.js";
 import { parsePositiveInt, validateHexColor } from "../utils/validators.js";
 
@@ -133,6 +137,7 @@ export function setupLabelsCommands(program: Command): void {
 					const service = await createLinearService(rootOpts);
 					return service.getLabels(teamFilter, limit, nameFilter);
 				});
+				warnIfTruncated(result.labels.length, limit);
 				outputSuccess({
 					data: result.labels,
 					meta: { count: result.labels.length },

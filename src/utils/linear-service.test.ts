@@ -217,6 +217,87 @@ describe("LinearService", () => {
 				'Project "Nonexistent" not found',
 			);
 		});
+
+		it("resolves a Linear project URL via slugId filter (includeArchived)", async () => {
+			mockProjects.mockResolvedValue({ nodes: [{ id: "slug-uuid" }] });
+			const service = new LinearService({ apiKey: "token" });
+			const result = await service.resolveProjectId(
+				"https://linear.app/verticalint/project/tools-and-standardization-40815d9beb16/overview",
+			);
+			expect(result).toBe("slug-uuid");
+			expect(mockProjects).toHaveBeenCalledWith(
+				expect.objectContaining({
+					filter: {
+						slugId: { eq: "tools-and-standardization-40815d9beb16" },
+					},
+					// URLs in the wild commonly point at archived projects; the
+					// slugId path must resolve them so the caller can inspect.
+					includeArchived: true,
+				}),
+			);
+		});
+
+		it("resolves a bare slug-id via slugId filter", async () => {
+			mockProjects.mockResolvedValue({ nodes: [{ id: "slug-uuid-2" }] });
+			const service = new LinearService({ apiKey: "token" });
+			const result = await service.resolveProjectId(
+				"customer-api-abc123def456",
+			);
+			expect(result).toBe("slug-uuid-2");
+			expect(mockProjects).toHaveBeenCalledWith(
+				expect.objectContaining({
+					filter: { slugId: { eq: "customer-api-abc123def456" } },
+				}),
+			);
+		});
+
+		it("throws when a slug-id form does not match (no name fallback)", async () => {
+			// `nodes: []` simulates Linear returning no project for this
+			// slugId. We assert the resolver doesn't silently fall back to a
+			// name-based eqIgnoreCase query (which would never match a URL) —
+			// the last and only filter shape sent for this call is the slugId one.
+			mockProjects.mockResolvedValue({ nodes: [] });
+			const service = new LinearService({ apiKey: "token" });
+			await expect(
+				service.resolveProjectId(
+					"https://linear.app/x/project/missing-aaaaaaaaaaaa/overview",
+				),
+			).rejects.toThrow("not found");
+			expect(mockProjects).toHaveBeenLastCalledWith(
+				expect.objectContaining({
+					filter: { slugId: { eq: "missing-aaaaaaaaaaaa" } },
+				}),
+			);
+		});
+	});
+
+	describe("normalizeProjectInput", () => {
+		it("passes UUIDs through unchanged without an API call", async () => {
+			const service = new LinearService({ apiKey: "token" });
+			const before = mockProjects.mock.calls.length;
+			const result = await service.normalizeProjectInput(
+				"f47ac10b-58cc-4372-a567-0e02b2c3d479",
+			);
+			expect(result).toBe("f47ac10b-58cc-4372-a567-0e02b2c3d479");
+			expect(mockProjects.mock.calls.length).toBe(before);
+		});
+
+		it("passes plain names through unchanged without an API call", async () => {
+			const service = new LinearService({ apiKey: "token" });
+			const before = mockProjects.mock.calls.length;
+			const result = await service.normalizeProjectInput("Customer API");
+			expect(result).toBe("Customer API");
+			expect(mockProjects.mock.calls.length).toBe(before);
+		});
+
+		it("resolves URL inputs to a UUID via slugId", async () => {
+			mockProjects.mockResolvedValue({ nodes: [{ id: "resolved-uuid" }] });
+			const service = new LinearService({ apiKey: "token" });
+			const result = await service.normalizeProjectInput(
+				"https://linear.app/x/project/foo-1234567890ab/overview",
+			);
+			expect(result).toBe("resolved-uuid");
+		});
 	});
 
 	describe("getTeams", () => {
