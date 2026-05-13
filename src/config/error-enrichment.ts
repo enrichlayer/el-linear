@@ -51,6 +51,19 @@ interface GqlTeamResult {
 	} | null;
 }
 
+/**
+ * Raw GraphQL is used here instead of `LinearService` / `client.team(id)`
+ * because we need three connections (projects, members, labels) in a
+ * single round-trip, gated on which fields the validator actually flagged
+ * as missing. Going through the SDK would mean three sequential
+ * `.projects()` / `.members()` / `.labels()` calls (the SDK's
+ * connection-resolver promises don't batch), which doubles the
+ * worst-case latency of an already-on-the-error-path enrichment.
+ *
+ * Per CLAUDE.md "prefer @linear/sdk over raw GraphQL" rule: this is the
+ * "batching with @include directives" exception. Revisit if `@linear/sdk`
+ * ever exposes a multi-connection batch helper.
+ */
 const TEAM_SUGGESTIONS_QUERY = `
   query TeamSuggestions(
     $teamId: String!
@@ -134,13 +147,18 @@ async function resolveTeamUuid(
  *
  * Preference order:
  *   1. Config alias (always single-token, e.g. "dima")
- *   2. Email (stable, no spaces)
- *   3. Quoted displayName (last resort — wrapped in double quotes so a name
- *      like `Kamal M` doesn't get split by the shell on retry)
+ *   2. Email (stable, no spaces, no shell metacharacters)
+ *   3. POSIX-quoted displayName (last resort — single-quoted via
+ *      `shellQuote` so a name like `Kamal M`, `O'Brien`, or one
+ *      containing `$`/backtick/`\\` doesn't get split or expanded by
+ *      the shell on retry).
  *
  * The retryability is the point: the suggestion must paste back into the
  * same `el-linear issues create ... --assignee <token>` without further
- * escaping by the caller.
+ * escaping by the caller. The displayName branch uses the same POSIX
+ * single-quote helper as the rest of the retry command so the escaping
+ * contract is uniform — no asymmetric "quote with double quotes here,
+ * single quotes there" trap for future maintainers.
  */
 function bestAssigneeToken(
 	name: string,
@@ -157,8 +175,8 @@ function bestAssigneeToken(
 		return email;
 	}
 	const label = displayName || name;
-	if (/\s/.test(label)) {
-		return `"${label.replace(/"/g, '\\"')}"`;
+	if (/\s/.test(label) || /['"`$\\]/.test(label)) {
+		return shellQuote(label);
 	}
 	return label;
 }
@@ -426,11 +444,13 @@ function decorateError(
 	if (kind === "assignee") {
 		return `${message}\n${formatAssigneeSuggestions(ctx.members)}`;
 	}
-	if (kind === "labels") {
+	if (kind === "labels" || kind === "type-label") {
+		// Both branches benefit from the verb→type inference hint plus
+		// the canonical-types + domain-labels suggestion block. Sharing
+		// the decorator keeps them in lockstep: a user who passed a
+		// non-type label (type-label error) sees the same "title verb
+		// suggests type X" guidance as one who passed no labels at all.
 		return decorateLabelsError(message, ctx);
-	}
-	if (kind === "type-label") {
-		return `${message}\n${formatLabelSuggestions(ctx)}`;
 	}
 	return message;
 }

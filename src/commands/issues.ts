@@ -364,13 +364,19 @@ async function resolveCreateInputs(
 			options.labels = validationResult.normalizedLabels.join(",");
 		}
 
-		if (validationResult.errors.length > 0 && options.team) {
+		// Match the team-resolution rule used for the create call below
+		// (line ~389): fall back to config.defaultTeam when --team is omitted.
+		// Without this, users with a configured default team would see bare
+		// validation errors with no suggestions — the exact opposite of what
+		// the AI-coding-agent use case needs.
+		const enrichTeam = options.team || config.defaultTeam;
+		if (validationResult.errors.length > 0 && enrichTeam) {
 			try {
 				const graphQLService = await createGraphQLService(rootOpts);
 				const linearService = await createLinearService(rootOpts);
 				await enrichValidationErrors(
 					validationResult,
-					{ team: options.team, title },
+					{ team: enrichTeam, title },
 					{ graphQLService, linearService },
 				);
 			} catch {

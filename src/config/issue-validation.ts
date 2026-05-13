@@ -136,6 +136,19 @@ export function getCanonicalTypeLabels(): string[] {
  * or null if no match.
  *
  * Checks multi-word verbs first (e.g. "Set up"), then single-word verbs.
+ *
+ * Why this lives next to `checkTitleVerbAlignment` but does NOT share its
+ * matching loop: the two functions answer different questions despite
+ * walking the same map.
+ *   - `checkTitleVerbAlignment` runs only when a type label is already
+ *     supplied; it warns when the verb belongs to a *different* type set
+ *     than the one the user picked.
+ *   - `inferTypeFromTitle` runs only when no type label is supplied; it
+ *     wants the *positive* match — "this verb belongs to this type" —
+ *     so it can suggest a default in the enrichment block.
+ * Sharing TYPE_VERB_MAP keeps them in sync; sharing the matcher would
+ * conflate "warn about mismatch" with "suggest a default" and produce
+ * subtle bugs (e.g. inferring a type the alignment check just rejected).
  */
 export function inferTypeFromTitle(
 	title: string,

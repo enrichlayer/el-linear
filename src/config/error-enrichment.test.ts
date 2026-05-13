@@ -204,7 +204,53 @@ describe("enrichValidationErrors", () => {
 
 		expect(result.errors[0]).toContain("--assignee dima");
 		expect(result.errors[0]).toContain("--assignee kamal@example.com");
-		expect(result.errors[0]).toContain('--assignee "Pat Q"');
+		// POSIX single-quoted (was previously double-quoted, but that didn't
+		// escape $/backtick/backslash). Single-quoting is what the rest of
+		// the retry-command builder uses, so the displayName branch matches.
+		expect(result.errors[0]).toContain("--assignee 'Pat Q'");
+	});
+
+	it("POSIX-quotes a displayName containing shell metacharacters", async () => {
+		const result: ValidationResult = {
+			errors: ["Missing --assignee. ..."],
+			warnings: [],
+			normalizedLabels: null,
+		};
+		const services = makeServices({
+			id: "team-dev-uuid",
+			key: "DEV",
+			name: "Dev",
+			members: {
+				nodes: [
+					// Apostrophe in the displayName — needs POSIX `'\''` escape.
+					{
+						id: "u0",
+						name: "OBrien",
+						displayName: "O'Brien",
+						email: undefined,
+						active: true,
+					},
+					// `$` in the displayName — would expand inside double quotes,
+					// must be single-quoted.
+					{
+						id: "u1",
+						name: "Costly",
+						displayName: "$Costly",
+						email: undefined,
+						active: true,
+					},
+				],
+			},
+		});
+		await enrichValidationErrors(
+			result,
+			{ team: "DEV", title: "Add feature" },
+			asServices(services),
+		);
+		// Apostrophe escaped via POSIX `'\''` glue.
+		expect(result.errors[0]).toContain(`--assignee 'O'\\''Brien'`);
+		// Dollar sign safely single-quoted, no expansion possible on retry.
+		expect(result.errors[0]).toContain(`--assignee '$Costly'`);
 	});
 
 	it("appends label suggestions plus verb-based type inference to a Missing --labels error", async () => {
@@ -295,7 +341,11 @@ describe("enrichValidationErrors", () => {
 		expect(result.errors[0]).toContain("Suggestions");
 	});
 
-	it("appends label suggestions to a Missing type label error", async () => {
+	it("appends label suggestions plus verb-inference hint to a Missing type label error", async () => {
+		// "Missing type label" (user passed a domain label but no type label)
+		// gets the same enrichment path as "Missing --labels" entirely, so a
+		// title verb that maps to a type label still surfaces the inference
+		// hint. Previously the type-label branch skipped this hint.
 		const result: ValidationResult = {
 			errors: [
 				"Missing type label. Exactly one required.\n  Valid type labels: bug, feature, refactor, chore, spike\n  Provided labels: backend",
@@ -316,6 +366,11 @@ describe("enrichValidationErrors", () => {
 		);
 		expect(result.errors[0]).toContain("Suggestions");
 		expect(result.errors[0]).toContain("feature");
+		// Verb "Add" → feature type. Same hint shape as the labels branch.
+		expect(result.errors[0]).toContain(
+			'Inferred from title: type label "feature"',
+		);
+		expect(result.errors[0]).toContain('title starts with "Add"');
 	});
 
 	it("batches a single GraphQL call covering all missing fields", async () => {

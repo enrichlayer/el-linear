@@ -82,6 +82,13 @@ behavior change — multi-profile is purely opt-in.
 - **Output is JSON by default.** Use `outputSuccess(...)` / `outputWarning(...)` / `handleAsyncCommand(...)` from `utils/output.ts`. Never `console.log`.
 - **Always lint before push**: `pnpm exec biome check --fix src/`.
 - **American English** in code, comments, docstrings, CHANGELOG, README, and commit messages. `behavior`, `honor`, `color`, `serialize`, `recognize` — not `behaviour`, `honour`, `colour`, `serialise`, `recognise`. The package is published on npm under an American audience and the Linear API uses American spellings; staying consistent avoids the mixed-spelling drift that `git grep` reveals every few months.
+- **Prefer the `@linear/sdk` over raw GraphQL.** When an `@linear/sdk` method covers the call (e.g. `client.issues`, `client.users`, `client.issueLabels`, `client.team(id).projects()`), use it via `LinearService` rather than writing a new query string for `graphQLService.rawRequest()`. The SDK gives you typed inputs, automatic pagination helpers, and one place to absorb schema changes. Reach for raw GraphQL **only** when the SDK can't express the call without losing something concrete — and call out why in a docstring on the query string. Legitimate reasons:
+  - **Batching with `@include`/`@skip` directives** — e.g. fetching team `projects + members + labels` in one round-trip when the SDK would force three.
+  - **Selecting fields the SDK's typed wrappers omit** — anything on `viewer.organization`, attachment metadata Linear added after the SDK release, raw connection cursors, etc.
+  - **Mutations the SDK doesn't expose** (rare; document the SDK gap in the docstring so we can revisit on SDK upgrades).
+  - **Performance-critical loops** where the SDK's per-edge resolver promises produce N+1 round-trips.
+
+  Bare "we want a custom field set" is not a sufficient reason — `client.issues({ ... })` already lets you destructure exactly the fields you need.
 
 ## Common tasks
 
@@ -91,13 +98,20 @@ Most things should start as a `el-linear graphql` invocation. If you find
 yourself running the same query repeatedly, promote it to a first-class
 command:
 
-1. Add the GraphQL query to `src/queries/<resource>.ts`.
-2. Add a service method in `src/utils/linear-service.ts` (for paginated
-   lists, where the SDK's pagination helper saves work) or call
-   `graphQLService.rawRequest()` directly otherwise.
-3. Add the command in `src/commands/<resource>.ts` with a setup function.
-4. Wire it into `src/main.ts`.
-5. Test with mocked `graphQLService` and `linearService`.
+1. **Check the SDK first.** Open `@linear/sdk`'s exported `LinearClient`
+   methods. If the call is expressible as `client.foo({...})`, add a
+   service method on `LinearService` and skip steps 2-3 of the GraphQL
+   path. The SDK-preference rule above applies.
+2. Only if the SDK can't express it: add the GraphQL query to
+   `src/queries/<resource>.ts` with a docstring naming the SDK gap
+   (batching, missing field, etc.) so the next maintainer can revisit
+   on SDK upgrades.
+3. Call it from a service method in `src/utils/linear-service.ts` (for
+   paginated lists, where the SDK's pagination helper saves work) or via
+   `graphQLService.rawRequest()` for the raw-query path.
+4. Add the command in `src/commands/<resource>.ts` with a setup function.
+5. Wire it into `src/main.ts`.
+6. Test with mocked `graphQLService` and `linearService`.
 
 ### Debug a failing test
 
