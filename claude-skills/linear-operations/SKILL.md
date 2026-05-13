@@ -359,7 +359,7 @@ Always check if a project exists before creating: `el-linear projects list --lim
 
 1. Bump `--limit`.
 2. Search across all teams, not the team-filtered subset — projects often span multiple teams, and filtering by `.teams[].key == "X"` will drop them.
-3. If the user gave a Linear project URL like `https://linear.app/<workspace>/project/<slug>-<id>/...`, that URL is itself an identifier — pass it directly to `--project`, or parse the slug/UUID suffix.
+3. If the user gave a Linear project URL like `https://linear.app/<workspace>/project/<slug>-<id>/...`, **extract the human-readable name from the slug** (`tools-and-standardization-40815d9beb16` → `Tools and standardization`) and pass that to `--project`. Today's `resolveProjectId` (`src/utils/linear-service.ts:595`) only accepts a canonical UUID (8-4-4-4-12 hex) or an exact-case-insensitive project name — raw URLs and the truncated 12-char id suffix do not resolve. DEV-4105 tracks native URL/slug acceptance; once it lands, this step collapses to "pass the URL directly".
 4. If still missing, **ask** before falling back to a different project.
 
 ---
