@@ -353,7 +353,7 @@ el-linear projects add-team "Project Name" ENG 2>&1
 
 Always check if a project exists before creating: `el-linear projects list --limit 200`.
 
-**Default `--limit` is 25.** In workspaces with many projects, a missing match is silent — the project may simply be past the page boundary. Use `--limit 200` (or higher) for any project lookup intended to be exhaustive.
+**`--limit` defaults vary by command — `projects list` defaults to 100, `issues list` defaults to 25.** In workspaces with 100+ projects, a missing match is silent — the project may simply be past the page boundary. Use `--limit 200` (or higher) for any project lookup intended to be exhaustive.
 
 **If the user names a project that doesn't surface, do not substitute a different one.** Broaden the search before claiming the project doesn't exist:
 
