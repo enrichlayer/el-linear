@@ -560,6 +560,46 @@ describe("enrichProjectResolverError", () => {
 		expect(enriched).toContain("team DEV");
 	});
 
+	it("handles project names containing quotes (greedy capture)", async () => {
+		const services = makeServices({
+			id: "team-dev-uuid",
+			key: "DEV",
+			name: "Dev",
+			projects: { nodes: projectsPayload(["Customer API"]) },
+		});
+		// notFoundError emits `Project "My "Cool" Proj" not found.` — the
+		// regex must backtrack from the trailing `" not found` to capture
+		// the full quoted identifier rather than stopping at the first
+		// inner quote.
+		const enriched = await enrichProjectResolverError(
+			'Project "My "Cool" Proj" not found.',
+			{ team: "DEV" },
+			asServices(services),
+		);
+		expect(enriched).toContain('My "Cool" Proj');
+		expect(enriched).toContain('--project "Customer API"');
+	});
+
+	it('ignores leading text — `Project "X" not found` substring inside an unrelated message', async () => {
+		const services = makeServices({
+			id: "team-dev-uuid",
+			key: "DEV",
+			name: "Dev",
+			projects: { nodes: projectsPayload(["Customer API"]) },
+		});
+		// A different error class that mentions the project shape in its
+		// middle — start-anchored regex must not enrich this.
+		const original =
+			'Validation error: the comment "Project \\"X\\" not found" is too short.';
+		const enriched = await enrichProjectResolverError(
+			original,
+			{ team: "DEV" },
+			asServices(services),
+		);
+		expect(enriched).toBe(original);
+		expect(services.graphQLService.rawRequest).not.toHaveBeenCalled();
+	});
+
 	it("works for URL-shaped inputs (captures the URL inside the quotes)", async () => {
 		const services = makeServices({
 			id: "team-dev-uuid",

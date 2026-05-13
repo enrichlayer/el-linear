@@ -353,8 +353,14 @@ export async function enrichValidationErrors(
  * batched issues-service project resolver. Matches the message body and
  * captures the user's original input so the synthesized enrichment error
  * can reference it.
+ *
+ * Start-anchored to avoid a false-positive when the substring appears
+ * inside an unrelated error. Greedy `.+` with `\.?` tail handles project
+ * names that themselves contain quotes — the regex backtracks from the
+ * final `" not found.` to find the longest valid identifier (`notFoundError`
+ * always ends with a period, so the tail is a stable terminator).
  */
-const PROJECT_NOT_FOUND_PATTERN = /Project "([^"]+)" not found/;
+const PROJECT_NOT_FOUND_PATTERN = /^Project "(.+)" not found\.?/;
 
 /**
  * Enrich a project resolver failure ({@link PROJECT_NOT_FOUND_PATTERN})

@@ -351,7 +351,11 @@ async function withProjectResolverEnrichment<T>(
 				services,
 			);
 			if (enriched !== err.message) {
-				throw new Error(enriched);
+				// Mutate in place rather than throwing a fresh Error — preserves
+				// the original error subclass and stack trace so consumers that
+				// rely on `instanceof` (or read `.stack` via EL_LINEAR_DEBUG=1)
+				// keep working. Only the user-facing message changes.
+				err.message = enriched;
 			}
 		}
 		throw err;
