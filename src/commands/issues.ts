@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import type { Command, OptionValues } from "commander";
 import { loadConfig } from "../config/config.js";
+import { enrichValidationErrors } from "../config/error-enrichment.js";
 import {
 	enforceValidation,
 	validateIssueCreation,
@@ -370,6 +371,26 @@ async function resolveCreateInputs(
 		// Apply normalized labels back so resolution uses the canonical names
 		if (validationResult.normalizedLabels) {
 			options.labels = validationResult.normalizedLabels.join(",");
+		}
+
+		// Match the team-resolution rule used for the create call below
+		// (line ~389): fall back to config.defaultTeam when --team is omitted.
+		// Without this, users with a configured default team would see bare
+		// validation errors with no suggestions — the exact opposite of what
+		// the AI-coding-agent use case needs.
+		const enrichTeam = options.team || config.defaultTeam;
+		if (validationResult.errors.length > 0 && enrichTeam) {
+			try {
+				const graphQLService = await createGraphQLService(rootOpts);
+				const linearService = await createLinearService(rootOpts);
+				await enrichValidationErrors(
+					validationResult,
+					{ team: enrichTeam, title },
+					{ graphQLService, linearService },
+				);
+			} catch {
+				// Best-effort enrichment — never block the original error.
+			}
 		}
 
 		enforceValidation(validationResult);
