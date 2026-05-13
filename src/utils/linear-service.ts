@@ -17,6 +17,7 @@ import type { AuthOptions } from "./auth.js";
 import { toISOStringOrNow, toISOStringOrUndefined } from "./date-format.js";
 import { multipleMatchesError, notFoundError } from "./error-messages.js";
 import { parseIssueIdentifier } from "./identifier-parser.js";
+import { parseProjectSlugId } from "./project-slug.js";
 import { isUuid } from "./uuid.js";
 
 const DEFAULT_CYCLE_PAGINATION_LIMIT = 250;
@@ -587,19 +588,55 @@ export class LinearService {
 		return chosen.id;
 	}
 
-	async resolveProjectId(projectNameOrId: string): Promise<string> {
-		if (isUuid(projectNameOrId)) {
-			return projectNameOrId;
+	async resolveProjectId(projectInput: string): Promise<string> {
+		if (isUuid(projectInput)) {
+			return projectInput;
 		}
-		const filter = { name: { eqIgnoreCase: projectNameOrId } };
+		const slugId = parseProjectSlugId(projectInput);
+		if (slugId) {
+			const bySlug = await this.client.projects({
+				filter: { slugId: { eq: slugId } } as Record<string, unknown>,
+				first: 1,
+			});
+			if (bySlug.nodes.length > 0) {
+				return bySlug.nodes[0].id;
+			}
+			// Slug-id form was syntactically valid but didn't match a project
+			// — fall through to name resolution would be misleading (the user
+			// clearly pasted a URL/slug, not a name). Throw the same shape of
+			// not-found error as the name path.
+			throw notFoundError("Project", projectInput);
+		}
+		const filter = { name: { eqIgnoreCase: projectInput } };
 		const projectsConnection = await this.client.projects({
 			filter,
 			first: 1,
 		});
 		if (projectsConnection.nodes.length === 0) {
-			throw notFoundError("Project", projectNameOrId);
+			throw notFoundError("Project", projectInput);
 		}
 		return projectsConnection.nodes[0].id;
+	}
+
+	/**
+	 * Normalize a user-supplied project input to a UUID when the input is
+	 * a URL or slug-id form. Pass-through for UUIDs and plain names — the
+	 * latter stays a name so downstream batch-resolve queries can fold the
+	 * lookup into their single round-trip.
+	 *
+	 * Used by callers that route project resolution through a separate
+	 * batch-resolve step (e.g. `GraphqlIssuesService.createIssue`) — they
+	 * can pre-normalize URL/slug inputs to UUIDs so the batch query's
+	 * `name eqIgnoreCase` filter doesn't have to learn the URL/slug shape.
+	 */
+	async normalizeProjectInput(projectInput: string): Promise<string> {
+		if (isUuid(projectInput)) {
+			return projectInput;
+		}
+		if (parseProjectSlugId(projectInput)) {
+			return this.resolveProjectId(projectInput);
+		}
+		return projectInput;
 	}
 }
 

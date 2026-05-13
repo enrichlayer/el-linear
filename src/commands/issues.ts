@@ -43,6 +43,7 @@ import {
 	handleAsyncCommand,
 	outputSuccess,
 	outputWarning,
+	warnIfTruncated,
 } from "../utils/output.js";
 import { getRootOpts } from "../utils/root-opts.js";
 import {
@@ -247,6 +248,7 @@ async function handleListIssues(
 		options.project ||
 		options.project === false ||
 		options.priority;
+	const limit = parsePositiveInt(options.limit, "--limit");
 	if (hasFilters) {
 		const searchArgs: SearchIssueArgs = {
 			teamId: options.team ? resolveTeam(options.team) : undefined,
@@ -260,20 +262,22 @@ async function handleListIssues(
 				? parsePriorityFilter(options.priority)
 				: undefined,
 			orderBy: options.sort === "created" ? "createdAt" : "updatedAt",
-			limit: parsePositiveInt(options.limit, "--limit"),
+			limit,
 		};
 		const result = sortIssues(
 			await issuesService.searchIssues(searchArgs),
 			options.sort,
 		);
+		warnIfTruncated(result.length, limit);
 		outputIssues(result, options.format, options.fields, {
 			team: options.team,
 		});
 	} else {
 		const result = sortIssues(
-			await issuesService.getIssues(parsePositiveInt(options.limit, "--limit")),
+			await issuesService.getIssues(limit),
 			options.sort,
 		);
+		warnIfTruncated(result.length, limit);
 		outputIssues(result, options.format, options.fields, {});
 	}
 }
@@ -289,6 +293,7 @@ async function handleSearchIssues(
 	const rootOpts = getRootOpts(command);
 	const { issuesService } = await createIssuesService(rootOpts);
 
+	const limit = parsePositiveInt(options.limit, "--limit");
 	const searchArgs: SearchIssueArgs = {
 		query,
 		teamId: options.team ? resolveTeam(options.team) : undefined,
@@ -301,12 +306,13 @@ async function handleSearchIssues(
 		priority: options.priority
 			? parsePriorityFilter(options.priority)
 			: undefined,
-		limit: parsePositiveInt(options.limit, "--limit"),
+		limit,
 	};
 	const result = sortIssues(
 		await issuesService.searchIssues(searchArgs),
 		options.sort,
 	);
+	warnIfTruncated(result.length, limit);
 	outputIssues(result, options.format, options.fields, { query });
 }
 

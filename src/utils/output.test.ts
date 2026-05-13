@@ -17,6 +17,7 @@ import {
 	resetWarnings,
 	setFieldsFilter,
 	setRawMode,
+	warnIfTruncated,
 } from "./output.js";
 
 describe("outputSuccess", () => {
@@ -139,6 +140,52 @@ describe("warning buffer", () => {
 		const parsed = JSON.parse(allStdout);
 		expect(parsed.identifier).toBe("DEV-1");
 		expect(parsed._warnings).toEqual(["mid-execution warning"]);
+	});
+});
+
+describe("warnIfTruncated", () => {
+	let stdoutSpy: ReturnType<typeof vi.spyOn>;
+
+	beforeEach(() => {
+		resetWarnings();
+		stdoutSpy = vi
+			.spyOn(process.stdout, "write")
+			.mockImplementation(() => true);
+	});
+
+	afterEach(() => {
+		stdoutSpy.mockRestore();
+	});
+
+	it("emits a results_truncated warning when count === limit", () => {
+		warnIfTruncated(50, 50);
+		outputSuccess({ data: [] });
+		const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+		expect(parsed._warnings).toHaveLength(1);
+		expect(parsed._warnings[0]).toContain("results_truncated");
+		expect(parsed._warnings[0]).toContain("50 matching --limit 50");
+		expect(parsed._warnings[0]).toContain("--limit 100");
+	});
+
+	it("does not warn when count < limit", () => {
+		warnIfTruncated(7, 100);
+		outputSuccess({ data: [] });
+		const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+		expect(parsed._warnings).toBeUndefined();
+	});
+
+	it("does not warn when count > limit (defensive)", () => {
+		warnIfTruncated(101, 100);
+		outputSuccess({ data: [] });
+		const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+		expect(parsed._warnings).toBeUndefined();
+	});
+
+	it("suggested limit is double the current limit", () => {
+		warnIfTruncated(25, 25);
+		outputSuccess({ data: [] });
+		const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+		expect(parsed._warnings[0]).toContain("--limit 50");
 	});
 });
 

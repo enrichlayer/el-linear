@@ -256,56 +256,59 @@ export class GraphQLIssuesService {
 		args: UpdateIssueArgs,
 		labelMode = "overwriting",
 	): Promise<LinearIssue> {
+		// Normalize URL/slug-id --project inputs to UUIDs before the batch
+		// resolver runs; see comment on `withNormalizedProjectId`.
+		const normalizedArgs = await this.withNormalizedProjectId(args);
 		const { resolvedIssueId, issueTeamId, currentIssueLabels, resolveResult } =
-			await this.resolveUpdateContext(args);
+			await this.resolveUpdateContext(normalizedArgs);
 
 		let teamIdForLabels = issueTeamId;
-		if (!teamIdForLabels && args.labelIds && resolvedIssueId) {
+		if (!teamIdForLabels && normalizedArgs.labelIds && resolvedIssueId) {
 			teamIdForLabels = await this.fetchIssueTeamId(resolvedIssueId);
 		}
 
 		const finalLabelIds = await this.resolveLabelsWithMode(
-			args.labelIds,
+			normalizedArgs.labelIds,
 			resolveResult,
 			labelMode,
 			currentIssueLabels,
 			teamIdForLabels,
-			args.teamId,
+			normalizedArgs.teamId,
 		);
 
-		const finalProjectId = args.projectId
-			? this.resolveProjectId(args.projectId, resolveResult)
+		const finalProjectId = normalizedArgs.projectId
+			? this.resolveProjectId(normalizedArgs.projectId, resolveResult)
 			: undefined;
 
 		const { projectMilestoneNodes, issueProjectMilestoneNodes } =
-			this.extractMilestoneNodes(args, resolveResult);
+			this.extractMilestoneNodes(normalizedArgs, resolveResult);
 
 		const finalMilestoneId = this.resolveMilestoneId(
-			args.milestoneId,
+			normalizedArgs.milestoneId,
 			resolveResult,
 			projectMilestoneNodes,
 			issueProjectMilestoneNodes,
 		);
 
 		const finalCycleId = await this.resolveCycleIdForUpdate(
-			args,
+			normalizedArgs,
 			resolveResult,
 			resolvedIssueId,
 		);
 		const resolvedStatusId = await this.resolveStatusIdForUpdate(
-			args,
+			normalizedArgs,
 			resolvedIssueId,
 		);
 
 		// Resolve assignee in place — `buildUpdateInput` reads it
 		// directly. Match the createIssue pattern.
-		let assigneeId = args.assigneeId;
+		let assigneeId = normalizedArgs.assigneeId;
 		if (assigneeId && !isUuid(assigneeId)) {
 			assigneeId = await this.linearService.resolveUserId(assigneeId);
 		}
 
 		const updateInput = this.buildUpdateInput(
-			{ ...args, assigneeId },
+			{ ...normalizedArgs, assigneeId },
 			{
 				statusId: resolvedStatusId,
 				projectId: finalProjectId,
@@ -315,7 +318,11 @@ export class GraphQLIssuesService {
 			},
 		);
 
-		return this.executeUpdateMutation(resolvedIssueId, args.id, updateInput);
+		return this.executeUpdateMutation(
+			resolvedIssueId,
+			normalizedArgs.id,
+			updateInput,
+		);
 	}
 
 	async archiveIssue(issueId: string): Promise<IssueArchiveOperationResult> {
@@ -410,7 +417,12 @@ export class GraphQLIssuesService {
 	}
 
 	async createIssue(args: CreateIssueArgs): Promise<LinearIssue> {
-		const resolveVariables = this.buildCreateResolveVariables(args);
+		// Pre-resolve URL/slug-id forms of --project to a UUID so the batch
+		// resolver below (which uses a `name eqIgnoreCase` filter) can skip
+		// the project lookup entirely. Plain name inputs flow through unchanged
+		// and get resolved by the batch query in a single round-trip.
+		const normalizedArgs = await this.withNormalizedProjectId(args);
+		const resolveVariables = this.buildCreateResolveVariables(normalizedArgs);
 
 		let resolveResult: BatchResolveResult = {};
 		if (Object.keys(resolveVariables).length > 0) {
@@ -437,18 +449,21 @@ export class GraphQLIssuesService {
 			}
 		}
 
-		const resolved = await this.resolveCreateFields(args, resolveResult);
+		const resolved = await this.resolveCreateFields(
+			normalizedArgs,
+			resolveResult,
+		);
 
 		// Mutate-the-input feels gross but matches the existing pattern
 		// — `resolved` doesn't carry assigneeId, so the buildCreateInput
 		// step reads `args.assigneeId` directly. Resolve in place.
-		let assigneeId = args.assigneeId;
+		let assigneeId = normalizedArgs.assigneeId;
 		if (assigneeId && !isUuid(assigneeId)) {
 			assigneeId = await this.linearService.resolveUserId(assigneeId);
 		}
 
 		const createInput = this.buildCreateInput(
-			{ ...args, assigneeId },
+			{ ...normalizedArgs, assigneeId },
 			resolved,
 		);
 		return this.executeCreateMutation(createInput);
@@ -1326,6 +1341,27 @@ export class GraphQLIssuesService {
 			teamId = await this.fetchIssueTeamId(resolvedIssueId);
 		}
 		return this.linearService.resolveStatusId(args.statusId, teamId);
+	}
+
+	/**
+	 * Pre-resolve URL/slug-id project inputs to UUIDs before the batch
+	 * resolver runs. Plain names and UUIDs pass through unchanged; only
+	 * URL/slug-id forms incur a separate slug→UUID round-trip (the batch
+	 * query's `name eqIgnoreCase` filter can't match a URL string).
+	 */
+	private async withNormalizedProjectId<T extends { projectId?: string }>(
+		args: T,
+	): Promise<T> {
+		if (!args.projectId) {
+			return args;
+		}
+		const normalized = await this.linearService.normalizeProjectInput(
+			args.projectId,
+		);
+		if (normalized === args.projectId) {
+			return args;
+		}
+		return { ...args, projectId: normalized };
 	}
 
 	private buildCreateResolveVariables(

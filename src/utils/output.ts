@@ -220,6 +220,28 @@ export function outputSuccess(data: unknown): void {
 	}
 }
 
+/**
+ * Emit a `results_truncated` warning when a list command's result count
+ * equals the requested `--limit`, signaling to the caller (typically an
+ * AI agent) that more results may exist beyond the page. Heuristic, not
+ * exact — `length === limit` has a false-positive when the workspace
+ * happens to hold exactly `limit` matching items. Accurate `hasNextPage`
+ * would require widening every list-service return type; deferred until
+ * a caller cares about the false-positive rate.
+ *
+ * Message includes a concrete next-step (suggested `--limit` is 2× the
+ * current limit) so the agent doesn't have to derive it.
+ */
+export function warnIfTruncated(count: number, limit: number): void {
+	if (count !== limit) {
+		return;
+	}
+	outputWarning(
+		`results_truncated: returned ${count} matching --limit ${limit}; more results may exist. ` +
+			`Re-run with --limit ${limit * 2} (or narrow via filters like --name, --state, --team) to verify.`,
+	);
+}
+
 export function outputWarning(message: string | string[]): void {
 	const messages = Array.isArray(message) ? message : [message];
 	for (const msg of messages) {
