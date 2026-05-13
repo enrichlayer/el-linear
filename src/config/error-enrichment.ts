@@ -347,6 +347,69 @@ export async function enrichValidationErrors(
 	}
 }
 
+/**
+ * Pattern for the `Project "X" not found` error shape thrown by
+ * `LinearService.resolveProjectId` (both name and slug-id paths) and the
+ * batched issues-service project resolver. Matches the message body and
+ * captures the user's original input so the synthesized enrichment error
+ * can reference it.
+ */
+const PROJECT_NOT_FOUND_PATTERN = /Project "([^"]+)" not found/;
+
+/**
+ * Enrich a project resolver failure ({@link PROJECT_NOT_FOUND_PATTERN})
+ * with the same team-scoped suggestions that {@link enrichValidationErrors}
+ * appends to `Missing --project` validation errors. Returns the original
+ * message unchanged if the error doesn't match or `--team` is unknown.
+ *
+ * The validation path covers "user forgot `--project`"; this path covers
+ * "user pasted a URL/slug/name that didn't resolve" — same recovery hints
+ * apply in both cases. Synthesizes a `Missing --project: …` error string
+ * so the existing classifier and suggestion code can be reused without
+ * special-casing the resolver shape.
+ *
+ * Best-effort like `enrichValidationErrors`: any failure (network, unknown
+ * team, GraphQL error) returns the original message unchanged. The caller
+ * is expected to rethrow with the returned message.
+ */
+export async function enrichProjectResolverError(
+	originalMessage: string,
+	options: EnrichOptions,
+	services: { graphQLService: GraphQLService; linearService: LinearService },
+): Promise<string> {
+	const match = originalMessage.match(PROJECT_NOT_FOUND_PATTERN);
+	if (!match || !options.team) {
+		return originalMessage;
+	}
+	const projectInput = match[1];
+
+	const synthetic: ValidationResult = {
+		errors: [
+			`Missing --project: "${projectInput}" did not resolve to any project on team ${options.team}.`,
+		],
+		warnings: [],
+		normalizedLabels: null,
+	};
+
+	try {
+		await enrichValidationErrors(synthetic, options, services);
+	} catch {
+		return originalMessage;
+	}
+
+	// If enrichment didn't actually append a suggestions block, fall back
+	// to the original — better a clean error than a stuttering one with
+	// just the synthetic preamble and no concrete options.
+	if (
+		synthetic.errors.length === 0 ||
+		!synthetic.errors[0].includes("Suggestions")
+	) {
+		return originalMessage;
+	}
+
+	return synthetic.errors[0];
+}
+
 interface RetryContext {
 	classifications: ReturnType<typeof classifyError>[];
 	inferred: { verb: string; type: string } | null;

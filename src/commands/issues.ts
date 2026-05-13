@@ -1,7 +1,10 @@
 import { execFileSync } from "node:child_process";
 import type { Command, OptionValues } from "commander";
 import { loadConfig } from "../config/config.js";
-import { enrichValidationErrors } from "../config/error-enrichment.js";
+import {
+	enrichProjectResolverError,
+	enrichValidationErrors,
+} from "../config/error-enrichment.js";
 import {
 	enforceValidation,
 	validateIssueCreation,
@@ -35,9 +38,15 @@ import type {
 	SearchIssueArgs,
 	UpdateIssueArgs,
 } from "../utils/graphql-issues-service.js";
-import { createGraphQLService } from "../utils/graphql-service.js";
+import {
+	createGraphQLService,
+	type GraphQLService,
+} from "../utils/graphql-service.js";
 import { createIssuesService } from "../utils/issues-service-bootstrap.js";
-import { createLinearService } from "../utils/linear-service.js";
+import {
+	createLinearService,
+	type LinearService,
+} from "../utils/linear-service.js";
 import { logger } from "../utils/logger.js";
 import {
 	handleAsyncCommand,
@@ -316,6 +325,39 @@ async function handleSearchIssues(
 	outputIssues(result, options.format, options.fields, { query });
 }
 
+/**
+ * Run an `issuesService.createIssue` / `.updateIssue` call and, if it
+ * throws a `Project "<input>" not found` resolver error, enrich the
+ * message with team-scoped project suggestions before re-throwing. Same
+ * suggestion shape as the `Missing --project` validation path — agents
+ * get a concrete retry list whether the failure was "forgot to pass
+ * --project" or "passed --project but it didn't resolve".
+ *
+ * Best-effort: any other error class flows through unchanged, and any
+ * failure inside enrichment falls back to the original message.
+ */
+async function withProjectResolverEnrichment<T>(
+	fn: () => Promise<T>,
+	options: { team: string | undefined; title?: string },
+	services: { graphQLService: GraphQLService; linearService: LinearService },
+): Promise<T> {
+	try {
+		return await fn();
+	} catch (err) {
+		if (err instanceof Error && options.team) {
+			const enriched = await enrichProjectResolverError(
+				err.message,
+				{ team: options.team, title: options.title },
+				services,
+			);
+			if (enriched !== err.message) {
+				throw new Error(enriched);
+			}
+		}
+		throw err;
+	}
+}
+
 async function resolveCreateInputs(
 	title: string,
 	options: OptionValues,
@@ -545,30 +587,35 @@ async function handleCreateIssue(
 		graphQLService,
 	);
 
-	const result = await issuesService.createIssue({
-		// title is omitted when --from-template is set without an override,
-		// so Linear copies the template's title server-side.
-		...(title ? { title } : {}),
-		teamId,
-		teamInput,
-		description: prepared.description,
-		assigneeId,
-		priority,
-		projectId: options.project,
-		statusId: status,
-		labelIds: labelIds.length > 0 ? labelIds : undefined,
-		parentId: options.parentTicket,
-		milestoneId: options.projectMilestone,
-		cycleId: options.cycle,
-		subscriberIds,
-		dueDate: options.dueDate,
-		// Linear server-side template instantiation. When set,
-		// Linear copies the template's title/description/labels/priority
-		// onto the new issue; any explicit field above wins by override.
-		...(typeof options.fromTemplate === "string" && options.fromTemplate
-			? { templateId: options.fromTemplate as string }
-			: {}),
-	});
+	const result = await withProjectResolverEnrichment(
+		() =>
+			issuesService.createIssue({
+				// title is omitted when --from-template is set without an override,
+				// so Linear copies the template's title server-side.
+				...(title ? { title } : {}),
+				teamId,
+				teamInput,
+				description: prepared.description,
+				assigneeId,
+				priority,
+				projectId: options.project,
+				statusId: status,
+				labelIds: labelIds.length > 0 ? labelIds : undefined,
+				parentId: options.parentTicket,
+				milestoneId: options.projectMilestone,
+				cycleId: options.cycle,
+				subscriberIds,
+				dueDate: options.dueDate,
+				// Linear server-side template instantiation. When set,
+				// Linear copies the template's title/description/labels/priority
+				// onto the new issue; any explicit field above wins by override.
+				...(typeof options.fromTemplate === "string" && options.fromTemplate
+					? { templateId: options.fromTemplate as string }
+					: {}),
+			}),
+		{ team: options.team ?? loadConfig().defaultTeam, title },
+		{ graphQLService, linearService },
+	);
 	const relations = await createRelations(
 		result.id,
 		options,
@@ -795,9 +842,13 @@ async function handleUpdateIssue(
 		? await resolveAssignee(options.assignee, rootOpts)
 		: undefined;
 	const updateArgs = buildUpdateArgs(issueId, options, assigneeId);
-	const result = await issuesService.updateIssue(
-		updateArgs,
-		options.labelBy || "adding",
+	const result = await withProjectResolverEnrichment(
+		() => issuesService.updateIssue(updateArgs, options.labelBy || "adding"),
+		{
+			team: options.team ?? loadConfig().defaultTeam,
+			title: options.title as string | undefined,
+		},
+		{ graphQLService, linearService },
 	);
 	const autoLinked = originalDescription
 		? await maybeAutoLink({

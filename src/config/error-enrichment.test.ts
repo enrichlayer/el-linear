@@ -38,7 +38,9 @@ vi.mock("../utils/output.js", () => ({
 	outputWarning: vi.fn(),
 }));
 
-const { enrichValidationErrors } = await import("./error-enrichment.js");
+const { enrichProjectResolverError, enrichValidationErrors } = await import(
+	"./error-enrichment.js"
+);
 const { validateIssueCreation } = await import("./issue-validation.js");
 
 // --- Helpers ---
@@ -530,5 +532,113 @@ describe("enrichValidationErrors", () => {
 		);
 
 		expect(result.errors[0]).not.toContain("Retry with:");
+	});
+});
+
+describe("enrichProjectResolverError", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it('enriches a `Project "X" not found` error with project suggestions', async () => {
+		const services = makeServices({
+			id: "team-dev-uuid",
+			key: "DEV",
+			name: "Dev",
+			projects: { nodes: projectsPayload(["Customer API", "Billing"]) },
+		});
+
+		const enriched = await enrichProjectResolverError(
+			'Project "tools-and-standardization-deadbeefcafe" not found.',
+			{ team: "DEV" },
+			asServices(services),
+		);
+
+		expect(enriched).toContain("Suggestions");
+		expect(enriched).toContain('--project "Customer API"');
+		expect(enriched).toContain("tools-and-standardization-deadbeefcafe");
+		expect(enriched).toContain("team DEV");
+	});
+
+	it("works for URL-shaped inputs (captures the URL inside the quotes)", async () => {
+		const services = makeServices({
+			id: "team-dev-uuid",
+			key: "DEV",
+			name: "Dev",
+			projects: { nodes: projectsPayload(["Customer API"]) },
+		});
+
+		const url =
+			"https://linear.app/verticalint/project/missing-aaaaaaaaaaaa/overview";
+		const enriched = await enrichProjectResolverError(
+			`Project "${url}" not found.`,
+			{ team: "DEV" },
+			asServices(services),
+		);
+
+		expect(enriched).toContain(url);
+		expect(enriched).toContain('--project "Customer API"');
+	});
+
+	it("returns the original message unchanged when no team is provided", async () => {
+		const services = makeServices({ id: "x", key: "X", name: "X" });
+		const original = 'Project "Foo" not found.';
+		const enriched = await enrichProjectResolverError(
+			original,
+			{ team: undefined },
+			asServices(services),
+		);
+		expect(enriched).toBe(original);
+		expect(services.graphQLService.rawRequest).not.toHaveBeenCalled();
+	});
+
+	it("returns the original message when the error doesn't match the pattern", async () => {
+		const services = makeServices({ id: "x", key: "X", name: "X" });
+		const original = "Some other unrelated error.";
+		const enriched = await enrichProjectResolverError(
+			original,
+			{ team: "DEV" },
+			asServices(services),
+		);
+		expect(enriched).toBe(original);
+		expect(services.graphQLService.rawRequest).not.toHaveBeenCalled();
+	});
+
+	it("reports 'no active projects' when the team has no projects", async () => {
+		const services = makeServices({
+			id: "team-dev-uuid",
+			key: "DEV",
+			name: "Dev",
+			projects: { nodes: [] },
+		});
+		const enriched = await enrichProjectResolverError(
+			'Project "Foo" not found.',
+			{ team: "DEV" },
+			asServices(services),
+		);
+		// Better to say "the team has nothing to offer" than to throw away the
+		// resolved team context — the agent now knows their input had no chance
+		// of matching anything on team DEV and can ask the user rather than
+		// re-trying with a longer --limit.
+		expect(enriched).toContain("no active projects found on this team");
+		expect(enriched).toContain("team DEV");
+	});
+
+	it("falls back to the original message when enrichment throws", async () => {
+		const services = {
+			graphQLService: {
+				rawRequest: vi.fn().mockRejectedValue(new Error("network down")),
+			},
+			linearService: {
+				resolveTeamId: vi.fn().mockResolvedValue("team-dev-uuid"),
+			},
+		};
+		const original = 'Project "Foo" not found.';
+		const enriched = await enrichProjectResolverError(
+			original,
+			{ team: "DEV" },
+			asServices(services),
+		);
+		expect(enriched).toBe(original);
 	});
 });
