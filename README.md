@@ -250,6 +250,57 @@ network call (offline use, perf, `--no-validate`), provide it via any of:
 
 When any of these is set, no GraphQL request is made.
 
+### Shared team config
+
+Teams can check a shared config file into a repository (e.g. a Tools repo) and
+have every member load it automatically. The team file holds things that are the
+same for everyone — member aliases, label maps, term rules, validation settings —
+while personal config holds individual preferences and tokens.
+
+**Merge order (lowest → highest priority):**
+
+1. Built-in defaults
+2. Team config file
+3. Personal `~/.config/el-linear/config.json` (or profile config)
+
+Personal config wins on scalar conflicts. Arrays (`terms`, `defaultLabels`) are
+**concatenated** — personal entries are appended to team entries, so you extend
+the team rules rather than replace them.
+
+**Set the team config path** via personal config:
+
+```json
+{ "teamConfigPath": "/path/to/tools-repo/.el-linear/config.json" }
+```
+
+Or override per-invocation with the `EL_LINEAR_TEAM_CONFIG` env var (highest priority):
+
+```bash
+EL_LINEAR_TEAM_CONFIG=/path/to/tools-repo/.el-linear/config.json el-linear issues create ...
+```
+
+**The team config file** is a standard `config.json` fragment — any `ElLinearConfig`
+field is valid except `teamConfigPath` itself. Keep it free of tokens and personal
+preferences; those stay in personal config. Example team file:
+
+```json
+{
+  "members": {
+    "aliases": { "alice": "Alice Anderson", "bob": "Bob Barnes" },
+    "uuids":   { "Alice Anderson": "<uuid>",  "Bob Barnes": "<uuid>" }
+  },
+  "teams": { "ENG": "<uuid>", "OPS": "<uuid>" },
+  "labels": { "workspace": { "claude": "<uuid>" } },
+  "terms": [
+    { "canonical": "Enrich Layer", "reject": ["EnrichLayer", "enrichlayer"] }
+  ],
+  "validation": { "enabled": true }
+}
+```
+
+Run `el-linear config show` to see the resolved config and confirm which team
+config path is active (`teamConfig` field in the output).
+
 ## Term enforcement (with brand-promotion examples)
 
 The `terms` rules let you keep a list of canonical names and the misspellings
