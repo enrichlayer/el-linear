@@ -271,20 +271,29 @@ interface BatchResolveIssueForUpdate {
 
 export interface BatchResolveForCreateResponse {
 	teams: { nodes: { id: string; key: string; name: string }[] };
-	projects: { nodes: BatchResolveProjectNode[] };
-	milestones: { nodes: BatchResolveProjectMilestoneRef[] };
+	// `projectsByName` / `projectsById` / `milestones` are `@include`-gated,
+	// so each is absent unless its input was provided. The service folds the
+	// project aliases into a single `projects` field on `BatchResolveResult`.
+	projectsByName?: { nodes: BatchResolveProjectNode[] };
+	projectsById?: { nodes: BatchResolveProjectNode[] };
+	milestones?: { nodes: BatchResolveProjectMilestoneRef[] };
 	parentIssues: { nodes: { id: string; identifier: string }[] };
 }
 
 export interface BatchResolveForSearchResponse {
 	teams: { nodes: { id: string; key: string; name: string }[] };
-	projects: { nodes: BatchResolveProjectNode[] };
+	// `@include`-gated — absent unless a project name was provided.
+	projects?: { nodes: BatchResolveProjectNode[] };
 	users: { nodes: { id: string; name: string; email: string }[] };
 }
 
 export interface BatchResolveForUpdateResponse {
-	projects: { nodes: BatchResolveProjectNode[] };
-	milestones: { nodes: BatchResolveProjectMilestoneRef[] };
+	// `projectsByName` / `projectsById` / `milestones` are `@include`-gated,
+	// so each is absent unless its input was provided. The service folds the
+	// project aliases into a single `projects` field on `BatchResolveResult`.
+	projectsByName?: { nodes: BatchResolveProjectNode[] };
+	projectsById?: { nodes: BatchResolveProjectNode[] };
+	milestones?: { nodes: BatchResolveProjectMilestoneRef[] };
 	issues: { nodes: BatchResolveIssueForUpdate[] };
 }
 

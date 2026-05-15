@@ -209,11 +209,18 @@ function resolveLabel(name: string, teamKey?: string): string | null {
 
 /**
  * Resolve labels for a team, returning UUIDs for known labels.
- * Unknown labels are returned as-is for API resolution.
+ *
+ * Labels that don't map to a config UUID are returned as their canonical
+ * (alias-expanded) name — e.g. `docs` becomes `documentation` — so the
+ * API-side resolver matches the right label rather than auto-creating one
+ * under the abbreviation. Pass no `teamKey` to defer team-scoped labels to
+ * API resolution: a team-scoped config UUID is only valid for that team,
+ * so resolving it here is wrong whenever the team is decided later (e.g.
+ * the create flow auto-switches the team to match the project).
  */
 export function resolveLabels(names: string[], teamKey?: string): string[] {
 	return names.map((name) => {
 		const resolved = resolveLabel(name, teamKey);
-		return resolved || name;
+		return resolved || LABEL_ALIASES[name.toLowerCase()] || name;
 	});
 }

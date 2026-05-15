@@ -183,4 +183,19 @@ describe("resolveLabels", () => {
 		// Unknown labels pass through as names
 		expect(resolveLabels(["nonexistent"], "DEV")).toEqual(["nonexistent"]);
 	});
+
+	it("expands an alias to its canonical name when it has no config UUID", () => {
+		// `docs` is a known alias for `documentation`, but neither is a config
+		// label here — the canonical name is emitted so API resolution finds
+		// the real label instead of auto-creating one named "docs".
+		expect(resolveLabels(["docs"])).toEqual(["documentation"]);
+		expect(resolveLabels(["fe"])).toEqual(["frontend"]);
+	});
+
+	it("defers team-scoped labels to API resolution when no team is given", () => {
+		// `tech-debt` only exists under the DEV team config. Without a team
+		// key it must pass through as a name so the API resolves it against
+		// the issue's final team — not get pinned to a stale team's UUID.
+		expect(resolveLabels(["tech-debt"])).toEqual(["tech-debt"]);
+	});
 });

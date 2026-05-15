@@ -461,7 +461,11 @@ async function resolveCreateInputs(
 
 	let labelIds: string[] = [];
 	if (options.labels) {
-		labelIds = resolveLabels(splitList(options.labels), teamInput);
+		// No `teamInput`: team-scoped labels are resolved API-side against the
+		// issue's *final* team, which `createIssue` may auto-switch to match
+		// the project. Resolving a team-scoped config UUID here would pin the
+		// label to the pre-switch team and Linear would reject the mismatch.
+		labelIds = resolveLabels(splitList(options.labels));
 	}
 	if (options.claude) {
 		const claudeId = config.labels.workspace.claude;

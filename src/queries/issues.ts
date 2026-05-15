@@ -48,11 +48,21 @@ export const FILTERED_SEARCH_ISSUES_QUERY = `
   }
 `;
 
+/**
+ * Batch-resolves a search's team/project/assignee/delegate filter inputs.
+ *
+ * The `projects` block is `@include`-gated: Linear treats a null filter
+ * comparator as "no filter", so an always-on block with an unset
+ * `$projectName` would fetch an arbitrary project. (Search resolves a UUID
+ * `--project` directly without consulting this block, so only the
+ * name-resolution arm is needed here.)
+ */
 export const BATCH_RESOLVE_FOR_SEARCH_QUERY = `
   query BatchResolveForSearch(
     $teamKey: String
     $teamName: String
     $projectName: String
+    $hasProjectName: Boolean = false
     $assigneeEmail: String
   ) {
     teams(
@@ -71,7 +81,10 @@ export const BATCH_RESOLVE_FOR_SEARCH_QUERY = `
       }
     }
 
-    projects(filter: { name: { eqIgnoreCase: $projectName } }, first: 1) {
+    projects(
+      filter: { name: { eqIgnoreCase: $projectName } }
+      first: 1
+    ) @include(if: $hasProjectName) {
       nodes {
         id
         name
@@ -112,14 +125,46 @@ export const GET_ISSUE_BY_IDENTIFIER_QUERY = `
   }
 `;
 
+/**
+ * Batch-resolves an update's project/milestone/issue inputs.
+ *
+ * The project and milestone blocks are `@include`-gated for the same
+ * reason as `BATCH_RESOLVE_FOR_CREATE_QUERY`: a null filter comparator is
+ * a no-op that returns an arbitrary record. A UUID `--project` is resolved
+ * by `id` (`projectsById`) so its milestones are still fetched for
+ * `--project-milestone` name resolution; a name uses `projectsByName`.
+ */
 export const BATCH_RESOLVE_FOR_UPDATE_QUERY = `
   query BatchResolveForUpdate(
     $projectName: String
+    $projectId: ID
+    $hasProjectName: Boolean = false
+    $hasProjectId: Boolean = false
     $teamKey: String
     $issueNumber: Float
     $milestoneName: String
+    $hasMilestoneName: Boolean = false
   ) {
-    projects(filter: { name: { eqIgnoreCase: $projectName } }, first: 1) {
+    projectsByName: projects(
+      filter: { name: { eqIgnoreCase: $projectName } }
+      first: 1
+    ) @include(if: $hasProjectName) {
+      nodes {
+        id
+        name
+        projectMilestones {
+          nodes {
+            id
+            name
+          }
+        }
+      }
+    }
+
+    projectsById: projects(
+      filter: { id: { eq: $projectId } }
+      first: 1
+    ) @include(if: $hasProjectId) {
       nodes {
         id
         name
@@ -135,7 +180,7 @@ export const BATCH_RESOLVE_FOR_UPDATE_QUERY = `
     milestones: projectMilestones(
       filter: { name: { eq: $milestoneName } }
       first: 1
-    ) {
+    ) @include(if: $hasMilestoneName) {
       nodes {
         id
         name
@@ -224,14 +269,37 @@ export const DELETE_ISSUE_MUTATION = `
   }
 `;
 
+/**
+ * Batch-resolves a create's team/project/milestone/parent inputs in one
+ * round-trip.
+ *
+ * The project and milestone blocks are gated behind `@include` directives
+ * rather than left always-on. Linear treats a null filter comparator
+ * (`{ name: { eqIgnoreCase: null } }`) as "no filter" — so an always-on
+ * `projects` block with an unset `$projectName` returns an *arbitrary*
+ * project, which the caller would then mistake for the user's project
+ * (e.g. auto-switching the team to that unrelated project's team). The
+ * `has*` booleans ensure a block is fetched only when its input exists.
+ *
+ * A UUID `--project` is resolved by `id` (`projectsById`) so its team
+ * associations are still fetched for team-project validation; a name is
+ * resolved by `name` (`projectsByName`). The two are mutually exclusive,
+ * but GraphQL forbids two same-aliased fields with differing arguments,
+ * so they carry distinct aliases and the service folds whichever ran
+ * into `resolveResult.projects`.
+ */
 export const BATCH_RESOLVE_FOR_CREATE_QUERY = `
   query BatchResolveForCreate(
     $teamKey: String
     $teamName: String
     $projectName: String
+    $projectId: ID
+    $hasProjectName: Boolean = false
+    $hasProjectId: Boolean = false
     $parentTeamKey: String
     $parentIssueNumber: Float
     $milestoneName: String
+    $hasMilestoneName: Boolean = false
   ) {
     teams(
       filter: {
@@ -249,7 +317,26 @@ export const BATCH_RESOLVE_FOR_CREATE_QUERY = `
       }
     }
 
-    projects(filter: { name: { eqIgnoreCase: $projectName } }, first: 1) {
+    projectsByName: projects(
+      filter: { name: { eqIgnoreCase: $projectName } }
+      first: 1
+    ) @include(if: $hasProjectName) {
+      nodes {
+        id
+        name
+        teams {
+          nodes { id key }
+        }
+        projectMilestones {
+          nodes { id name }
+        }
+      }
+    }
+
+    projectsById: projects(
+      filter: { id: { eq: $projectId } }
+      first: 1
+    ) @include(if: $hasProjectId) {
       nodes {
         id
         name
@@ -265,7 +352,7 @@ export const BATCH_RESOLVE_FOR_CREATE_QUERY = `
     milestones: projectMilestones(
       filter: { name: { eq: $milestoneName } }
       first: 1
-    ) {
+    ) @include(if: $hasMilestoneName) {
       nodes {
         id
         name

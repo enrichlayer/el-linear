@@ -320,4 +320,247 @@ describe("GraphQLIssuesService", () => {
 			expect(result.summary).toBeUndefined();
 		});
 	});
+
+	describe("createIssue project/team resolution", () => {
+		const PROJECT_UUID = "11111111-1111-4111-8111-111111111111";
+		const issueNode = {
+			id: "issue-1",
+			identifier: "PYT-1",
+			title: "Test",
+			priority: 0,
+			labels: { nodes: [] },
+			createdAt: "2026-01-01T00:00:00.000Z",
+			updatedAt: "2026-01-01T00:00:00.000Z",
+		};
+
+		function setupCreate(batchResult: Record<string, unknown>) {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			vi.spyOn(linearService, "normalizeProjectInput").mockResolvedValue(
+				PROJECT_UUID,
+			);
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockImplementation(async (query: string) => {
+					if (query.includes("BatchResolveForCreate")) {
+						return batchResult;
+					}
+					if (query.includes("issueCreate")) {
+						return {
+							issueCreate: { success: true, issue: issueNode, lastSyncId: 1 },
+						};
+					}
+					throw new Error(`unexpected query: ${query}`);
+				});
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+			return { service, rawRequest };
+		}
+
+		function batchVars(rawRequest: ReturnType<typeof vi.spyOn>) {
+			const call = rawRequest.mock.calls.find(([q]: unknown[]) =>
+				String(q).includes("BatchResolveForCreate"),
+			);
+			return call?.[1] as Record<string, unknown>;
+		}
+
+		function createInputTeamId(rawRequest: ReturnType<typeof vi.spyOn>) {
+			const call = rawRequest.mock.calls.find(([q]: unknown[]) =>
+				String(q).includes("issueCreate"),
+			);
+			return (call?.[1] as { input: { teamId?: string } }).input.teamId;
+		}
+
+		it("resolves a UUID --project by id, not a null name filter", async () => {
+			const { service, rawRequest } = setupCreate({
+				teams: { nodes: [{ id: "team-all", key: "ALL", name: "All" }] },
+				projectsById: {
+					nodes: [
+						{
+							id: PROJECT_UUID,
+							name: "SOPs",
+							teams: { nodes: [{ id: "team-all", key: "ALL" }] },
+						},
+					],
+				},
+				parentIssues: { nodes: [] },
+			});
+
+			await service.createIssue({
+				title: "Test",
+				teamId: "ALL",
+				teamInput: "ALL",
+				projectId: PROJECT_UUID,
+			});
+
+			const vars = batchVars(rawRequest);
+			expect(vars).toMatchObject({
+				projectId: PROJECT_UUID,
+				hasProjectId: true,
+			});
+			expect(vars).not.toHaveProperty("projectName");
+			expect(vars).not.toHaveProperty("hasProjectName");
+		});
+
+		it("keeps the requested team when a UUID --project is associated with it", async () => {
+			const { service, rawRequest } = setupCreate({
+				teams: { nodes: [{ id: "team-all", key: "ALL", name: "All" }] },
+				projectsById: {
+					nodes: [
+						{
+							id: PROJECT_UUID,
+							name: "SOPs",
+							teams: { nodes: [{ id: "team-all", key: "ALL" }] },
+						},
+					],
+				},
+				parentIssues: { nodes: [] },
+			});
+
+			await service.createIssue({
+				title: "Test",
+				teamId: "ALL",
+				teamInput: "ALL",
+				projectId: PROJECT_UUID,
+			});
+
+			// No false auto-switch: the project IS on ALL.
+			expect(createInputTeamId(rawRequest)).toBe("team-all");
+		});
+
+		it("auto-switches the team when a UUID --project belongs to exactly one other team", async () => {
+			const { service, rawRequest } = setupCreate({
+				teams: { nodes: [{ id: "team-all", key: "ALL", name: "All" }] },
+				projectsById: {
+					nodes: [
+						{
+							id: PROJECT_UUID,
+							name: "Build IP ban system",
+							teams: { nodes: [{ id: "team-pyt", key: "PYT" }] },
+						},
+					],
+				},
+				parentIssues: { nodes: [] },
+			});
+
+			await service.createIssue({
+				title: "Test",
+				teamId: "ALL",
+				teamInput: "ALL",
+				projectId: PROJECT_UUID,
+			});
+
+			// The project resolved by id carries its real team, so the switch
+			// targets the project's actual team rather than an arbitrary one.
+			expect(createInputTeamId(rawRequest)).toBe("team-pyt");
+		});
+	});
+
+	describe("updateIssue project/milestone resolution", () => {
+		const ISSUE_UUID = "22222222-2222-4222-8222-222222222222";
+		const PROJECT_UUID = "33333333-3333-4333-8333-333333333333";
+		const issueNode = {
+			id: ISSUE_UUID,
+			identifier: "PYT-1",
+			title: "Test",
+			priority: 0,
+			labels: { nodes: [] },
+			createdAt: "2026-01-01T00:00:00.000Z",
+			updatedAt: "2026-01-01T00:00:00.000Z",
+		};
+
+		function setupUpdate(batchResult: Record<string, unknown>) {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			vi.spyOn(linearService, "normalizeProjectInput").mockResolvedValue(
+				PROJECT_UUID,
+			);
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockImplementation(async (query: string) => {
+					if (query.includes("BatchResolveForUpdate")) {
+						return batchResult;
+					}
+					if (query.includes("issueUpdate")) {
+						return {
+							issueUpdate: { success: true, issue: issueNode, lastSyncId: 1 },
+						};
+					}
+					throw new Error(`unexpected query: ${query}`);
+				});
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+			return { service, rawRequest };
+		}
+
+		function batchVars(rawRequest: ReturnType<typeof vi.spyOn>) {
+			const call = rawRequest.mock.calls.find(([q]: unknown[]) =>
+				String(q).includes("BatchResolveForUpdate"),
+			);
+			return call?.[1] as Record<string, unknown>;
+		}
+
+		function updateInput(rawRequest: ReturnType<typeof vi.spyOn>) {
+			const call = rawRequest.mock.calls.find(([q]: unknown[]) =>
+				String(q).includes("issueUpdate"),
+			);
+			return (call?.[1] as { input: Record<string, unknown> }).input;
+		}
+
+		it("resolves a UUID --project by id, not a null name filter", async () => {
+			const { service, rawRequest } = setupUpdate({
+				projectsById: {
+					nodes: [
+						{
+							id: PROJECT_UUID,
+							name: "SOPs",
+							projectMilestones: { nodes: [] },
+						},
+					],
+				},
+				issues: { nodes: [] },
+			});
+
+			await service.updateIssue({ id: ISSUE_UUID, projectId: PROJECT_UUID });
+
+			const vars = batchVars(rawRequest);
+			expect(vars).toMatchObject({
+				projectId: PROJECT_UUID,
+				hasProjectId: true,
+			});
+			expect(vars).not.toHaveProperty("projectName");
+		});
+
+		it("resolves --project-milestone against the UUID project's own milestones", async () => {
+			const { service, rawRequest } = setupUpdate({
+				projectsById: {
+					nodes: [
+						{
+							id: PROJECT_UUID,
+							name: "SOPs",
+							projectMilestones: {
+								nodes: [
+									{
+										id: "de519000-0000-4000-8000-000000000005",
+										name: "Phase 1",
+									},
+								],
+							},
+						},
+					],
+				},
+				milestones: { nodes: [] },
+				issues: { nodes: [] },
+			});
+
+			await service.updateIssue({
+				id: ISSUE_UUID,
+				projectId: PROJECT_UUID,
+				milestoneId: "Phase 1",
+			});
+
+			expect(batchVars(rawRequest)).toMatchObject({ hasMilestoneName: true });
+			expect(updateInput(rawRequest).projectMilestoneId).toBe(
+				"de519000-0000-4000-8000-000000000005",
+			);
+		});
+	});
 });

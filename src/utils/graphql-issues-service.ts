@@ -443,9 +443,12 @@ export class GraphQLIssuesService {
 						labelQuery.variables,
 					),
 				]);
-				resolveResult = { ...batch, labels: labels.labels };
+				resolveResult = {
+					...this.foldCreateBatchResult(batch),
+					labels: labels.labels,
+				};
 			} else {
-				resolveResult = await batchPromise;
+				resolveResult = this.foldCreateBatchResult(await batchPromise);
 			}
 		}
 
@@ -467,6 +470,38 @@ export class GraphQLIssuesService {
 			resolved,
 		);
 		return this.executeCreateMutation(createInput);
+	}
+
+	/**
+	 * Folds the `@include`-gated `projectsByName` / `projectsById` aliases
+	 * from a create batch response into the single `projects` field the
+	 * field-resolution helpers expect. At most one project alias is ever
+	 * present, since a `--project` input is either a name or a UUID.
+	 */
+	private foldCreateBatchResult(
+		batch: BatchResolveForCreateResponse,
+	): BatchResolveResult {
+		return {
+			teams: batch.teams,
+			projects: batch.projectsByName ?? batch.projectsById,
+			milestones: batch.milestones,
+			parentIssues: batch.parentIssues,
+		};
+	}
+
+	/**
+	 * Folds the `@include`-gated `projectsByName` / `projectsById` aliases
+	 * from an update batch response into the single `projects` field the
+	 * field-resolution helpers expect. See `foldCreateBatchResult`.
+	 */
+	private foldUpdateBatchResult(
+		batch: BatchResolveForUpdateResponse,
+	): BatchResolveResult {
+		return {
+			projects: batch.projectsByName ?? batch.projectsById,
+			milestones: batch.milestones,
+			issues: batch.issues,
+		};
 	}
 
 	private async resolveCreateFields(
@@ -568,6 +603,7 @@ export class GraphQLIssuesService {
 			args.project?.kind === "id" ? args.project.id : undefined;
 		if (projectIdArg && !isUuid(projectIdArg)) {
 			resolveVariables.projectName = projectIdArg;
+			resolveVariables.hasProjectName = true;
 		}
 		if (
 			args.assigneeId &&
@@ -1267,12 +1303,23 @@ export class GraphQLIssuesService {
 			}
 		}
 
-		if (args.projectId && !isUuid(args.projectId)) {
-			resolveVariables.projectName = args.projectId;
+		if (args.projectId) {
+			// A UUID resolves by `id` so the project's milestones are still
+			// fetched for `--project-milestone` name resolution; a name
+			// resolves by `name`. The `has*` flags gate the `@include`d
+			// blocks so an unset input never triggers a null no-op filter.
+			if (isUuid(args.projectId)) {
+				resolveVariables.projectId = args.projectId;
+				resolveVariables.hasProjectId = true;
+			} else {
+				resolveVariables.projectName = args.projectId;
+				resolveVariables.hasProjectName = true;
+			}
 		}
 
 		if (args.milestoneId && !isUuid(args.milestoneId)) {
 			resolveVariables.milestoneName = args.milestoneId;
+			resolveVariables.hasMilestoneName = true;
 		}
 
 		const { __labelNames, ...updateQueryVars } = resolveVariables;
@@ -1293,9 +1340,12 @@ export class GraphQLIssuesService {
 					labelQuery.variables,
 				),
 			]);
-			resolveResult = { ...batch, labels: labels.labels };
+			resolveResult = {
+				...this.foldUpdateBatchResult(batch),
+				labels: labels.labels,
+			};
 		} else {
-			resolveResult = await batchPromise;
+			resolveResult = this.foldUpdateBatchResult(await batchPromise);
 		}
 
 		if (!isUuid(args.id)) {
@@ -1374,11 +1424,22 @@ export class GraphQLIssuesService {
 				this.buildResolveVariablesForTeam(args.teamId),
 			);
 		}
-		if (args.projectId && !isUuid(args.projectId)) {
-			resolveVariables.projectName = args.projectId;
+		if (args.projectId) {
+			// A UUID is resolved by `id` so the project's team associations
+			// are still fetched for team-project validation; a name is
+			// resolved by `name`. The `has*` flags gate the `@include`d
+			// blocks so an unset input never triggers a null no-op filter.
+			if (isUuid(args.projectId)) {
+				resolveVariables.projectId = args.projectId;
+				resolveVariables.hasProjectId = true;
+			} else {
+				resolveVariables.projectName = args.projectId;
+				resolveVariables.hasProjectName = true;
+			}
 		}
 		if (args.milestoneId && !isUuid(args.milestoneId)) {
 			resolveVariables.milestoneName = args.milestoneId;
+			resolveVariables.hasMilestoneName = true;
 		}
 		if (args.labelIds && args.labelIds.length > 0) {
 			const nonUuidLabels = args.labelIds.filter((id) => !isUuid(id));

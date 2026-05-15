@@ -310,7 +310,9 @@ describe("issues commands", () => {
 				...requiredArgs,
 			]);
 
-			expect(mockResolveLabels).toHaveBeenCalledWith(["bug", "feature"], "DEV");
+			// No team arg: team-scoped labels are resolved API-side against the
+			// issue's final (possibly auto-switched) team, not the --team input.
+			expect(mockResolveLabels).toHaveBeenCalledWith(["bug", "feature"]);
 			expect(mockCreateIssue).toHaveBeenCalledWith(
 				expect.objectContaining({
 					labelIds: ["label-uuid-1", "label-uuid-2"],
