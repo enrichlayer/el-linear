@@ -68,6 +68,7 @@ export function setupProfileCommands(program: Command): void {
 				data: {
 					name: active.name ?? "<default>",
 					configPath: active.configPath,
+					localConfigPath: active.localConfigPath,
 					tokenPath: active.tokenPath,
 				},
 			});

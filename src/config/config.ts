@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { outputWarning } from "../utils/output.js";
 import {
 	CONFIG_PATH,
+	LOCAL_CONFIG_PATH,
 	type ProfilePaths,
 	resolveActiveProfile,
 } from "./paths.js";
@@ -73,12 +74,17 @@ export interface ElLinearConfig {
 	 * Default assignee identifier (alias / display name / email / UUID — same
 	 * shapes resolveAssignee accepts) for `issues create`. Applied when
 	 * `--assignee` is not passed. Pass `--no-assignee` to override at one site.
+	 *
+	 * Prefer setting this in `local.json` instead of `config.json` so it stays
+	 * out of shared team config.
 	 */
 	defaultAssignee?: string;
 	/**
 	 * Default priority for `issues create` / `issues update`. Accepts the same
 	 * keywords as the --priority flag: `none|urgent|high|medium|normal|low`
 	 * or `0`–`4`. Applied when `--priority` is not passed.
+	 *
+	 * Prefer setting this in `local.json` instead of `config.json`.
 	 */
 	defaultPriority?: string;
 	/**
@@ -86,6 +92,8 @@ export interface ElLinearConfig {
 	 * and `projects list`. Defaults to 3600 (1 hour) when omitted. A value of
 	 * `0` disables the cache entirely. Override per-invocation with
 	 * `--no-cache`.
+	 *
+	 * Prefer setting this in `local.json` instead of `config.json`.
 	 */
 	cacheTTLSeconds?: number;
 	/**
@@ -108,6 +116,34 @@ export interface ElLinearConfig {
  * excludes `teamConfigPath` itself to prevent circular references.
  */
 export type TeamConfig = Omit<ElLinearConfig, "teamConfigPath">;
+
+/**
+ * User-local overrides that live in `~/.config/el-linear/local.json` (or the
+ * per-profile equivalent). These are applied on top of the merged team+personal
+ * config, so every field here takes the highest precedence.
+ *
+ * Use `local.json` for anything that is personal rather than team-wide:
+ * your own email, personal default priority, cache preferences. Never commit
+ * `local.json` to a shared repo — it is `.gitignore`-worthy by nature.
+ *
+ * Merge order (lowest → highest priority):
+ *   defaults → team config file → personal config.json → local.json
+ */
+export interface ElLinearLocalConfig {
+	/**
+	 * Your Linear account email. Used as the default `--assignee` when creating
+	 * issues. Takes precedence over `config.json`'s `defaultAssignee`.
+	 *
+	 * Example: "ytspar@gmail.com"
+	 */
+	assigneeEmail?: string;
+	/** Same semantics as `ElLinearConfig.defaultAssignee`, but local-wins. */
+	defaultAssignee?: string;
+	/** Same semantics as `ElLinearConfig.defaultPriority`, but local-wins. */
+	defaultPriority?: string;
+	/** Same semantics as `ElLinearConfig.cacheTTLSeconds`, but local-wins. */
+	cacheTTLSeconds?: number;
+}
 
 const DEFAULT_CONFIG: ElLinearConfig = {
 	defaultTeam: "",
@@ -140,19 +176,25 @@ const DEFAULT_CONFIG: ElLinearConfig = {
 //   On subsequent calls the cache hit lets us skip reading personal config and
 //   go straight to the merged-config cache.
 //
-// Level 2 — merged result:
+// Level 2 — merged result (team + personal):
 //   Key: `"${profileKey}::${teamConfigPath}"`
-//   Value: the fully merged ElLinearConfig.
+//   Value: the fully merged ElLinearConfig (before local.json overlay).
+//
+// Level 3 — local config:
+//   Key: profile name (null for legacy single-file layout).
+//   Value: the parsed ElLinearLocalConfig from local.json.
 //
 // ALL-935 deferred fix note: profile switching mid-process is covered because
-// the profile name is part of both cache keys.
+// the profile name is part of all cache keys.
 const cachedTeamConfigPath = new Map<string, string | undefined>();
 const cachedConfig = new Map<string, ElLinearConfig>();
+const cachedLocalConfigByProfile = new Map<string | null, ElLinearLocalConfig>();
 
-/** Test seam — resets both caches between test cases. */
+/** Test seam — resets all caches between test cases. */
 export function _resetConfigCacheForTests(): void {
 	cachedTeamConfigPath.clear();
 	cachedConfig.clear();
+	cachedLocalConfigByProfile.clear();
 }
 
 export function loadConfig(): ElLinearConfig {
@@ -183,7 +225,10 @@ export function loadConfig(): ElLinearConfig {
 
 	const cacheKey = `${profileKey}::${teamConfigPath ?? ""}`;
 	const cached = cachedConfig.get(cacheKey);
-	if (cached) return cached;
+	if (cached) {
+		// Apply local config on top of cached merged result.
+		return applyLocalConfig(cached, loadLocalConfig());
+	}
 
 	// Cache miss — do the full merge. Reuse personalRaw if we already read it.
 	if (!personalRaw) {
@@ -204,13 +249,15 @@ export function loadConfig(): ElLinearConfig {
 		DEFAULT_CONFIG as unknown as Record<string, unknown>,
 		teamRaw,
 	);
-	const resolved = deepMerge(
+	const merged = deepMerge(
 		afterTeam,
 		personalRaw,
 	) as unknown as ElLinearConfig;
 
-	cachedConfig.set(cacheKey, resolved);
-	return resolved;
+	cachedConfig.set(cacheKey, merged);
+
+	// Overlay local.json on top — highest priority layer.
+	return applyLocalConfig(merged, loadLocalConfig());
 }
 
 /**
@@ -231,6 +278,61 @@ export function getActiveTeamConfigPath(): string | undefined {
 		loadConfig();
 	}
 	return cachedTeamConfigPath.get(pathCacheKey);
+}
+
+/**
+ * Load user-local overrides from `local.json`. Returns an empty object when
+ * no file exists — callers treat it as "no overrides". Errors are silent so
+ * a missing or malformed `local.json` never breaks a command.
+ */
+export function loadLocalConfig(): ElLinearLocalConfig {
+	const active = resolveActiveProfile();
+	const cacheKey = active.name;
+	const cached = cachedLocalConfigByProfile.get(cacheKey);
+	if (cached !== undefined) {
+		return cached;
+	}
+
+	const candidates = [active.localConfigPath];
+	if (active.localConfigPath !== LOCAL_CONFIG_PATH)
+		candidates.push(LOCAL_CONFIG_PATH);
+	const sourcePath = candidates.find((p) => fs.existsSync(p));
+
+	let local: ElLinearLocalConfig = {};
+	if (sourcePath) {
+		try {
+			local = JSON.parse(
+				fs.readFileSync(sourcePath, "utf8"),
+			) as ElLinearLocalConfig;
+		} catch {
+			outputWarning(`Failed to parse ${sourcePath}, ignoring local config`);
+		}
+	}
+
+	cachedLocalConfigByProfile.set(cacheKey, local);
+	return local;
+}
+
+/**
+ * Merge local config overrides onto the merged team+personal config.
+ * `assigneeEmail` maps to `defaultAssignee` as a convenience alias.
+ */
+function applyLocalConfig(
+	base: ElLinearConfig,
+	local: ElLinearLocalConfig,
+): ElLinearConfig {
+	if (Object.keys(local).length === 0) return base;
+	const result = { ...base };
+	if (local.cacheTTLSeconds !== undefined)
+		result.cacheTTLSeconds = local.cacheTTLSeconds;
+	if (local.defaultPriority !== undefined)
+		result.defaultPriority = local.defaultPriority;
+	if (local.defaultAssignee !== undefined) {
+		result.defaultAssignee = local.defaultAssignee;
+	} else if (local.assigneeEmail !== undefined) {
+		result.defaultAssignee = local.assigneeEmail;
+	}
+	return result;
 }
 
 function readRawPersonalConfig(active: ProfilePaths): Record<string, unknown> {

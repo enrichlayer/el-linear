@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	ACTIVE_PROFILE_FILE,
 	CONFIG_PATH,
+	LOCAL_CONFIG_PATH,
 	getSessionProfileOverride,
 	PROFILES_DIR,
 	type ProfileFsOps,
@@ -49,10 +50,11 @@ describe("setActiveProfileForSession + getSessionProfileOverride", () => {
 });
 
 describe("profilePaths", () => {
-	it("builds <CONFIG_DIR>/profiles/<name>/{config.json,token}", () => {
+	it("builds <CONFIG_DIR>/profiles/<name>/{config.json,local.json,token}", () => {
 		const r = profilePaths("forage");
 		expect(r.name).toBe("forage");
 		expect(r.configPath).toBe(`${PROFILES_DIR}/forage/config.json`);
+		expect(r.localConfigPath).toBe(`${PROFILES_DIR}/forage/local.json`);
 		expect(r.tokenPath).toBe(`${PROFILES_DIR}/forage/token`);
 	});
 });
@@ -66,6 +68,7 @@ describe("resolveActiveProfile — priority order", () => {
 		const r = resolveActiveProfile({}, fsOps);
 		expect(r.name).toBeNull();
 		expect(r.configPath).toBe(CONFIG_PATH);
+		expect(r.localConfigPath).toBe(LOCAL_CONFIG_PATH);
 		expect(r.tokenPath).toBe(TOKEN_PATH);
 	});
 
@@ -75,6 +78,7 @@ describe("resolveActiveProfile — priority order", () => {
 		const r = resolveActiveProfile({ EL_LINEAR_PROFILE: "envprofile" }, fsOps);
 		expect(r.name).toBe("override");
 		expect(r.configPath).toContain("/profiles/override/config.json");
+		expect(r.localConfigPath).toContain("/profiles/override/local.json");
 	});
 
 	it("uses EL_LINEAR_PROFILE env when no session override", () => {
@@ -88,6 +92,7 @@ describe("resolveActiveProfile — priority order", () => {
 		const r = resolveActiveProfile({}, fsOps);
 		expect(r.name).toBe("ondisk");
 		expect(r.configPath).toContain("/profiles/ondisk/config.json");
+		expect(r.localConfigPath).toContain("/profiles/ondisk/local.json");
 	});
 
 	it("ignores empty / whitespace marker files", () => {
