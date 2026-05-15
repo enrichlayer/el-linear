@@ -600,6 +600,10 @@ export function setupProjectsCommands(program: Command): void {
 			"filter by case-insensitive substring on project name",
 		)
 		.option(
+			"--team <key|name>",
+			"filter to projects belonging to a specific team (e.g. DEV, FE)",
+		)
+		.option(
 			"--state <names>",
 			"include only projects in these states (comma-separated: backlog, planned, started, paused, completed, canceled)",
 		)
@@ -616,6 +620,7 @@ export function setupProjectsCommands(program: Command): void {
 				const rootOpts = getRootOpts(command);
 				const limit = parsePositiveInt(options.limit, "--limit");
 				const nameFilter = options.name as string | undefined;
+				const teamFilter = options.team as string | undefined;
 				const stateFilter = resolveProjectStateFilter(options);
 				const ttl = resolveCacheTTL({
 					configTTL: loadConfig().cacheTTLSeconds,
@@ -626,12 +631,14 @@ export function setupProjectsCommands(program: Command): void {
 				const cacheKey =
 					`projects-list-limit:${limit}` +
 					`-name:${nameFilter ?? "_all"}` +
+					`-team:${teamFilter ?? "_all"}` +
 					`-states:${stateFilter.states?.join(",") ?? "_any"}` +
 					`-excl:${stateFilter.excludeStates?.join(",") ?? "_none"}`;
 				const result = await cached(cacheKey, ttl, async () => {
 					const service = await createLinearService(rootOpts);
 					return service.getProjects(limit, {
 						nameFilter,
+						teamFilter,
 						states: stateFilter.states,
 						excludeStates: stateFilter.excludeStates,
 					});
