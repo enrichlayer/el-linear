@@ -14,6 +14,7 @@ const mockUpdateIssue = vi.fn();
 const mockSearchIssues = vi.fn();
 const mockArchiveIssue = vi.fn();
 const mockDeleteIssue = vi.fn();
+const mockStartIssue = vi.fn();
 
 class MockGraphQLIssuesService {
 	getIssues = mockGetIssues;
@@ -23,6 +24,7 @@ class MockGraphQLIssuesService {
 	searchIssues = mockSearchIssues;
 	archiveIssue = mockArchiveIssue;
 	deleteIssue = mockDeleteIssue;
+	startIssue = mockStartIssue;
 }
 
 vi.mock("../utils/graphql-issues-service.js", () => ({
@@ -175,6 +177,7 @@ describe("issues commands", () => {
 			expect(mockSearchIssues).toHaveBeenCalledWith({
 				teamId: "team-id-DEV",
 				assigneeId: undefined,
+				delegateId: undefined,
 				project: undefined,
 				labelNames: undefined,
 				status: undefined,
@@ -186,6 +189,21 @@ describe("issues commands", () => {
 				data: filteredIssues,
 				meta: { count: 2, team: "DEV" },
 			});
+		});
+
+		it("filters results by --delegate", async () => {
+			mockSearchIssues.mockResolvedValue([]);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, ["issues", "list", "--delegate", "claude"]);
+
+			expect(mockResolveMember).toHaveBeenCalledWith("claude");
+			expect(mockSearchIssues).toHaveBeenCalledWith(
+				expect.objectContaining({
+					delegateId: "member-id-claude",
+				}),
+			);
 		});
 
 		it("--project filters with kind=id discriminant (DEV-4068 T4)", async () => {
@@ -289,6 +307,30 @@ describe("issues commands", () => {
 			expect(mockCreateIssue).toHaveBeenCalledWith(
 				expect.objectContaining({
 					assigneeId: "member-id-bob",
+				}),
+			);
+		});
+
+		it("passes delegateId when --delegate is provided", async () => {
+			mockCreateIssue.mockResolvedValue({ id: "new-issue-id" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Task",
+				"--team",
+				"DEV",
+				"--delegate",
+				"claude",
+				...requiredArgs,
+			]);
+
+			expect(mockResolveMember).toHaveBeenCalledWith("claude");
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({
+					delegateId: "member-id-claude",
 				}),
 			);
 		});
@@ -993,6 +1035,25 @@ describe("issues commands", () => {
 	});
 
 	describe("issues update", () => {
+		it("errors when --delegate and --clear-delegate are both used", async () => {
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+
+			await runCommand(program, [
+				"issues",
+				"update",
+				"DEV-1",
+				"--delegate",
+				"claude",
+				"--clear-delegate",
+			]);
+
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Cannot use --delegate and --clear-delegate"),
+			);
+			expect(process.exit).toHaveBeenCalledWith(1);
+		});
+
 		it("errors when --parent-ticket and --clear-parent-ticket are both used", async () => {
 			const program = createTestProgram();
 			setupIssuesCommands(program);
@@ -1131,6 +1192,47 @@ describe("issues commands", () => {
 			expect(mockUpdateIssue).toHaveBeenCalled();
 			expect(mockOutputSuccess).toHaveBeenCalled();
 		});
+
+		it("updates issue delegate", async () => {
+			mockUpdateIssue.mockResolvedValue({ id: "uuid", identifier: "DEV-1" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"update",
+				"DEV-1",
+				"--delegate",
+				"claude",
+			]);
+
+			expect(mockUpdateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({
+					delegateId: "member-id-claude",
+				}),
+				"adding",
+			);
+		});
+
+		it("clears issue delegate", async () => {
+			mockUpdateIssue.mockResolvedValue({ id: "uuid", identifier: "DEV-1" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"update",
+				"DEV-1",
+				"--clear-delegate",
+			]);
+
+			expect(mockUpdateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({
+					delegateId: null,
+				}),
+				"adding",
+			);
+		});
 	});
 
 	describe("issues archive/delete", () => {
@@ -1218,6 +1320,39 @@ describe("issues commands", () => {
 
 			expect(mockDeleteIssue).toHaveBeenCalledWith("DEV-1", {
 				permanentlyDelete: true,
+			});
+		});
+	});
+
+	describe("issues start", () => {
+		it("moves an issue to a started workflow state", async () => {
+			mockStartIssue.mockResolvedValue({
+				issue: { id: "uuid-1", identifier: "DEV-1", title: "Task" },
+				started: true,
+				previousState: {
+					id: "state-backlog",
+					name: "Backlog",
+					type: "backlog",
+				},
+				targetState: { id: "state-started", name: "In Progress" },
+			});
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, ["issues", "start", "DEV-1"]);
+
+			expect(mockStartIssue).toHaveBeenCalledWith("DEV-1");
+			expect(mockOutputSuccess).toHaveBeenCalledWith({
+				id: "uuid-1",
+				identifier: "DEV-1",
+				title: "Task",
+				started: true,
+				previousState: {
+					id: "state-backlog",
+					name: "Backlog",
+					type: "backlog",
+				},
+				targetState: { id: "state-started", name: "In Progress" },
 			});
 		});
 	});

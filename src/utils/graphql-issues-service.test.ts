@@ -82,6 +82,92 @@ describe("GraphQLIssuesService", () => {
 		});
 	});
 
+	describe("startIssue", () => {
+		it("moves a backlog issue to the first started state", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			vi.spyOn(linearService, "resolveIssueId").mockResolvedValue("uuid-1");
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValueOnce({
+					issue: {
+						id: "uuid-1",
+						identifier: "DEV-1",
+						state: { id: "state-backlog", name: "Backlog", type: "backlog" },
+						team: { id: "team-1", key: "DEV", name: "Dev" },
+						delegate: null,
+					},
+				})
+				.mockResolvedValueOnce({
+					team: {
+						states: {
+							nodes: [
+								{ id: "state-later", name: "Review", position: 20 },
+								{ id: "state-first", name: "In Progress", position: 10 },
+							],
+						},
+					},
+				});
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+			const updateIssue = vi.spyOn(service, "updateIssue").mockResolvedValue({
+				id: "uuid-1",
+				identifier: "DEV-1",
+				title: "Task",
+				labels: [],
+				priority: 0,
+				createdAt: "2026-01-01T00:00:00.000Z",
+				updatedAt: "2026-01-01T00:00:00.000Z",
+				url: "https://linear.app/acme/issue/DEV-1/task",
+			});
+
+			const result = await service.startIssue("DEV-1");
+
+			expect(rawRequest).toHaveBeenCalledTimes(2);
+			expect(updateIssue).toHaveBeenCalledWith(
+				{ id: "uuid-1", statusId: "state-first" },
+				"adding",
+			);
+			expect(result.started).toBe(true);
+			expect(result.targetState).toEqual({
+				id: "state-first",
+				name: "In Progress",
+			});
+		});
+
+		it("does not update an issue that is already started", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			vi.spyOn(linearService, "resolveIssueId").mockResolvedValue("uuid-1");
+			vi.spyOn(graphQLService, "rawRequest").mockResolvedValueOnce({
+				issue: {
+					id: "uuid-1",
+					identifier: "DEV-1",
+					state: { id: "state-started", name: "In Progress", type: "started" },
+					team: { id: "team-1", key: "DEV", name: "Dev" },
+					delegate: null,
+				},
+			});
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+			const getIssueById = vi.spyOn(service, "getIssueById").mockResolvedValue({
+				id: "uuid-1",
+				identifier: "DEV-1",
+				title: "Task",
+				labels: [],
+				priority: 0,
+				createdAt: "2026-01-01T00:00:00.000Z",
+				updatedAt: "2026-01-01T00:00:00.000Z",
+				url: "https://linear.app/acme/issue/DEV-1/task",
+			});
+			const updateIssue = vi.spyOn(service, "updateIssue");
+
+			const result = await service.startIssue("DEV-1");
+
+			expect(getIssueById).toHaveBeenCalledWith("uuid-1");
+			expect(updateIssue).not.toHaveBeenCalled();
+			expect(result.started).toBe(false);
+		});
+	});
+
 	describe("resolveTeamId (via internal access)", () => {
 		it("returns team ID when GraphQL exact match succeeds", async () => {
 			const service = createService();
@@ -169,6 +255,22 @@ describe("GraphQLIssuesService", () => {
 			expect(result.state).toEqual({ id: "state-1", name: "In Progress" });
 			expect(result.assignee).toEqual({ id: "user-1", name: "Alice" });
 			expect(result.team).toEqual({ id: "team-1", key: "DEV", name: "Dev" });
+		});
+
+		it("transforms issue delegate", () => {
+			const service = createService();
+			const result = service.transformIssueData({
+				id: "issue-1",
+				identifier: "DEV-100",
+				title: "Test",
+				priority: 1,
+				delegate: { id: "agent-1", name: "Claude" },
+				labels: { nodes: [] },
+				createdAt: "2026-01-01T00:00:00.000Z",
+				updatedAt: "2026-01-01T00:00:00.000Z",
+			});
+
+			expect(result.delegate).toEqual({ id: "agent-1", name: "Claude" });
 		});
 
 		it("transforms labels", () => {

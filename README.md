@@ -68,7 +68,7 @@ every team ends up writing themselves:
 | **Term enforcement** | Catch misspellings of brand and project names in issue titles and descriptions ("EnrichLayer" → "Enrich Layer"). |
 | **Status defaults** | "No project? → Triage. Has assignee+project? → Todo." Per-workspace, configurable. |
 | **Auto-link & relate** | When you write `EMW-258` in a description, el-linear wraps it as a markdown link **and** creates the corresponding sidebar relation. Prose like "blocked by EMW-258" infers the relation type. |
-| **`--claude` flag** | Tag issues delegated to [Claude Code](https://claude.ai/code) for autonomous work. The label is plain config; the flag is muscle memory. |
+| **Agent delegation** | Use Linear's native `delegate` field for agent work while keeping the human `assignee` responsible. `issues start` moves work to the team's first started status. |
 | **GraphQL escape hatch** | Anything not covered by built-in commands: `el-linear graphql '{ viewer { id } }'`. Schema introspection included. |
 | **Bundled Claude skill** | The published tarball includes a `claude-skills/linear-operations/` directory you can symlink into your project's `.claude/skills/`. |
 
@@ -89,6 +89,7 @@ or pointing `EL_LINEAR_OAUTH_CONFIG` at one:
 ```json
 {
   "linearOAuth": {
+    "actor": "user",
     "clientId": "your-linear-oauth-client-id",
     "redirectPort": 8765,
     "scopes": ["read", "write", "issues:create", "comments:create"],
@@ -100,6 +101,15 @@ or pointing `EL_LINEAR_OAUTH_CONFIG` at one:
 `passwordManagerPath` is optional metadata for humans/scripts; el-linear does
 not execute password-manager commands from it. Do not put a `client_secret` in
 this shared file. The OAuth flow uses PKCE.
+
+For agent/service-account OAuth, authorize the app actor:
+
+```bash
+el-linear init oauth --actor app
+```
+
+App actor tokens can request `app:assignable` and `app:mentionable`, but not
+`admin`. The authorized app user ID is stored in `oauth.json` as `viewerId`.
 
 At runtime, credentials are resolved in this order:
 
@@ -328,20 +338,23 @@ are allowed even though `enrichlayer` is rejected.
 
 If you don't define any rules, term enforcement is a no-op.
 
-## The `--claude` delegation pattern
+## Native Agent Delegation
 
-`el-linear issues create` accepts `--claude`, which applies the workspace label
-configured at `config.labels.workspace.claude`. The label is the contract:
-it tells [Claude Code](https://claude.ai/code) "this issue is delegated to
-you for autonomous execution."
+Linear now has a native issue `delegate` field for agent work. Use `assignee`
+for the accountable human and `delegate` for the agent app user doing the
+implementation.
 
 ```bash
 el-linear issues create "Migrate auth middleware to new session store" \
-  --team ENG --assignee alice --project "Auth Refactor" \
-  --description "..." --claude
+  --team ENG --assignee alice --delegate claude --project "Auth Refactor" \
+  --description "..."
+
+el-linear issues start ENG-123
 ```
 
-Claude finds delegated work with `el-linear issues search "claude" --status "Todo"`.
+Agents find delegated work with `el-linear issues list --delegate claude`.
+`--claude` still applies the legacy configured label, but native `--delegate`
+is the preferred contract.
 
 ## Commands at a glance
 
@@ -352,7 +365,7 @@ el-linear <command> --help       # detailed help for one command
 
 | Group | Common commands |
 |-------|-----------------|
-| Issues | `issues {list, search, create, read, update, delete, history, related, link-references}` |
+| Issues | `issues {list, search, create, read, update, start, delete, history, related, link-references}` |
 | Comments | `comments {list, create, update}` |
 | Labels | `labels {list, create, retire, restore}` |
 | Projects | `projects {list, add-team, remove-team}` |

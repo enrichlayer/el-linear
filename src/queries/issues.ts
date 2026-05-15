@@ -64,6 +64,7 @@ export const BATCH_RESOLVE_FOR_SEARCH_QUERY = `
     $projectName: String
     $hasProjectName: Boolean = false
     $assigneeEmail: String
+    $delegateEmail: String
   ) {
     teams(
       filter: {
@@ -92,6 +93,14 @@ export const BATCH_RESOLVE_FOR_SEARCH_QUERY = `
     }
 
     users(filter: { email: { eq: $assigneeEmail } }, first: 1) {
+      nodes {
+        id
+        name
+        email
+      }
+    }
+
+    delegates: users(filter: { email: { eq: $delegateEmail } }, first: 1) {
       nodes {
         id
         name
@@ -437,6 +446,32 @@ export const GET_ISSUE_TEAM_QUERY = `
   query GetIssueTeam($issueId: String!) {
     issue(id: $issueId) {
       team { id }
+    }
+  }
+`;
+
+export const GET_ISSUE_START_CONTEXT_QUERY = `
+  query GetIssueStartContext($id: String!) {
+    issue(id: $id) {
+      id
+      identifier
+      state { id name type }
+      team { id key name }
+      delegate { id name url }
+    }
+  }
+`;
+
+export const TEAM_STARTED_STATUSES_QUERY = `
+  query TeamStartedStatuses($teamId: String!) {
+    team(id: $teamId) {
+      states(filter: { type: { eq: "started" } }) {
+        nodes {
+          id
+          name
+          position
+        }
+      }
     }
   }
 `;

@@ -117,6 +117,7 @@ export interface LinearIssue {
 	comments?: LinearComment[];
 	createdAt: string;
 	cycle?: CycleRef;
+	delegate?: UserRef;
 	description?: string;
 	dueDate?: string;
 	embeds?: import("../utils/embed-parser.js").Embed[];

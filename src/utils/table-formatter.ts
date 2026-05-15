@@ -115,6 +115,19 @@ const ALL_COLUMNS: Record<string, ColumnDef<LinearIssue>> = {
 			return atIdx > 0 ? name.slice(0, atIdx) : name;
 		},
 	},
+	delegate: {
+		key: "delegate",
+		header: "Delegate",
+		width: 20,
+		extract: (i) => {
+			if (!i.delegate) {
+				return "—";
+			}
+			const name = i.delegate.name;
+			const atIdx = name.indexOf("@");
+			return atIdx > 0 ? name.slice(0, atIdx) : name;
+		},
+	},
 	project: {
 		key: "project",
 		header: "Project",
@@ -288,6 +301,17 @@ const MD_COLUMNS: Record<string, MarkdownColumnDef<LinearIssue>> = {
 				return "—";
 			}
 			const name = i.assignee.name;
+			const atIdx = name.indexOf("@");
+			return atIdx > 0 ? name.slice(0, atIdx) : name;
+		},
+	},
+	delegate: {
+		header: "Delegate",
+		extract: (i) => {
+			if (!i.delegate) {
+				return "—";
+			}
+			const name = i.delegate.name;
 			const atIdx = name.indexOf("@");
 			return atIdx > 0 ? name.slice(0, atIdx) : name;
 		},

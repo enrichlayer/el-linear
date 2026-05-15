@@ -49,6 +49,11 @@ vi.mock("../config/config.js", () => ({
 	loadConfig: () => ({}),
 }));
 
+const mockResolveTeam = vi.fn((name: string) => name);
+vi.mock("../config/resolver.js", () => ({
+	resolveTeam: (name: string) => mockResolveTeam(name),
+}));
+
 const { setupProjectsCommands } = await import("./projects.js");
 
 describe("projects commands", () => {
@@ -68,6 +73,7 @@ describe("projects commands", () => {
 
 			expect(mockGetProjects).toHaveBeenCalledWith(100, {
 				nameFilter: undefined,
+				teamId: undefined,
 				states: undefined,
 				excludeStates: undefined,
 			});
@@ -80,6 +86,7 @@ describe("projects commands", () => {
 
 			expect(mockGetProjects).toHaveBeenCalledWith(10, {
 				nameFilter: undefined,
+				teamId: undefined,
 				states: undefined,
 				excludeStates: undefined,
 			});
@@ -92,6 +99,7 @@ describe("projects commands", () => {
 
 			expect(mockGetProjects).toHaveBeenCalledWith(100, {
 				nameFilter: "knowledge",
+				teamId: undefined,
 				states: undefined,
 				excludeStates: undefined,
 			});
@@ -104,6 +112,7 @@ describe("projects commands", () => {
 
 			expect(mockGetProjects).toHaveBeenCalledWith(100, {
 				nameFilter: undefined,
+				teamId: undefined,
 				states: undefined,
 				excludeStates: ["completed", "canceled"],
 			});
@@ -121,7 +130,26 @@ describe("projects commands", () => {
 
 			expect(mockGetProjects).toHaveBeenCalledWith(100, {
 				nameFilter: undefined,
+				teamId: undefined,
 				states: ["started", "planned"],
+				excludeStates: undefined,
+			});
+		});
+
+		it("resolves --team alias to UUID and passes teamId server-side", async () => {
+			mockResolveTeam.mockReturnValue("ENG");
+			mockResolveTeamId.mockResolvedValue("team-uuid-eng");
+
+			const program = createTestProgram();
+			setupProjectsCommands(program);
+			await runCommand(program, ["projects", "list", "--team", "ENG"]);
+
+			expect(mockResolveTeam).toHaveBeenCalledWith("ENG");
+			expect(mockResolveTeamId).toHaveBeenCalledWith("ENG");
+			expect(mockGetProjects).toHaveBeenCalledWith(100, {
+				nameFilter: undefined,
+				teamId: "team-uuid-eng",
+				states: undefined,
 				excludeStates: undefined,
 			});
 		});

@@ -176,6 +176,8 @@ export class LinearService {
 			nameFilter?: string;
 			states?: string[];
 			excludeStates?: string[];
+			/** Resolved team UUID — applied as a server-side filter before pagination. */
+			teamId?: string;
 		} = {},
 	): Promise<LinearProject[]> {
 		const filter: Record<string, unknown> = {};
@@ -186,6 +188,9 @@ export class LinearService {
 			filter.state = { in: options.states };
 		} else if (options.excludeStates && options.excludeStates.length > 0) {
 			filter.state = { nin: options.excludeStates };
+		}
+		if (options.teamId) {
+			filter.teams = { some: { id: { eq: options.teamId } } };
 		}
 		const projects = await this.client.projects({
 			filter: nonEmptyFilter(filter),

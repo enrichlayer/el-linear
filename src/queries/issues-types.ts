@@ -113,6 +113,7 @@ export interface IssueNode {
 	updatedAt: string;
 	state: IdNameRef | null;
 	assignee: AssigneeNode | null;
+	delegate: AssigneeNode | null;
 	team: IdKeyNameRef | null;
 	project: IdNameRef | null;
 	labels: { nodes: IdNameRef[] };
@@ -190,6 +191,36 @@ export interface DeleteIssueResponse {
 export interface GetIssueTeamResponse {
 	issue: {
 		team: { id: string } | null;
+	} | null;
+}
+
+type WorkflowStateType =
+	| "triage"
+	| "backlog"
+	| "unstarted"
+	| "started"
+	| "completed"
+	| "canceled";
+
+export interface IssueStartContextResponse {
+	issue: {
+		id: string;
+		identifier: string;
+		state: { id: string; name: string; type: WorkflowStateType } | null;
+		team: { id: string; key: string; name: string } | null;
+		delegate: AssigneeNode | null;
+	} | null;
+}
+
+export interface TeamStartedStatusesResponse {
+	team: {
+		states: {
+			nodes: {
+				id: string;
+				name: string;
+				position: number;
+			}[];
+		};
 	} | null;
 }
 
@@ -281,6 +312,7 @@ export interface BatchResolveForCreateResponse {
 }
 
 export interface BatchResolveForSearchResponse {
+	delegates?: { nodes: { id: string; name: string; email: string }[] };
 	teams: { nodes: { id: string; key: string; name: string }[] };
 	// `@include`-gated — absent unless a project name was provided.
 	projects?: { nodes: BatchResolveProjectNode[] };
@@ -312,6 +344,7 @@ export interface BatchResolveResult {
 	milestones?: { nodes: BatchResolveProjectMilestoneRef[] };
 	parentIssues?: { nodes: { id: string; identifier: string }[] };
 	users?: { nodes: { id: string; name: string; email: string }[] };
+	delegates?: { nodes: { id: string; name: string; email: string }[] };
 	issues?: { nodes: BatchResolveIssueForUpdate[] };
 	labels?: { nodes: BatchResolveLabelNode[] };
 }
