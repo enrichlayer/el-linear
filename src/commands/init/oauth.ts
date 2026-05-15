@@ -233,9 +233,10 @@ async function promptRegistration(defaults: {
 	);
 	logLine(
 		TS(
-			`Then paste the client_id (and client_secret, if your app is configured as confidential). Actor: ${defaults.actor}.`,
+			`Then paste the client_id (and client_secret, if your app is configured as confidential).`,
 		),
 	);
+	logLine(TS(`Actor: ${defaults.actor}.`));
 	if (defaults.actor === "user") {
 		logLine(TS("Use --actor app for agent/service-account app user tokens."));
 	}

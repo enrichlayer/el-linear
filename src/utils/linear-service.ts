@@ -176,7 +176,8 @@ export class LinearService {
 			nameFilter?: string;
 			states?: string[];
 			excludeStates?: string[];
-			teamFilter?: string;
+			/** Resolved team UUID — applied as a server-side filter before pagination. */
+			teamId?: string;
 		} = {},
 	): Promise<LinearProject[]> {
 		const filter: Record<string, unknown> = {};
@@ -187,6 +188,9 @@ export class LinearService {
 			filter.state = { in: options.states };
 		} else if (options.excludeStates && options.excludeStates.length > 0) {
 			filter.state = { nin: options.excludeStates };
+		}
+		if (options.teamId) {
+			filter.teams = { some: { id: { eq: options.teamId } } };
 		}
 		const projects = await this.client.projects({
 			filter: nonEmptyFilter(filter),
@@ -203,32 +207,22 @@ export class LinearService {
 				return { project, teams, lead };
 			}),
 		);
-		const teamNeedle = options.teamFilter?.toLowerCase();
-		return projectsWithData
-			.filter(({ teams }) => {
-				if (!teamNeedle) return true;
-				return teams.nodes.some(
-					(t) =>
-						t.key.toLowerCase() === teamNeedle ||
-						t.name.toLowerCase() === teamNeedle,
-				);
-			})
-			.map(({ project, teams, lead }) => ({
-				id: project.id,
-				name: project.name,
-				description: project.description || undefined,
-				state: project.state,
-				progress: project.progress,
-				teams: teams.nodes.map((team) => ({
-					id: team.id,
-					key: team.key,
-					name: team.name,
-				})),
-				lead: lead ? { id: lead.id, name: lead.name } : undefined,
-				targetDate: toISOStringOrUndefined(project.targetDate),
-				createdAt: toISOStringOrNow(project.createdAt),
-				updatedAt: toISOStringOrNow(project.updatedAt),
-			}));
+		return projectsWithData.map(({ project, teams, lead }) => ({
+			id: project.id,
+			name: project.name,
+			description: project.description || undefined,
+			state: project.state,
+			progress: project.progress,
+			teams: teams.nodes.map((team) => ({
+				id: team.id,
+				key: team.key,
+				name: team.name,
+			})),
+			lead: lead ? { id: lead.id, name: lead.name } : undefined,
+			targetDate: toISOStringOrUndefined(project.targetDate),
+			createdAt: toISOStringOrNow(project.createdAt),
+			updatedAt: toISOStringOrNow(project.updatedAt),
+		}));
 	}
 
 	async resolveTeamId(teamKeyOrNameOrId: string): Promise<string> {

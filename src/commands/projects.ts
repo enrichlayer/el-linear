@@ -636,9 +636,14 @@ export function setupProjectsCommands(program: Command): void {
 					`-excl:${stateFilter.excludeStates?.join(",") ?? "_none"}`;
 				const result = await cached(cacheKey, ttl, async () => {
 					const service = await createLinearService(rootOpts);
+					let teamId: string | undefined;
+					if (teamFilter) {
+						const resolved = resolveTeam(teamFilter);
+						teamId = await service.resolveTeamId(resolved);
+					}
 					return service.getProjects(limit, {
 						nameFilter,
-						teamFilter,
+						teamId,
 						states: stateFilter.states,
 						excludeStates: stateFilter.excludeStates,
 					});
