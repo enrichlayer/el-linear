@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { outputWarning } from "../utils/output.js";
+import type { ProfilePaths } from "./paths.js";
 import { CONFIG_PATH, resolveActiveProfile } from "./paths.js";
 import type { TermRule } from "./term-enforcer.js";
 
@@ -80,7 +81,24 @@ export interface ElLinearConfig {
 	 * `--no-cache`.
 	 */
 	cacheTTLSeconds?: number;
+	/**
+	 * Path to a shared team config file. Fields in the team config are merged
+	 * under the personal config (personal config wins on conflicts). The team
+	 * config accepts any ElLinearConfig fields except `teamConfigPath` itself.
+	 * Useful for sharing member aliases, label maps, and term rules across a
+	 * team by checking the file into a shared repository. Override at runtime
+	 * with the `EL_LINEAR_TEAM_CONFIG` env var (env var takes precedence).
+	 */
+	teamConfigPath?: string;
 }
+
+/**
+ * Fields valid in a shared team config file (the file pointed to by
+ * `teamConfigPath` or `EL_LINEAR_TEAM_CONFIG`). All fields are optional —
+ * omitted fields fall back to defaults or the personal config layer. The type
+ * excludes `teamConfigPath` itself to prevent circular references.
+ */
+export type TeamConfig = Omit<ElLinearConfig, "teamConfigPath">;
 
 const DEFAULT_CONFIG: ElLinearConfig = {
 	defaultTeam: "",
@@ -104,89 +122,121 @@ const DEFAULT_CONFIG: ElLinearConfig = {
 	terms: [],
 };
 
-// Profile-keyed cache. Pre-fix this was a single `cachedConfig` —
-// switching the active profile mid-process and calling `loadConfig`
-// again would return the OLD profile's config until
-// `_resetConfigCacheForTests` ran. Today the CLI sets the profile
-// in `preAction` before any command body, so this is latent — but
-// keying by profile makes it future-proof and makes test isolation
-// less footgun-prone (profile A's setup pollutes profile B's read).
-// ALL-935 deferred fix.
-//
-// Key: `null` for the legacy single-file layout (no active profile),
-// otherwise the profile name. We never mix the two paths in the
-// cache — the marker name selects exactly one path.
-const cachedConfigByProfile = new Map<string | null, ElLinearConfig>();
+// Cache keyed by `"${profileName}::${teamConfigPath}"` so that switching
+// profiles or team config paths mid-process (test isolation, --profile flag)
+// returns the correct merged config without a stale hit.
+// Key uses "" for the legacy single-file layout (no active profile) and ""
+// for no team config path.
+const cachedConfig = new Map<string, ElLinearConfig>();
 
 /** Test seam — resets the cache between test cases. */
 export function _resetConfigCacheForTests(): void {
-	cachedConfigByProfile.clear();
+	cachedConfig.clear();
 }
 
 export function loadConfig(): ElLinearConfig {
-	// Profile-aware: read from <CONFIG_DIR>/profiles/<name>/config.json
-	// when a profile is active, falling back to the legacy single-file
-	// path so existing setups keep working without migration.
 	const active = resolveActiveProfile();
-	const cacheKey = active.name;
-	const cached = cachedConfigByProfile.get(cacheKey);
-	if (cached) {
-		return cached;
-	}
+	// Env var overrides teamConfigPath in personal config.
+	const teamConfigEnvPath =
+		process.env.EL_LINEAR_TEAM_CONFIG?.trim() || undefined;
 
+	// Read personal config raw first so we can extract teamConfigPath before
+	// computing the full cache key (and to avoid double-reads on cache hit).
+	const personalRaw = readRawPersonalConfig(active);
+	const teamConfigPath =
+		teamConfigEnvPath ?? (personalRaw.teamConfigPath as string | undefined);
+
+	const cacheKey = `${active.name ?? ""}::${teamConfigPath ?? ""}`;
+	const cached = cachedConfig.get(cacheKey);
+	if (cached) return cached;
+
+	// Load the team config layer (errors are warned, never thrown).
+	const teamRaw: Record<string, unknown> = teamConfigPath
+		? loadTeamConfigRaw(teamConfigPath)
+		: {};
+	// teamConfigPath inside a team config file would be circular; strip it.
+	delete teamRaw.teamConfigPath;
+
+	// Merge order: defaults → team config → personal config (personal wins).
+	const afterTeam = deepMerge(
+		DEFAULT_CONFIG as unknown as Record<string, unknown>,
+		teamRaw,
+	);
+	const resolved = deepMerge(
+		afterTeam,
+		personalRaw,
+	) as unknown as ElLinearConfig;
+
+	cachedConfig.set(cacheKey, resolved);
+	return resolved;
+}
+
+function readRawPersonalConfig(active: ProfilePaths): Record<string, unknown> {
 	const candidates = [active.configPath];
 	if (active.configPath !== CONFIG_PATH) candidates.push(CONFIG_PATH);
 	const sourcePath = candidates.find((p) => fs.existsSync(p));
 
-	let resolved: ElLinearConfig;
-	if (sourcePath) {
-		try {
-			const userConfig = JSON.parse(
-				fs.readFileSync(sourcePath, "utf8"),
-			) as Record<string, unknown>;
-			// Migration: the legacy `brand: { name, reject }` config is auto-promoted to
-			// a single entry in `terms[]`. We warn (not throw) so existing users get a
-			// grace period to update their config.
-			if (
-				userConfig.brand &&
-				typeof userConfig.brand === "object" &&
-				!Array.isArray(userConfig.brand)
-			) {
-				const legacy = userConfig.brand as { name?: unknown; reject?: unknown };
-				if (typeof legacy.name === "string" && Array.isArray(legacy.reject)) {
-					outputWarning(
-						"config.brand is deprecated — replace it with config.terms = [{ canonical, reject }]. See README#term-enforcer.",
-					);
-					const existing = Array.isArray(userConfig.terms)
-						? userConfig.terms
-						: [];
-					userConfig.terms = [
-						...existing,
-						{ canonical: legacy.name, reject: legacy.reject },
-					];
-				}
-				delete userConfig.brand;
-			}
-			resolved = deepMerge(
-				DEFAULT_CONFIG as unknown as Record<string, unknown>,
-				userConfig,
-			) as unknown as ElLinearConfig;
-		} catch {
-			outputWarning(`Failed to parse ${sourcePath}, using empty defaults`);
-			resolved = DEFAULT_CONFIG;
-		}
-	} else {
+	if (!sourcePath) {
 		const profileNote = active.name
 			? ` (active profile: \`${active.name}\` — expected at ${active.configPath})`
 			: "";
 		outputWarning(
 			`No config found at ${active.configPath}${profileNote}. Run \`el-linear init\` (or \`el-linear profile add ${active.name ?? "<name>"}\`) to create one.`,
 		);
-		resolved = DEFAULT_CONFIG;
+		return {};
 	}
 
-	cachedConfigByProfile.set(cacheKey, resolved);
-	return resolved;
+	try {
+		const raw = JSON.parse(fs.readFileSync(sourcePath, "utf8")) as Record<
+			string,
+			unknown
+		>;
+		// Migration: the legacy `brand: { name, reject }` config is auto-promoted
+		// to a single entry in `terms[]`. We warn (not throw) so existing users get
+		// a grace period to update their config.
+		if (
+			raw.brand &&
+			typeof raw.brand === "object" &&
+			!Array.isArray(raw.brand)
+		) {
+			const legacy = raw.brand as { name?: unknown; reject?: unknown };
+			if (typeof legacy.name === "string" && Array.isArray(legacy.reject)) {
+				outputWarning(
+					"config.brand is deprecated — replace it with config.terms = [{ canonical, reject }]. See README#term-enforcer.",
+				);
+				const existing = Array.isArray(raw.terms) ? raw.terms : [];
+				raw.terms = [
+					...existing,
+					{ canonical: legacy.name, reject: legacy.reject },
+				];
+			}
+			delete raw.brand;
+		}
+		return raw;
+	} catch {
+		outputWarning(`Failed to parse ${sourcePath}, using empty defaults`);
+		return {};
+	}
+}
+
+function loadTeamConfigRaw(teamConfigPath: string): Record<string, unknown> {
+	if (!fs.existsSync(teamConfigPath)) {
+		outputWarning(
+			`Team config not found at ${teamConfigPath} — skipping team config layer.`,
+		);
+		return {};
+	}
+	try {
+		return JSON.parse(fs.readFileSync(teamConfigPath, "utf8")) as Record<
+			string,
+			unknown
+		>;
+	} catch {
+		outputWarning(
+			`Failed to parse team config at ${teamConfigPath} — skipping team config layer.`,
+		);
+		return {};
+	}
 }
 
 function deepMerge(
