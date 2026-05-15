@@ -6,8 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	ACTIVE_PROFILE_FILE,
 	CONFIG_PATH,
-	LOCAL_CONFIG_PATH,
 	getSessionProfileOverride,
+	LOCAL_CONFIG_PATH,
 	PROFILES_DIR,
 	type ProfileFsOps,
 	profilePaths,

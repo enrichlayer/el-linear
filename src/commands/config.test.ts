@@ -105,7 +105,10 @@ describe("config commands", () => {
 
 	describe("config local show", () => {
 		it("outputs the raw local config", async () => {
-			const fakeLocal = { assigneeEmail: "you@example.com", defaultPriority: "high" };
+			const fakeLocal = {
+				assigneeEmail: "you@example.com",
+				defaultPriority: "high",
+			};
 			mockLoadLocalConfig.mockReturnValue(fakeLocal);
 
 			const program = createTestProgram();

@@ -91,9 +91,7 @@ export function setupConfigCommands(program: Command): void {
 
 				const typedValue = key === "cacheTTLSeconds" ? Number(value) : value;
 				if (key === "cacheTTLSeconds" && Number.isNaN(typedValue)) {
-					throw new Error(
-						`cacheTTLSeconds must be an integer, got "${value}"`,
-					);
+					throw new Error(`cacheTTLSeconds must be an integer, got "${value}"`);
 				}
 
 				const updated = { ...existing, [key]: typedValue };

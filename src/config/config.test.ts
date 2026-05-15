@@ -218,7 +218,9 @@ describe("loadConfig — team config layer", () => {
 		expect(config.defaultTeam).toBe("PERSONAL");
 		outputSuccess({ check: true });
 		const out = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trimEnd());
-		expect(out._warnings?.some((w: string) => w.includes("Team config not found"))).toBe(true);
+		expect(
+			out._warnings?.some((w: string) => w.includes("Team config not found")),
+		).toBe(true);
 		stdoutSpy.mockRestore();
 	});
 
@@ -319,7 +321,10 @@ describe("loadConfig — local.json overlay", () => {
 
 	it("assigneeEmail in local.json becomes defaultAssignee in resolved config", async () => {
 		const localPath = `${process.env.HOME}/.config/el-linear/local.json`;
-		fsFiles.set(localPath, JSON.stringify({ assigneeEmail: "ytspar@gmail.com" }));
+		fsFiles.set(
+			localPath,
+			JSON.stringify({ assigneeEmail: "ytspar@gmail.com" }),
+		);
 		defaultExistsReturn = true;
 		defaultReadReturn = JSON.stringify({ defaultTeam: "DEV" });
 
@@ -333,7 +338,10 @@ describe("loadConfig — local.json overlay", () => {
 		const localPath = `${process.env.HOME}/.config/el-linear/local.json`;
 		fsFiles.set(
 			localPath,
-			JSON.stringify({ assigneeEmail: "email@example.com", defaultAssignee: "alias-name" }),
+			JSON.stringify({
+				assigneeEmail: "email@example.com",
+				defaultAssignee: "alias-name",
+			}),
 		);
 		defaultExistsReturn = false;
 

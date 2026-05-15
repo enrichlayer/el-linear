@@ -188,7 +188,10 @@ const DEFAULT_CONFIG: ElLinearConfig = {
 // the profile name is part of all cache keys.
 const cachedTeamConfigPath = new Map<string, string | undefined>();
 const cachedConfig = new Map<string, ElLinearConfig>();
-const cachedLocalConfigByProfile = new Map<string | null, ElLinearLocalConfig>();
+const cachedLocalConfigByProfile = new Map<
+	string | null,
+	ElLinearLocalConfig
+>();
 
 /** Test seam — resets all caches between test cases. */
 export function _resetConfigCacheForTests(): void {
@@ -249,10 +252,7 @@ export function loadConfig(): ElLinearConfig {
 		DEFAULT_CONFIG as unknown as Record<string, unknown>,
 		teamRaw,
 	);
-	const merged = deepMerge(
-		afterTeam,
-		personalRaw,
-	) as unknown as ElLinearConfig;
+	const merged = deepMerge(afterTeam, personalRaw) as unknown as ElLinearConfig;
 
 	cachedConfig.set(cacheKey, merged);
 
@@ -321,7 +321,12 @@ function applyLocalConfig(
 	base: ElLinearConfig,
 	local: ElLinearLocalConfig,
 ): ElLinearConfig {
-	if (Object.keys(local).length === 0) return base;
+	const hasApplicable =
+		local.cacheTTLSeconds !== undefined ||
+		local.defaultPriority !== undefined ||
+		local.defaultAssignee !== undefined ||
+		local.assigneeEmail !== undefined;
+	if (!hasApplicable) return base;
 	const result = { ...base };
 	if (local.cacheTTLSeconds !== undefined)
 		result.cacheTTLSeconds = local.cacheTTLSeconds;
