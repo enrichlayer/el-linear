@@ -726,6 +726,18 @@ export class GraphQLIssuesService {
 		resolveResult: BatchResolveResult,
 	): string {
 		if (isUuid(projectId)) {
+			// The create/update batch queries fetch a `projectsById` block for a
+			// UUID `--project` (folded into `resolveResult.projects`). An empty
+			// `nodes` array means the block ran but matched nothing — i.e. the
+			// UUID doesn't exist. Fail clearly here instead of passing a dead
+			// UUID to the mutation, which would surface a vague server error.
+			// When no block was fetched (`projects` undefined — e.g. the search
+			// path has no `projectsById` arm) there's nothing to validate, so
+			// the UUID passes through unchanged.
+			const fetched = resolveResult.projects?.nodes;
+			if (fetched && fetched.length === 0) {
+				throw notFoundError("Project", projectId);
+			}
 			return projectId;
 		}
 		const projectNodes = resolveResult.projects?.nodes;
