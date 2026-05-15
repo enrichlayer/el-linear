@@ -453,6 +453,24 @@ describe("GraphQLIssuesService", () => {
 			// targets the project's actual team rather than an arbitrary one.
 			expect(createInputTeamId(rawRequest)).toBe("team-pyt");
 		});
+
+		it("throws a clear error when a UUID --project does not exist", async () => {
+			const { service } = setupCreate({
+				teams: { nodes: [{ id: "team-all", key: "ALL", name: "All" }] },
+				// `projectsById` ran but matched nothing — the UUID is dead.
+				projectsById: { nodes: [] },
+				parentIssues: { nodes: [] },
+			});
+
+			await expect(
+				service.createIssue({
+					title: "Test",
+					teamId: "ALL",
+					teamInput: "ALL",
+					projectId: PROJECT_UUID,
+				}),
+			).rejects.toThrow(/Project .* not found/);
+		});
 	});
 
 	describe("updateIssue project/milestone resolution", () => {
@@ -561,6 +579,18 @@ describe("GraphQLIssuesService", () => {
 			expect(updateInput(rawRequest).projectMilestoneId).toBe(
 				"de519000-0000-4000-8000-000000000005",
 			);
+		});
+
+		it("throws a clear error when a UUID --project does not exist", async () => {
+			const { service } = setupUpdate({
+				// `projectsById` ran but matched nothing — the UUID is dead.
+				projectsById: { nodes: [] },
+				issues: { nodes: [] },
+			});
+
+			await expect(
+				service.updateIssue({ id: ISSUE_UUID, projectId: PROJECT_UUID }),
+			).rejects.toThrow(/Project .* not found/);
 		});
 	});
 });
