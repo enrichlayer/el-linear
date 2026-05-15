@@ -10,6 +10,7 @@ import path from "node:path";
 
 export const CONFIG_DIR = path.join(os.homedir(), ".config", "el-linear");
 export const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
+export const LOCAL_CONFIG_PATH = path.join(CONFIG_DIR, "local.json");
 export const TOKEN_PATH = path.join(CONFIG_DIR, "token");
 export const TEAM_OAUTH_CONFIG_PATH = path.join(CONFIG_DIR, "team-oauth.json");
 export const ALIASES_PROGRESS_PATH = path.join(
@@ -56,6 +57,7 @@ export interface ProfilePaths {
 	/** Profile name; null when using the legacy single-file layout. */
 	name: string | null;
 	configPath: string;
+	localConfigPath: string;
 	tokenPath: string;
 }
 
@@ -149,6 +151,7 @@ export function resolveActiveProfile(
 	return {
 		name: null,
 		configPath: CONFIG_PATH,
+		localConfigPath: LOCAL_CONFIG_PATH,
 		tokenPath: TOKEN_PATH,
 	};
 }
@@ -159,6 +162,7 @@ export function profilePaths(name: string): ProfilePaths {
 	return {
 		name,
 		configPath: path.join(dir, "config.json"),
+		localConfigPath: path.join(dir, "local.json"),
 		tokenPath: path.join(dir, "token"),
 	};
 }
