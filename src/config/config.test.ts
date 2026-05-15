@@ -160,7 +160,6 @@ describe("loadConfig — team config layer", () => {
 
 	it("merges team config under personal config (personal wins)", async () => {
 		const teamPath = "/shared/team-config.json";
-		const personalPath = "/home/.config/el-linear/config.json";
 
 		fsFiles.set(
 			teamPath,
@@ -169,24 +168,8 @@ describe("loadConfig — team config layer", () => {
 				defaultTeam: "ENG",
 			}),
 		);
-		fsFiles.set(
-			personalPath,
-			JSON.stringify({
-				members: { aliases: { alice: "Ali" } }, // override team alias for alice
-				defaultAssignee: "me",
-			}),
-		);
 
-		// Point personal config at the team config.
-		// We wire teamConfigPath by using the env var to avoid having to
-		// know the personal config's exact on-disk path in this unit test.
 		process.env.EL_LINEAR_TEAM_CONFIG = teamPath;
-		// Override defaultExists so personal path reads succeed via fsFiles.
-		defaultExistsReturn = false; // fsFiles.has() takes precedence for known paths
-
-		// Re-point default read to the personal config content.
-		// Use a path-specific entry so both files resolve correctly.
-		// Personal config is at the legacy CONFIG_PATH. We set it via defaultRead.
 		defaultExistsReturn = true;
 		defaultReadReturn = JSON.stringify({
 			members: { aliases: { alice: "Ali" } },
@@ -347,5 +330,69 @@ describe("loadConfig — team config layer", () => {
 		// UUIDs from both layers
 		expect(config.members.uuids.alice).toBe("uuid-alice");
 		expect(config.members.uuids.charlie).toBe("uuid-charlie");
+	});
+
+	it("concatenates terms across layers (personal appends to team)", async () => {
+		const teamPath = "/shared/team.json";
+		fsFiles.set(
+			teamPath,
+			JSON.stringify({
+				terms: [{ canonical: "Enrich Layer", reject: ["EnrichLayer"] }],
+			}),
+		);
+
+		process.env.EL_LINEAR_TEAM_CONFIG = teamPath;
+		defaultExistsReturn = true;
+		defaultReadReturn = JSON.stringify({
+			terms: [{ canonical: "GitHub", reject: ["Github"] }],
+		});
+
+		const { loadConfig } = await import("./config.js");
+		const config = loadConfig();
+
+		expect(config.terms).toHaveLength(2);
+		expect(config.terms[0].canonical).toBe("Enrich Layer");
+		expect(config.terms[1].canonical).toBe("GitHub");
+	});
+
+	it("concatenates defaultLabels across layers", async () => {
+		const teamPath = "/shared/team.json";
+		fsFiles.set(teamPath, JSON.stringify({ defaultLabels: ["team-label"] }));
+
+		process.env.EL_LINEAR_TEAM_CONFIG = teamPath;
+		defaultExistsReturn = true;
+		defaultReadReturn = JSON.stringify({ defaultLabels: ["my-label"] });
+
+		const { loadConfig } = await import("./config.js");
+		const config = loadConfig();
+
+		expect(config.defaultLabels).toEqual(["team-label", "my-label"]);
+	});
+
+	it("no file I/O on repeated loadConfig calls after first (cache fast path)", async () => {
+		const teamPath = "/shared/team.json";
+		const { CONFIG_PATH } = await import("./paths.js");
+
+		// Pin the two config files explicitly; everything else (profile marker,
+		// etc.) is absent so resolveActiveProfile() skips its readFileSync call.
+		fsFiles.set(teamPath, JSON.stringify({ defaultTeam: "TEAM" }));
+		fsFiles.set(CONFIG_PATH, JSON.stringify({}));
+		defaultExistsReturn = false;
+
+		process.env.EL_LINEAR_TEAM_CONFIG = teamPath;
+
+		const fs = (await import("node:fs")).default;
+		const { loadConfig } = await import("./config.js");
+
+		loadConfig(); // first call — populates both caches
+		const readsBefore = (fs.readFileSync as ReturnType<typeof vi.fn>).mock.calls
+			.length;
+
+		loadConfig(); // second call — should hit both caches, no reads
+		loadConfig(); // third call — same
+		const readsAfter = (fs.readFileSync as ReturnType<typeof vi.fn>).mock.calls
+			.length;
+
+		expect(readsAfter).toBe(readsBefore);
 	});
 });

@@ -1,5 +1,5 @@
 import type { Command } from "commander";
-import { loadConfig } from "../config/config.js";
+import { getActiveTeamConfigPath, loadConfig } from "../config/config.js";
 import { outputSuccess } from "../utils/output.js";
 
 export function setupConfigCommands(program: Command): void {
@@ -16,6 +16,8 @@ export function setupConfigCommands(program: Command): void {
 			"\nDumps the merged config from ~/.config/el-linear/config.json.\n\nExamples:\n  el-linear config show",
 		)
 		.action(() => {
-			outputSuccess({ data: loadConfig() });
+			const data = loadConfig();
+			const teamConfig = getActiveTeamConfigPath();
+			outputSuccess(teamConfig ? { data, teamConfig } : { data });
 		});
 }
