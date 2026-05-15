@@ -580,5 +580,17 @@ describe("GraphQLIssuesService", () => {
 				"de519000-0000-4000-8000-000000000005",
 			);
 		});
+
+		it("throws a clear error when a UUID --project does not exist", async () => {
+			const { service } = setupUpdate({
+				// `projectsById` ran but matched nothing — the UUID is dead.
+				projectsById: { nodes: [] },
+				issues: { nodes: [] },
+			});
+
+			await expect(
+				service.updateIssue({ id: ISSUE_UUID, projectId: PROJECT_UUID }),
+			).rejects.toThrow(/Project .* not found/);
+		});
 	});
 });
