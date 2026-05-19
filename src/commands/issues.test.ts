@@ -1657,5 +1657,139 @@ describe("issues commands", () => {
 				type: "duplicate",
 			});
 		});
+
+		it("update: --related-to creates a forward 'related' relation", async () => {
+			setupAutoLinkMocks({ "DEV-100": "uuid-100" });
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"update",
+				"DEV-999",
+				"--related-to",
+				"DEV-100",
+			]);
+			expect(findRelationCreateInput()).toEqual({
+				issueId: "uuid-source",
+				relatedIssueId: "uuid-100",
+				type: "related",
+			});
+		});
+
+		it("update: --blocked-by creates a reversed 'blocks' relation", async () => {
+			setupAutoLinkMocks({ "DEV-100": "uuid-100" });
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"update",
+				"DEV-999",
+				"--blocked-by",
+				"DEV-100",
+			]);
+			expect(findRelationCreateInput()).toEqual({
+				issueId: "uuid-100",
+				relatedIssueId: "uuid-source",
+				type: "blocks",
+			});
+		});
+
+		it("update: --duplicate-of creates a forward 'duplicate' relation", async () => {
+			setupAutoLinkMocks({ "DEV-50": "uuid-50" });
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"update",
+				"DEV-999",
+				"--duplicate-of",
+				"DEV-50",
+			]);
+			expect(findRelationCreateInput()).toEqual({
+				issueId: "uuid-source",
+				relatedIssueId: "uuid-50",
+				type: "duplicate",
+			});
+		});
+
+		it("update: --blocks creates a forward 'blocks' relation", async () => {
+			setupAutoLinkMocks({ "DEV-200": "uuid-200" });
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"update",
+				"DEV-999",
+				"--blocks",
+				"DEV-200",
+			]);
+			expect(findRelationCreateInput()).toEqual({
+				issueId: "uuid-source",
+				relatedIssueId: "uuid-200",
+				type: "blocks",
+			});
+		});
+
+		it("update: relation-only invocation does NOT call updateIssue", async () => {
+			setupAutoLinkMocks({ "DEV-100": "uuid-100" });
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"update",
+				"DEV-999",
+				"--related-to",
+				"DEV-100",
+			]);
+			// Relation-only update must behave like `issues relate`: create the
+			// relation, but never issue an issueUpdate mutation.
+			expect(mockUpdateIssue).not.toHaveBeenCalled();
+			expect(findRelationCreateInput()).toEqual({
+				issueId: "uuid-source",
+				relatedIssueId: "uuid-100",
+				type: "related",
+			});
+		});
+
+		it("update: relation-only does not apply defaultPriority side effect", async () => {
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				defaultPriority: "high",
+			});
+			setupAutoLinkMocks({ "DEV-100": "uuid-100" });
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"update",
+				"DEV-999",
+				"--related-to",
+				"DEV-100",
+			]);
+			// Regression: with defaultPriority configured, a relation-only
+			// update previously rewrote the issue's priority via updateIssue.
+			expect(mockUpdateIssue).not.toHaveBeenCalled();
+		});
+
+		it("update: field + relation flags updates AND relates in one call", async () => {
+			setupAutoLinkMocks({ "DEV-100": "uuid-100" });
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"update",
+				"DEV-999",
+				"--title",
+				"Renamed",
+				"--related-to",
+				"DEV-100",
+			]);
+			expect(mockUpdateIssue).toHaveBeenCalled();
+			expect(findRelationCreateInput()).toEqual({
+				issueId: "uuid-source",
+				relatedIssueId: "uuid-100",
+				type: "related",
+			});
+		});
 	});
 });

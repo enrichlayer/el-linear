@@ -818,6 +818,49 @@ async function handleStartIssue(
 	});
 }
 
+// Field-mutating options on `issues update`, post alias-normalization.
+// If none of these are set, an `issues update` invocation that carries only
+// relation flags is treated as relation-only (see handleUpdateIssue): it must
+// behave exactly like `issues relate` and NOT issue an issueUpdate mutation,
+// which would otherwise apply the config defaultPriority fallback and bump the
+// issue's activity for what the user intended as a pure relation add.
+const UPDATE_FIELD_OPTION_KEYS = [
+	"title",
+	"description",
+	"appendDescription",
+	"status",
+	"priority",
+	"assignee",
+	"delegate",
+	"clearDelegate",
+	"project",
+	"labels",
+	"clearLabels",
+	"parentTicket",
+	"clearParentTicket",
+	"projectMilestone",
+	"clearProjectMilestone",
+	"cycle",
+	"clearCycle",
+	"dueDate",
+	"clearDueDate",
+] as const;
+
+function hasFieldUpdates(options: OptionValues): boolean {
+	return UPDATE_FIELD_OPTION_KEYS.some(
+		(key) => options[key] !== undefined && options[key] !== false,
+	);
+}
+
+function hasRelationFlags(options: OptionValues): boolean {
+	return Boolean(
+		options.relatedTo ||
+			options.blocks ||
+			options.blockedBy ||
+			options.duplicateOf,
+	);
+}
+
 async function handleUpdateIssue(
 	issueId: string,
 	options: OptionValues,
@@ -841,6 +884,29 @@ async function handleUpdateIssue(
 	const rootOpts = getRootOpts(command);
 	const { graphQLService, linearService, issuesService } =
 		await createIssuesService(rootOpts);
+
+	// Relation-only update: no field changes, just relation flags. Behave
+	// identically to `issues relate` — never call updateIssue, so no
+	// defaultPriority side effect and no spurious issue activity.
+	if (!hasFieldUpdates(options) && hasRelationFlags(options)) {
+		const sourceId = await linearService.resolveIssueId(issueId);
+		const relations = await createRelations(
+			sourceId,
+			options,
+			graphQLService,
+			linearService,
+		);
+		if (relations.length === 0) {
+			throw new Error(
+				"Specify at least one of: --related-to, --blocks, --blocked-by, --duplicate-of",
+			);
+		}
+		outputSuccess({
+			data: relations,
+			meta: { count: relations.length, source: issueId },
+		});
+		return;
+	}
 
 	if (options.appendDescription) {
 		const resolved = await linearService.resolveIssueId(issueId);
@@ -898,6 +964,16 @@ async function handleUpdateIssue(
 		},
 		{ graphQLService, linearService },
 	);
+	// Mirror `issues create` / `issues relate`: the --related-to / --blocks /
+	// --blocked-by / --duplicate-of flags create sidebar relations on the
+	// updated issue. Without this, callers wanting to add a relation to an
+	// existing issue have to make a second `issues relate` call.
+	const relations = await createRelations(
+		result.id,
+		options,
+		graphQLService,
+		linearService,
+	);
 	const autoLinked = originalDescription
 		? await maybeAutoLink({
 				issueId: result.id,
@@ -909,7 +985,11 @@ async function handleUpdateIssue(
 				linearService,
 			})
 		: undefined;
-	outputSuccess(autoLinked ? { ...result, autoLinked } : result);
+	outputSuccess({
+		...result,
+		...(relations.length > 0 ? { relations } : {}),
+		...(autoLinked ? { autoLinked } : {}),
+	});
 }
 
 async function handleArchiveIssue(
@@ -1311,6 +1391,10 @@ export function setupIssuesCommands(program: Command): void {
 			"--no-auto-link",
 			"skip auto-linking issue references found in the description",
 		)
+		.option("--related-to <issues>", "related issues (comma-separated)")
+		.option("--blocks <issues>", "issues this blocks (comma-separated)")
+		.option("--blocked-by <issues>", "issues blocking this (comma-separated)")
+		.option("--duplicate-of <issue>", "mark as duplicate of another issue")
 		.action(handleAsyncCommand(handleUpdateIssue));
 
 	issues
