@@ -1,7 +1,7 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	createTestProgram,
 	runCommand,
@@ -52,6 +52,8 @@ vi.mock("../utils/output.js", async (importOriginal) => {
 const { setupCommentsCommands } = await import("./comments.js");
 
 describe("comments commands", () => {
+	let tmpDir: string | undefined;
+
 	beforeEach(() => {
 		vi.clearAllMocks();
 		suppressExit();
@@ -67,6 +69,13 @@ describe("comments commands", () => {
 				},
 			},
 		});
+	});
+
+	afterEach(() => {
+		if (tmpDir) {
+			rmSync(tmpDir, { recursive: true, force: true });
+			tmpDir = undefined;
+		}
 	});
 
 	describe("comments create", () => {
@@ -121,8 +130,8 @@ describe("comments commands", () => {
 		});
 
 		it("reads body from --body-file", async () => {
-			const dir = mkdtempSync(join(tmpdir(), "comments-test-"));
-			const filePath = join(dir, "body.md");
+			tmpDir = mkdtempSync(join(tmpdir(), "comments-test-"));
+			const filePath = join(tmpDir, "body.md");
 			writeFileSync(filePath, "Body from file");
 
 			const program = createTestProgram();
@@ -143,6 +152,84 @@ describe("comments commands", () => {
 					}),
 				}),
 			);
+		});
+
+		it("does not call API when --body-file path does not exist", async () => {
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, [
+				"comments",
+				"create",
+				"ENG-123",
+				"--body-file",
+				"/nonexistent/path/body.md",
+			]);
+
+			expect(mockRawRequest).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("comments update", () => {
+		beforeEach(() => {
+			mockRawRequest.mockResolvedValue({
+				commentUpdate: {
+					success: true,
+					comment: {
+						id: "c1",
+						body: "Updated body",
+						user: { id: "u1", name: "Test User" },
+						createdAt: "2026-01-01T00:00:00.000Z",
+						updatedAt: "2026-01-01T00:00:00.000Z",
+					},
+				},
+			});
+		});
+
+		it("reads body from --body-file", async () => {
+			tmpDir = mkdtempSync(join(tmpdir(), "comments-test-"));
+			const filePath = join(tmpDir, "body.md");
+			writeFileSync(filePath, "Updated from file");
+
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, [
+				"comments",
+				"update",
+				"comment-uuid",
+				"--body-file",
+				filePath,
+			]);
+
+			expect(mockRawRequest).toHaveBeenCalledWith(
+				expect.stringContaining("commentUpdate"),
+				expect.objectContaining({
+					input: expect.objectContaining({
+						body: "Updated from file",
+					}),
+				}),
+			);
+		});
+
+		it("does not call API when --body-file path does not exist", async () => {
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, [
+				"comments",
+				"update",
+				"comment-uuid",
+				"--body-file",
+				"/nonexistent/path/body.md",
+			]);
+
+			expect(mockRawRequest).not.toHaveBeenCalled();
+		});
+
+		it("does not call API when neither --body nor --body-file is provided", async () => {
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, ["comments", "update", "comment-uuid"]);
+
+			expect(mockRawRequest).not.toHaveBeenCalled();
 		});
 	});
 
