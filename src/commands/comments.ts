@@ -40,13 +40,13 @@ const BODY_DATA_ERROR_RE = /prosemirror|bodydata|invalid.*body/i;
 const ISSUE_IDENTIFIER_REGEX = /^[A-Z][A-Z0-9]*-\d+$/;
 
 function readBody(options: OptionValues): string {
-	if (options.file) {
-		return readFileSync(options.file, "utf-8");
+	if (options.bodyFile) {
+		return readFileSync(options.bodyFile, "utf-8");
 	}
 	if (options.body) {
 		return options.body;
 	}
-	throw new Error("Either --body or --file is required");
+	throw new Error("Either --body or --body-file is required");
 }
 
 async function fetchSelfUserId(
@@ -350,7 +350,7 @@ export function setupCommentsCommands(program: Command): void {
 			"\nBoth UUID and identifiers like ABC-123 are supported.\nBare references to known team members (e.g. 'Dima') are auto-converted to @mentions — pass --no-auto-mention to disable.\nIssue identifiers (e.g. DEV-123) are wrapped as markdown links and added as 'related' relations on the parent issue — pass --no-auto-link to disable.",
 		)
 		.option("--body <body>", "comment body (inline)")
-		.option("--file <path>", "read comment body from file")
+		.option("--body-file <path>", "read comment body from file")
 		.option(
 			"--no-auto-mention",
 			"do not auto-convert bare team-member names to @mentions",
@@ -370,7 +370,7 @@ export function setupCommentsCommands(program: Command): void {
 		.command("update <commentId>")
 		.description("Update an existing comment.")
 		.option("--body <body>", "new comment body (inline)")
-		.option("--file <path>", "read new comment body from file")
+		.option("--body-file <path>", "read new comment body from file")
 		.option(
 			"--no-auto-mention",
 			"do not auto-convert bare team-member names to @mentions",
