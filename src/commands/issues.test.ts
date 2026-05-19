@@ -1657,5 +1657,78 @@ describe("issues commands", () => {
 				type: "duplicate",
 			});
 		});
+
+		it("update: --related-to creates a forward 'related' relation", async () => {
+			setupAutoLinkMocks({ "DEV-100": "uuid-100" });
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"update",
+				"DEV-999",
+				"--related-to",
+				"DEV-100",
+			]);
+			expect(findRelationCreateInput()).toEqual({
+				issueId: "uuid-source",
+				relatedIssueId: "uuid-100",
+				type: "related",
+			});
+		});
+
+		it("update: --blocked-by creates a reversed 'blocks' relation", async () => {
+			setupAutoLinkMocks({ "DEV-100": "uuid-100" });
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"update",
+				"DEV-999",
+				"--blocked-by",
+				"DEV-100",
+			]);
+			expect(findRelationCreateInput()).toEqual({
+				issueId: "uuid-100",
+				relatedIssueId: "uuid-source",
+				type: "blocks",
+			});
+		});
+
+		it("update: --duplicate-of creates a forward 'duplicate' relation", async () => {
+			setupAutoLinkMocks({ "DEV-50": "uuid-50" });
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"update",
+				"DEV-999",
+				"--duplicate-of",
+				"DEV-50",
+			]);
+			expect(findRelationCreateInput()).toEqual({
+				issueId: "uuid-source",
+				relatedIssueId: "uuid-50",
+				type: "duplicate",
+			});
+		});
+
+		it("update: --related-to with no other field still updates and relates", async () => {
+			setupAutoLinkMocks({ "DEV-100": "uuid-100" });
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"update",
+				"DEV-999",
+				"--related-to",
+				"DEV-100",
+			]);
+			expect(mockUpdateIssue).toHaveBeenCalled();
+			expect(findRelationCreateInput()).toEqual({
+				issueId: "uuid-source",
+				relatedIssueId: "uuid-100",
+				type: "related",
+			});
+		});
 	});
 });

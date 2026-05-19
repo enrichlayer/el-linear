@@ -147,6 +147,24 @@ el-linear issues related ENG-123 2>&1
 
 Returns all relations (related, blocks, blockedBy, duplicate) with direction, state, and assignee. Use this before creating follow-up work to understand the context around an issue.
 
+### Adding relations to an existing issue
+
+To attach a relation to an issue that **already exists** (triage, splitting findings into separate issues, backfilling related work), use `issues relate` — or pass the same flags to `issues update`:
+
+```bash
+# Dedicated relation command
+el-linear issues relate ENG-123 --related-to "ENG-456,ENG-789" 2>&1
+el-linear issues relate ENG-123 --blocked-by "ENG-400" 2>&1
+el-linear issues relate ENG-123 --duplicate-of "ENG-111" 2>&1
+
+# Or alongside a field update in one call
+el-linear issues update ENG-123 --status "In Progress" --related-to "ENG-456" 2>&1
+```
+
+Both `issues relate` and `issues update` accept `--related-to`, `--blocks`, `--blocked-by`, and `--duplicate-of` (comma-separated identifiers; `--duplicate-of` takes a single issue). `issues create` accepts the same flags.
+
+> **Gotcha:** `--related-to` is **not** valid on `issues update` in el-linear < 1.12. On older versions it fails with `error: unknown option '--related-to'` — use `el-linear issues relate <id> --related-to …` instead. `issues relate` has always supported it.
+
 ### Auto-linking issue references on create/update
 
 `el-linear issues create`, `el-linear issues update`, `el-linear comments create`, and `el-linear comments update` run the same auto-linking flow on text being written:

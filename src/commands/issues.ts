@@ -898,6 +898,16 @@ async function handleUpdateIssue(
 		},
 		{ graphQLService, linearService },
 	);
+	// Mirror `issues create` / `issues relate`: the --related-to / --blocks /
+	// --blocked-by / --duplicate-of flags create sidebar relations on the
+	// updated issue. Without this, callers wanting to add a relation to an
+	// existing issue have to make a second `issues relate` call.
+	const relations = await createRelations(
+		result.id,
+		options,
+		graphQLService,
+		linearService,
+	);
 	const autoLinked = originalDescription
 		? await maybeAutoLink({
 				issueId: result.id,
@@ -909,7 +919,11 @@ async function handleUpdateIssue(
 				linearService,
 			})
 		: undefined;
-	outputSuccess(autoLinked ? { ...result, autoLinked } : result);
+	outputSuccess({
+		...result,
+		...(relations.length > 0 ? { relations } : {}),
+		...(autoLinked ? { autoLinked } : {}),
+	});
 }
 
 async function handleArchiveIssue(
@@ -1311,6 +1325,10 @@ export function setupIssuesCommands(program: Command): void {
 			"--no-auto-link",
 			"skip auto-linking issue references found in the description",
 		)
+		.option("--related-to <issues>", "related issues (comma-separated)")
+		.option("--blocks <issues>", "issues this blocks (comma-separated)")
+		.option("--blocked-by <issues>", "issues blocking this (comma-separated)")
+		.option("--duplicate-of <issue>", "mark as duplicate of another issue")
 		.action(handleAsyncCommand(handleUpdateIssue));
 
 	issues
