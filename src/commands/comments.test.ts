@@ -1,3 +1,6 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	createTestProgram,
@@ -115,6 +118,31 @@ describe("comments commands", () => {
 			await runCommand(program, ["comments", "create", "ENG-123"]);
 
 			expect(mockRawRequest).not.toHaveBeenCalled();
+		});
+
+		it("reads body from --body-file", async () => {
+			const dir = mkdtempSync(join(tmpdir(), "comments-test-"));
+			const filePath = join(dir, "body.md");
+			writeFileSync(filePath, "Body from file");
+
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, [
+				"comments",
+				"create",
+				"ENG-123",
+				"--body-file",
+				filePath,
+			]);
+
+			expect(mockRawRequest).toHaveBeenCalledWith(
+				expect.stringContaining("commentCreate"),
+				expect.objectContaining({
+					input: expect.objectContaining({
+						body: "Body from file",
+					}),
+				}),
+			);
 		});
 	});
 
