@@ -280,10 +280,32 @@ async function handleUpdateComment(
 		input.body = body;
 	}
 
-	const result = await graphQLService.rawRequest<UpdateCommentResponse>(
-		UPDATE_COMMENT_MUTATION,
-		{ id: commentId, input },
-	);
+	let result: UpdateCommentResponse;
+	try {
+		result = await graphQLService.rawRequest<UpdateCommentResponse>(
+			UPDATE_COMMENT_MUTATION,
+			{ id: commentId, input },
+		);
+	} catch (err: unknown) {
+		// Same defense-in-depth fallback as `handleCreateComment` above: when
+		// Linear rejects `bodyData` (schema drift, unsupported node, validator
+		// quirk), retry the mutation with raw markdown `body` so the update
+		// goes through even if our prosemirror converter has fallen behind a
+		// schema change. The asymmetry between create and update used to mean
+		// any future drift would silently break updates while creates kept
+		// working — DEV-4261 closes that gap. Two call sites is the floor for
+		// extraction; copy-then-refactor on the third per the repo convention.
+		const msg = err instanceof Error ? err.message : String(err);
+		if (input.bodyData && BODY_DATA_ERROR_RE.test(msg)) {
+			const fallbackInput: Record<string, unknown> = { body };
+			result = await graphQLService.rawRequest<UpdateCommentResponse>(
+				UPDATE_COMMENT_MUTATION,
+				{ id: commentId, input: fallbackInput },
+			);
+		} else {
+			throw err;
+		}
+	}
 	const mutation = result.commentUpdate;
 	if (!mutation.success || !mutation.comment) {
 		throw new Error("Failed to update comment");
