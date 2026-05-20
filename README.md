@@ -277,17 +277,33 @@ Personal config wins on scalar conflicts. Arrays (`terms`, `defaultLabels`) are
 **concatenated** — personal entries are appended to team entries, so you extend
 the team rules rather than replace them.
 
-**Set the team config path** via personal config:
+**Set the team config path** with the `config team` subcommand — it
+resolves relative / `~/...` paths, validates the file before writing, and
+performs an atomic file-locked update:
+
+```bash
+el-linear config team set-path /path/to/tools-repo/.el-linear/config.json
+el-linear config team show     # confirm path + the keys it contributes
+el-linear config team clear    # remove the pointer
+```
+
+The command writes `teamConfigPath` into your personal `config.json`, so
+the setting persists across shells. To override the persistent setting
+per-invocation, use the `EL_LINEAR_TEAM_CONFIG` env var (highest
+priority):
+
+```bash
+EL_LINEAR_TEAM_CONFIG=/path/to/tools-repo/.el-linear/config.json el-linear issues create ...
+```
+
+If you prefer to edit the personal config by hand, the field looks like:
 
 ```json
 { "teamConfigPath": "/path/to/tools-repo/.el-linear/config.json" }
 ```
 
-Or override per-invocation with the `EL_LINEAR_TEAM_CONFIG` env var (highest priority):
-
-```bash
-EL_LINEAR_TEAM_CONFIG=/path/to/tools-repo/.el-linear/config.json el-linear issues create ...
-```
+— but the CLI path is preferred (it catches missing-file and invalid-JSON
+mistakes before they silently fall back to no team layer).
 
 **The team config file** is a standard `config.json` fragment — any `ElLinearConfig`
 field is valid except `teamConfigPath` itself. Keep it free of tokens and personal
