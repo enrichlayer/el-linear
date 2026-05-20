@@ -196,7 +196,7 @@ function injectMentions(
 	return {
 		...doc,
 		content: doc.content.map((node) => {
-			if (node.content && node.type !== "codeBlock") {
+			if (node.content && node.type !== "code_block") {
 				const processed = injectMentions(node, explicit, bare);
 				if (node.type === "paragraph" || node.type === "heading") {
 					return {

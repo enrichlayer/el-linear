@@ -35,9 +35,9 @@ describe("markdownToProseMirror", () => {
 		const doc = markdownToProseMirror("- Item one\n- Item two\n- Item three");
 		expect(doc.content).toHaveLength(1);
 		const list = doc.content![0];
-		expect(list.type).toBe("bulletList");
+		expect(list.type).toBe("bullet_list");
 		expect(list.content).toHaveLength(3);
-		expect(list.content![0].type).toBe("listItem");
+		expect(list.content![0].type).toBe("list_item");
 		expect(list.content![0].content![0].content![0].text).toBe("Item one");
 	});
 
@@ -45,7 +45,7 @@ describe("markdownToProseMirror", () => {
 		const doc = markdownToProseMirror("1. First\n2. Second");
 		expect(doc.content).toHaveLength(1);
 		const list = doc.content![0];
-		expect(list.type).toBe("orderedList");
+		expect(list.type).toBe("ordered_list");
 		expect(list.content).toHaveLength(2);
 	});
 
@@ -53,7 +53,7 @@ describe("markdownToProseMirror", () => {
 		const doc = markdownToProseMirror("```typescript\nconst x = 1;\n```");
 		expect(doc.content).toHaveLength(1);
 		const block = doc.content![0];
-		expect(block.type).toBe("codeBlock");
+		expect(block.type).toBe("code_block");
 		expect(block.attrs).toEqual({ language: "typescript" });
 		expect(block.content![0].text).toBe("const x = 1;");
 	});
@@ -61,7 +61,7 @@ describe("markdownToProseMirror", () => {
 	it("converts code blocks without language", () => {
 		const doc = markdownToProseMirror("```\nsome code\n```");
 		const block = doc.content![0];
-		expect(block.type).toBe("codeBlock");
+		expect(block.type).toBe("code_block");
 		expect(block.attrs).toBeUndefined();
 	});
 
@@ -76,7 +76,7 @@ describe("markdownToProseMirror", () => {
 	it("converts horizontal rules", () => {
 		const doc = markdownToProseMirror("---");
 		expect(doc.content).toHaveLength(1);
-		expect(doc.content![0].type).toBe("horizontalRule");
+		expect(doc.content![0].type).toBe("horizontal_rule");
 	});
 
 	it("handles mixed content", () => {
@@ -100,8 +100,8 @@ describe("markdownToProseMirror", () => {
 		expect(types).toEqual([
 			"heading",
 			"paragraph",
-			"bulletList",
-			"codeBlock",
+			"bullet_list",
+			"code_block",
 			"blockquote",
 		]);
 	});
@@ -119,7 +119,7 @@ describe("parseInline", () => {
 		expect(nodes[1]).toEqual({
 			type: "text",
 			text: "world",
-			marks: [{ type: "bold" }],
+			marks: [{ type: "strong" }],
 		});
 	});
 
@@ -129,7 +129,7 @@ describe("parseInline", () => {
 		expect(nodes[1]).toEqual({
 			type: "text",
 			text: "world",
-			marks: [{ type: "italic" }],
+			marks: [{ type: "em" }],
 		});
 	});
 
@@ -194,7 +194,7 @@ describe("parseInline", () => {
 	it("parses multiple inline marks in sequence", () => {
 		const nodes = parseInline("**bold** then `code`");
 		expect(nodes).toHaveLength(3);
-		expect(nodes[0].marks![0].type).toBe("bold");
+		expect(nodes[0].marks![0].type).toBe("strong");
 		expect(nodes[1].text).toBe(" then ");
 		expect(nodes[2].marks![0].type).toBe("code");
 	});
@@ -211,9 +211,9 @@ describe("table support", () => {
 		expect(doc.content![0].type).toBe("table");
 		const rows = doc.content![0].content!;
 		expect(rows).toHaveLength(3); // header + 2 body rows
-		expect(rows[0].content![0].type).toBe("tableHeader");
+		expect(rows[0].content![0].type).toBe("table_header");
 		expect(rows[0].content![0].content![0].content![0].text).toBe("Vendor");
-		expect(rows[1].content![0].type).toBe("tableCell");
+		expect(rows[1].content![0].type).toBe("table_cell");
 		expect(rows[1].content![0].content![0].content![0].text).toBe("Stripe");
 	});
 
@@ -230,7 +230,7 @@ describe("table support", () => {
 		const doc = markdownToProseMirror(md);
 		const bodyRow = doc.content![0].content![1];
 		const nameCell = bodyRow.content![0].content![0].content![0];
-		expect(nameCell.marks![0].type).toBe("bold");
+		expect(nameCell.marks![0].type).toBe("strong");
 		expect(nameCell.text).toBe("Stripe");
 	});
 
@@ -252,7 +252,7 @@ describe("table support", () => {
 		const doc = markdownToProseMirror(md);
 		const bodyRow = doc.content![0].content![1];
 		expect(bodyRow.content).toHaveLength(3);
-		expect(bodyRow.content![2].type).toBe("tableCell");
+		expect(bodyRow.content![2].type).toBe("table_cell");
 		expect(bodyRow.content![2].content![0].content).toEqual([]);
 	});
 
