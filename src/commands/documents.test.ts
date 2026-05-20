@@ -201,7 +201,12 @@ describe("documents commands", () => {
 				"My Project",
 			]);
 
-			expect(mockResolveProjectId).toHaveBeenCalledWith("My Project");
+			// DEV-4103: resolveProjectId accepts an optional --team scope so a
+			// name shared across teams doesn't silently bind to the wrong one.
+			expect(mockResolveProjectId).toHaveBeenCalledWith(
+				"My Project",
+				undefined,
+			);
 			expect(mockCreateDocument).toHaveBeenCalledWith(
 				expect.objectContaining({ projectId: "proj-uuid-1" }),
 			);

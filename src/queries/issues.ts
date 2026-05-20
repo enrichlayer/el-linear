@@ -328,7 +328,7 @@ export const BATCH_RESOLVE_FOR_CREATE_QUERY = `
 
     projectsByName: projects(
       filter: { name: { eqIgnoreCase: $projectName } }
-      first: 1
+      first: 5
     ) @include(if: $hasProjectName) {
       nodes {
         id

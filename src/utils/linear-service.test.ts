@@ -269,6 +269,66 @@ describe("LinearService", () => {
 				}),
 			);
 		});
+
+		// DEV-4103: --team scopes the resolver, ambiguous-name errors otherwise.
+		describe("DEV-4103: --team disambiguation", () => {
+			it("scopes the name filter to --team when provided", async () => {
+				// Team resolution first: DEV → uuid-dev. Then projects lookup.
+				mockTeams.mockResolvedValueOnce({
+					nodes: [{ id: "uuid-dev", key: "DEV", name: "Dev" }],
+				});
+				mockProjects.mockResolvedValueOnce({
+					nodes: [{ id: "shared-id-dev" }],
+				});
+				const service = new LinearService({ apiKey: "token" });
+				const result = await service.resolveProjectId("Shared Name", "DEV");
+				expect(result).toBe("shared-id-dev");
+				expect(mockProjects).toHaveBeenLastCalledWith(
+					expect.objectContaining({
+						filter: {
+							name: { eqIgnoreCase: "Shared Name" },
+							teams: { some: { id: { eq: "uuid-dev" } } },
+						},
+						first: 5,
+					}),
+				);
+			});
+
+			it("throws ambiguous when multiple projects share a name and no --team is set", async () => {
+				// Pretend both DEV and INF have a project called "Shared Name".
+				mockProjects.mockResolvedValueOnce({
+					nodes: [
+						{
+							id: "shared-id-dev",
+							name: "Shared Name",
+							teams: () =>
+								Promise.resolve({ nodes: [{ id: "uuid-dev", key: "DEV" }] }),
+						},
+						{
+							id: "shared-id-inf",
+							name: "Shared Name",
+							teams: () =>
+								Promise.resolve({ nodes: [{ id: "uuid-inf", key: "INF" }] }),
+						},
+					],
+				});
+				const service = new LinearService({ apiKey: "token" });
+				await expect(service.resolveProjectId("Shared Name")).rejects.toThrow(
+					/Multiple projects.*Shared Name.*DEV.*INF/s,
+				);
+			});
+
+			it("includes team context in the not-found message when --team is set", async () => {
+				mockTeams.mockResolvedValueOnce({
+					nodes: [{ id: "uuid-dev", key: "DEV", name: "Dev" }],
+				});
+				mockProjects.mockResolvedValueOnce({ nodes: [] });
+				const service = new LinearService({ apiKey: "token" });
+				await expect(
+					service.resolveProjectId("Nonexistent", "DEV"),
+				).rejects.toThrow('Project "Nonexistent" on team "DEV" not found.');
+			});
+		});
 	});
 
 	describe("normalizeProjectInput", () => {

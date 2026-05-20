@@ -45,7 +45,7 @@ import type { CreateLabelResponse } from "../queries/labels-types.js";
 import type { LinearIssue, LinearPriority } from "../types/linear.js";
 import { toISOStringOrNow } from "./date-format.js";
 import { extractEmbeds } from "./embed-parser.js";
-import { notFoundError } from "./error-messages.js";
+import { multipleMatchesError, notFoundError } from "./error-messages.js";
 import type { GraphQLService } from "./graphql-service.js";
 import {
 	parseIssueIdentifier,
@@ -605,7 +605,7 @@ export class GraphQLIssuesService {
 			: undefined;
 
 		const projectId: string | undefined = args.projectId
-			? this.resolveProjectId(args.projectId, resolveResult)
+			? this.resolveProjectId(args.projectId, resolveResult, teamId)
 			: undefined;
 
 		// Validate team-project compatibility and auto-correct when possible
@@ -818,9 +818,23 @@ export class GraphQLIssuesService {
 		return this.linearService.resolveTeamId(teamId);
 	}
 
+	/**
+	 * Pick a project ID from the batched name-lookup result.
+	 *
+	 * The batch query fetches up to 5 candidates by name (DEV-4103) so that
+	 * a name shared across teams doesn't silently bind to whichever project
+	 * Linear returned first. When a `--team` was supplied, prefer the
+	 * candidate whose team set includes it; the downstream
+	 * `validateProjectTeam` will then no-op (the team already matches).
+	 * When multiple candidates exist and none of them are on the requested
+	 * team (or no team was supplied), throw an explicit ambiguous-project
+	 * error listing the candidate teams — far better than the prior silent
+	 * cross-team match.
+	 */
 	private resolveProjectId(
 		projectId: string,
 		resolveResult: BatchResolveResult,
+		teamId?: string,
 	): string {
 		if (isUuid(projectId)) {
 			// The create/update batch queries fetch a `projectsById` block for a
@@ -841,7 +855,32 @@ export class GraphQLIssuesService {
 		if (!projectNodes?.length) {
 			throw notFoundError("Project", projectId);
 		}
-		return projectNodes[0].id;
+		if (projectNodes.length === 1) {
+			return projectNodes[0].id;
+		}
+		// Multiple matches — disambiguate by team when possible.
+		if (teamId) {
+			const teamMatches = projectNodes.filter((n) =>
+				n.teams?.nodes.some((t) => t.id === teamId),
+			);
+			if (teamMatches.length === 1) {
+				return teamMatches[0].id;
+			}
+			if (teamMatches.length > 1) {
+				// Same name, same team — extremely rare but Linear permits it.
+				// Fall through to ambiguity error so the user picks by URL/slug.
+			}
+		}
+		const descriptions = projectNodes.map((n) => {
+			const teamKeys = n.teams?.nodes.map((t) => t.key) ?? [];
+			return `${n.id} (teams: ${teamKeys.join(", ") || "none"})`;
+		});
+		throw multipleMatchesError(
+			"project",
+			projectId,
+			descriptions,
+			"scope with --team, or pass the project URL/slug-id",
+		);
 	}
 
 	/**
