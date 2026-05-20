@@ -120,7 +120,7 @@ function parseFencedCodeBlock(state: ParseState, line: string): boolean {
 		attrs.language = language;
 	}
 	state.content.push({
-		type: "codeBlock",
+		type: "code_block",
 		...(Object.keys(attrs).length > 0 ? { attrs } : {}),
 		content:
 			codeLines.length > 0
@@ -134,7 +134,7 @@ function parseHorizontalRule(state: ParseState, line: string): boolean {
 	if (!HR_RE.test(line)) {
 		return false;
 	}
-	state.content.push({ type: "horizontalRule" });
+	state.content.push({ type: "horizontal_rule" });
 	state.i++;
 	return true;
 }
@@ -164,12 +164,12 @@ function parseBulletList(state: ParseState, line: string): boolean {
 			break;
 		}
 		items.push({
-			type: "listItem",
+			type: "list_item",
 			content: [{ type: "paragraph", content: parseInline(m[1]) }],
 		});
 		state.i++;
 	}
-	state.content.push({ type: "bulletList", content: items });
+	state.content.push({ type: "bullet_list", content: items });
 	return true;
 }
 
@@ -184,12 +184,12 @@ function parseOrderedList(state: ParseState, line: string): boolean {
 			break;
 		}
 		items.push({
-			type: "listItem",
+			type: "list_item",
 			content: [{ type: "paragraph", content: parseInline(m[1]) }],
 		});
 		state.i++;
 	}
-	state.content.push({ type: "orderedList", content: items });
+	state.content.push({ type: "ordered_list", content: items });
 	return true;
 }
 
@@ -261,9 +261,9 @@ function parseTable(state: ParseState, line: string): boolean {
 	const cols = headerCells.length;
 
 	rows.push({
-		type: "tableRow",
+		type: "table_row",
 		content: headerCells.map((cell) => ({
-			type: "tableHeader",
+			type: "table_header",
 			content: [{ type: "paragraph", content: cellContent(cell) }],
 		})),
 	});
@@ -283,9 +283,9 @@ function parseTable(state: ParseState, line: string): boolean {
 		}
 		cells.length = cols;
 		rows.push({
-			type: "tableRow",
+			type: "table_row",
 			content: cells.map((cell) => ({
-				type: "tableCell",
+				type: "table_cell",
 				content: [{ type: "paragraph", content: cellContent(cell) }],
 			})),
 		});
@@ -398,7 +398,7 @@ function findEarliestInlineMatch(text: string): InlineMatch | null {
 			index: boldMatch.index ?? 0,
 			length: boldMatch[0].length,
 			innerText: boldMatch[1] ?? boldMatch[2],
-			marks: [{ type: "bold" }],
+			marks: [{ type: "strong" }],
 		});
 	}
 
@@ -408,7 +408,7 @@ function findEarliestInlineMatch(text: string): InlineMatch | null {
 			index: italicMatch.index ?? 0,
 			length: italicMatch[0].length,
 			innerText: italicMatch[1] ?? italicMatch[2],
-			marks: [{ type: "italic" }],
+			marks: [{ type: "em" }],
 		});
 	}
 

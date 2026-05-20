@@ -322,3 +322,118 @@ describe("resolveMentions — auto-mention for bare names", () => {
 		expect(mentions[1].attrs!.id).toBe(UUID_BOB);
 	});
 });
+
+// DEV-3785: comment creation failed for long bodies containing @mentions.
+// Root cause was schema-name drift in `markdown-prosemirror` — `bulletList` /
+// `codeBlock` / `bold` / `italic` etc. were camelCase, but Linear's schema
+// uses snake_case (`bullet_list`, `code_block`) and the marks `strong` /
+// `em`. The error surfaced as "Invalid bodyData value" once a markdown
+// element actually fired (longer bodies routinely contained lists / code /
+// bold). The fix is to emit Linear-native names everywhere. These tests lock
+// in the contract by exercising every node and mark type through the
+// mention-injection path and asserting Linear-schema names appear.
+describe("resolveMentions — DEV-3785 schema regression", () => {
+	it("produces Linear-schema node names for a markdown-rich body with a mention", async () => {
+		const body = [
+			"# Setup",
+			"",
+			"@bob please run the following steps:",
+			"",
+			"- Install deps",
+			"- Run **the build** with `pnpm build`",
+			"- See the [README](https://example.com/readme)",
+			"",
+			"```bash",
+			"pnpm install",
+			"```",
+			"",
+			"---",
+			"",
+			"> A note: this is _important_.",
+		].join("\n");
+
+		const result = await resolveMentions(body, mockLinearService());
+		expect(result).not.toBeNull();
+
+		// Collect every `type` in the doc and assert none of them are the old
+		// camelCase names. The renames are the regression we're locking in.
+		const types = new Set<string>();
+		const marks = new Set<string>();
+		const walk = (node: {
+			type: string;
+			content?: unknown[];
+			marks?: { type: string }[];
+		}) => {
+			types.add(node.type);
+			if (node.marks) {
+				for (const m of node.marks) marks.add(m.type);
+			}
+			if (Array.isArray(node.content)) {
+				for (const child of node.content) {
+					walk(child as Parameters<typeof walk>[0]);
+				}
+			}
+		};
+		walk(result!.bodyData as Parameters<typeof walk>[0]);
+
+		const forbidden = [
+			"bulletList",
+			"orderedList",
+			"listItem",
+			"codeBlock",
+			"horizontalRule",
+			"tableCell",
+			"tableHeader",
+			"tableRow",
+		];
+		for (const bad of forbidden) {
+			expect(types.has(bad), `node type "${bad}" leaked into output`).toBe(
+				false,
+			);
+		}
+		expect(marks.has("bold"), 'mark "bold" leaked (should be "strong")').toBe(
+			false,
+		);
+		expect(marks.has("italic"), 'mark "italic" leaked (should be "em")').toBe(
+			false,
+		);
+
+		// Sanity-check that the Linear-native names ARE present.
+		expect(types.has("bullet_list")).toBe(true);
+		expect(types.has("code_block")).toBe(true);
+		expect(types.has("horizontal_rule")).toBe(true);
+		expect(marks.has("strong")).toBe(true);
+		expect(marks.has("em")).toBe(true);
+
+		// The mention itself still landed (proves the schema fix didn't break
+		// mention injection through list / paragraph walking).
+		expect(types.has("suggestion_userMentions")).toBe(true);
+	});
+
+	it("handles a long single-paragraph body with one mention (the original repro)", async () => {
+		// Matches the DEV-3785 issue example almost verbatim — single
+		// paragraph, one mention, no other markdown. Documented as the case
+		// that originally surfaced the bug; left here so the repro stays
+		// visible in the test names.
+		const body =
+			"@bob Here is a longer message with enough text to trigger the bug in prosemirror conversion.";
+		const result = await resolveMentions(body, mockLinearService());
+		expect(result).not.toBeNull();
+
+		const paragraph = result!.bodyData.content![0];
+		expect(paragraph.type).toBe("paragraph");
+		const children = paragraph.content!;
+		expect(children[0].type).toBe("suggestion_userMentions");
+		expect(children[0].attrs!.id).toBe(UUID_BOB);
+		expect(children[1].type).toBe("text");
+		expect((children[1].text as string).startsWith(" Here is a longer")).toBe(
+			true,
+		);
+		// No empty text nodes — Linear's validator rejects them.
+		for (const node of children) {
+			if (node.type === "text") {
+				expect((node.text as string).length).toBeGreaterThan(0);
+			}
+		}
+	});
+});
