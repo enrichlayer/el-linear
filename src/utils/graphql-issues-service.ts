@@ -352,8 +352,19 @@ export class GraphQLIssuesService {
 			normalizedArgs.teamId,
 		);
 
+		// DEV-4103: scope project disambiguation by the issue's existing team
+		// so a `--project` name shared across teams binds to the issue's team
+		// rather than whichever project Linear happened to return first.
+		// `issueTeamId` is the right scope here — it's always a UUID and
+		// represents the team the issue currently lives on. `--team` is rare
+		// on update (and would imply a cross-team move that goes through
+		// separate validation paths anyway).
 		const finalProjectId = normalizedArgs.projectId
-			? this.resolveProjectId(normalizedArgs.projectId, resolveResult)
+			? this.resolveProjectId(
+					normalizedArgs.projectId,
+					resolveResult,
+					issueTeamId,
+				)
 			: undefined;
 
 		const { projectMilestoneNodes, issueProjectMilestoneNodes } =
