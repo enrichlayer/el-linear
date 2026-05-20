@@ -431,6 +431,10 @@ async function resolveCreateInputs(
 			title,
 			assignee: effectiveAssignee,
 			project: options.project,
+			// DEV-4084: scope the accepted type-label set to the team so the
+			// DEV team's `research` label validates without `--skip-validation`.
+			// Falls back to the workspace default when no team is provided.
+			team: options.team || config.defaultTeam || undefined,
 		});
 
 		// Apply normalized labels back so resolution uses the canonical names

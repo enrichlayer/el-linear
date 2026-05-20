@@ -315,8 +315,13 @@ export async function enrichValidationErrors(
 	const projects = teamData.projects?.nodes ?? [];
 	const members = teamData.members?.nodes ?? [];
 	const labels = teamData.labels?.nodes ?? [];
-	const typeLabels = getCanonicalTypeLabels();
-	const inferred = options.title ? inferTypeFromTitle(options.title) : null;
+	// DEV-4084: scope the suggested type-label set to the team when one is
+	// known so the retry hint surfaces (e.g.) `research` instead of `spike`
+	// on the Dev team.
+	const typeLabels = getCanonicalTypeLabels(options.team);
+	const inferred = options.title
+		? inferTypeFromTitle(options.title, options.team)
+		: null;
 
 	for (let i = 0; i < result.errors.length; i++) {
 		result.errors[i] = decorateError(result.errors[i], classifications[i], {
