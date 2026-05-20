@@ -31,6 +31,12 @@ on:
   push:
     branches:
       - main
+  # Manual trigger for credential-rotation / debugging / one-off catch-up.
+  # release-please is idempotent — a manual run is a no-op when there's
+  # nothing new to release. Added in DEV-4273 after the DEV-4269 credential
+  # outage required piggybacking on an organic merge to verify the renewed
+  # `RELEASE_PLEASE_TOKEN`. Fires with: `gh workflow run release-please.yml`.
+  workflow_dispatch:
 
 permissions:
   contents: write
