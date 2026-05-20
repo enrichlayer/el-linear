@@ -12,7 +12,8 @@
 		},
 		"./output": {
 			"types": "./dist/output.d.ts",
-			"import": "./dist/output.js"
+			"import": "./dist/output.js",
+			"default": "./dist/output.js"
 		}
 	},
 	"sideEffects": false,

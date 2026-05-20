@@ -54,6 +54,13 @@
  * `outputWarning`. The shared state in this module takes care of `--jq`,
  * `--fields`, `--raw`, and summary rendering uniformly.
  *
+ * Adapt the option names and flags to your CLI's existing conventions —
+ * the contract is the four setter calls (`setRawMode`, `setJqFilter`,
+ * `setFieldsFilter`, `setOutputFormat`), not the literal `--jq` /
+ * `--fields` / `--raw` / `--format` names. A CLI that already exposes
+ * `--json` / `--summary` shorthands can keep them as long as the
+ * preAction hook ends up calling the same setters with equivalent values.
+ *
  * # What is NOT exported
  *
  * - `--format summary` dispatch tables are linctl-specific (Linear
@@ -65,8 +72,11 @@
  *   in turn calls `outputError`. Don't re-export the bare function; the
  *   wrapper is the contract.
  * - Token-sanitization (`sanitizeForLog`) is internal to the error path.
- *   If a consumer needs sanitization elsewhere it should pull a small
- *   redactor of its own — coupling token redaction to the output layer
+ *   Consumers that route errors through `handleAsyncCommand` automatically
+ *   get token redaction on the error path — no separate redactor needed
+ *   for that case. If a consumer wants sanitization for something OTHER
+ *   than thrown errors (e.g. a custom debug log), it should pull a small
+ *   redactor of its own; coupling token redaction to the output layer
  *   would make this API surface stickier than it needs to be.
  */
 
