@@ -192,14 +192,26 @@ export class LinearService {
 		if (options.teamId) {
 			filter.teams = { some: { id: { eq: options.teamId } } };
 		}
-		const projects = await this.client.projects({
+		// `limit === 0` means "no limit" — paginate the full result set.
+		// Otherwise a single page of `limit` projects. DEV-4175: `--all` /
+		// `--limit 0` must return every project so callers never make a false
+		// "does not exist" determination off a silently truncated page.
+		const unlimited = limit === 0;
+		let page = await this.client.projects({
 			filter: nonEmptyFilter(filter),
-			first: limit,
+			first: unlimited ? 250 : limit,
 			orderBy: sdkOrderBy("updatedAt"),
 			includeArchived: false,
 		});
+		const projectNodes = [...page.nodes];
+		if (unlimited) {
+			while (page.pageInfo.hasNextPage) {
+				page = await page.fetchNext();
+				projectNodes.push(...page.nodes);
+			}
+		}
 		const projectsWithData = await Promise.all(
-			projects.nodes.map(async (project) => {
+			projectNodes.map(async (project) => {
 				const [teams, lead] = await Promise.all([
 					project.teams(),
 					project.lead,

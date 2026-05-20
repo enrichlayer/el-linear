@@ -30,7 +30,7 @@ import { logger } from "../utils/logger.js";
 import {
 	handleAsyncCommand,
 	outputSuccess,
-	warnIfTruncated,
+	outputWarning,
 } from "../utils/output.js";
 import { getRootOpts } from "../utils/root-opts.js";
 import {
@@ -51,6 +51,59 @@ const VALID_PROJECT_STATES: ReadonlySet<string> = new Set([
 	"completed",
 	"canceled",
 ]);
+
+/**
+ * Display ordering for `projects list`: active work first, terminal states
+ * last. Without this, the SDK's `updatedAt` order surfaces recently-touched
+ * completed/canceled projects ahead of in-progress ones — so an active project
+ * can fall past the `--limit` window and an agent concludes it does not exist
+ * (the DEV-4175 silent-truncation failure). Stable sort preserves `updatedAt`
+ * within each rank.
+ *
+ * `Linear` exposes additional internal states (e.g. archived) that we don't
+ * enumerate here; anything not in this table sorts to the end via
+ * `UNRANKED_STATE`.
+ */
+const PROJECT_STATE_RANK: Record<string, number> = {
+	started: 0,
+	planned: 1,
+	paused: 2,
+	backlog: 3,
+	completed: 4,
+	canceled: 5,
+};
+const UNRANKED_STATE = 9;
+
+export function sortActiveFirst(projects: LinearProject[]): LinearProject[] {
+	return [...projects].sort(
+		(a, b) =>
+			(PROJECT_STATE_RANK[a.state ?? ""] ?? UNRANKED_STATE) -
+			(PROJECT_STATE_RANK[b.state ?? ""] ?? UNRANKED_STATE),
+	);
+}
+
+/**
+ * Emit a truncation warning when `projects list` returned exactly `--limit`
+ * rows (the same `count === limit` heuristic as `warnIfTruncated` in
+ * `output.ts`). JSON buffers it into `_warnings` so the payload stays a single
+ * parseable object; every human-facing format prints to stderr so it can't be
+ * silently scrolled past. DEV-4175.
+ */
+function warnProjectsTruncated(
+	count: number,
+	limit: number,
+	format: string,
+): void {
+	const msg =
+		`results_truncated: returned ${count} projects matching --limit ${limit}; ` +
+		"more may exist. Re-run with --all to fetch every project " +
+		`(or --limit ${limit * 2}, or narrow with --name / --state / --team).`;
+	if (format === "json") {
+		outputWarning(msg);
+	} else {
+		logger.error(msg);
+	}
+}
 
 function parseStateList(value: string, flagName: string): string[] {
 	const states = splitList(value).map((s) => s.toLowerCase());
@@ -615,10 +668,20 @@ export function setupProjectsCommands(program: Command): void {
 			"--active",
 			"shorthand for --exclude-state completed,canceled (mutually exclusive with --state / --exclude-state)",
 		)
+		.option(
+			"--all",
+			"fetch every project (paginates fully). Equivalent to --limit 0; overrides --limit when both are given.",
+		)
 		.action(
 			handleAsyncCommand(async (options: OptionValues, command: Command) => {
 				const rootOpts = getRootOpts(command);
-				const limit = parsePositiveInt(options.limit, "--limit");
+				// `--all` / `--limit 0` mean unlimited. Stored as `limit = 0`,
+				// which `LinearService.getProjects` interprets as "paginate
+				// fully". DEV-4175.
+				const unlimited = options.all === true || options.limit === "0";
+				const limit = unlimited
+					? 0
+					: parsePositiveInt(options.limit, "--limit");
 				const nameFilter = options.name as string | undefined;
 				const teamFilter = options.team as string | undefined;
 				const stateFilter = resolveProjectStateFilter(options);
@@ -648,23 +711,39 @@ export function setupProjectsCommands(program: Command): void {
 						excludeStates: stateFilter.excludeStates,
 					});
 				});
+				// Active-first sort: keeps started/planned/paused/backlog
+				// ahead of completed/canceled in every format, so the active
+				// set always fits within `--limit`. DEV-4175.
+				const sorted = sortActiveFirst(result);
 				const format = options.format as string;
-				if (
+				const isTabular =
 					format === "table" ||
 					format === "md" ||
 					format === "markdown" ||
-					format === "csv"
-				) {
+					format === "csv";
+
+				// Emit the truncation warning BEFORE outputting: the JSON
+				// branch buffers into `_warnings`, which the next
+				// `outputSuccess()` call drains. All other formats route to
+				// stderr via `logger.error` so the visible payload (table,
+				// markdown, summary) stays clean.
+				if (!unlimited && sorted.length === limit) {
+					warnProjectsTruncated(sorted.length, limit, format);
+				}
+
+				if (isTabular) {
 					const fieldList = options.fields
 						? splitList(options.fields)
 						: undefined;
-					formatProjectsOutput(result, format, fieldList);
+					formatProjectsOutput(sorted, format, fieldList);
 					if (format === "table") {
-						logger.info(`\n${result.length} projects`);
+						logger.info(`\n${sorted.length} projects`);
 					}
 				} else {
-					warnIfTruncated(result.length, limit);
-					outputSuccess({ data: result, meta: { count: result.length } });
+					outputSuccess({
+						data: sorted,
+						meta: { count: sorted.length },
+					});
 				}
 			}),
 		);
