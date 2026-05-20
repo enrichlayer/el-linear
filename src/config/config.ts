@@ -1,4 +1,6 @@
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { outputWarning } from "../utils/output.js";
 import {
 	CONFIG_PATH,
@@ -7,6 +9,54 @@ import {
 	resolveActiveProfile,
 } from "./paths.js";
 import type { TermRule } from "./term-enforcer.js";
+
+/**
+ * Marker file written by the EL onboarding flow (`link-project.sh`) when a
+ * developer wires the tools repo to their machine. We treat its presence as
+ * the consent signal for auto-discovering the team config — see
+ * `discoverTeamConfigViaMarker` and DEV-4258.
+ *
+ * `os.homedir()` is evaluated lazily inside the helper so a mocked HOME in
+ * tests doesn't get baked into a module-level constant.
+ */
+function elToolsRootMarkerPath(): string {
+	return path.join(os.homedir(), ".config", "el-tools-root");
+}
+
+/**
+ * Source attribution for the active team-config layer. Surfaced via
+ * `getActiveTeamConfigInfo()` and rendered by `el-linear config team show` so
+ * the operator can debug "which file is el-linear actually loading?".
+ *
+ * - `env`: `EL_LINEAR_TEAM_CONFIG` is set in the environment (highest).
+ * - `personal`: `teamConfigPath` field in personal `config.json`.
+ * - `marker`: auto-discovered via `~/.config/el-tools-root` (DEV-4258).
+ * - `null`: no team layer active.
+ */
+export type TeamConfigSource = "env" | "personal" | "marker" | null;
+
+/**
+ * Resolve the shared team config path by reading the `~/.config/el-tools-root`
+ * marker file written by the EL onboarding flow (`link-project.sh`). Looks for
+ * `<root>/config/el-linear.shared.json` and returns the absolute path when it
+ * exists. Returns `undefined` for any of: marker missing, marker unreadable,
+ * marker empty, shared file missing — every failure mode is silent because
+ * the marker is opt-in and a non-EL user (OSS audience) is expected to miss
+ * it.
+ *
+ * The marker is the consent signal: only developers who explicitly linked
+ * their tools repo see this auto-discovery. DEV-4258 / ALL-964.
+ */
+function discoverTeamConfigViaMarker(): string | undefined {
+	try {
+		const root = fs.readFileSync(elToolsRootMarkerPath(), "utf8").trim();
+		if (!root) return undefined;
+		const shared = path.join(root, "config", "el-linear.shared.json");
+		return fs.existsSync(shared) ? shared : undefined;
+	} catch {
+		return undefined;
+	}
+}
 
 /**
  * Canonical shape of `~/.config/el-linear/config.json`. This is the single source
@@ -220,9 +270,16 @@ export function loadConfig(): ElLinearConfig {
 		cachedTeamConfigPath.set(pathCacheKey, teamConfigPath);
 	} else {
 		// First time for this profile without an env var: read personal config
-		// to find teamConfigPath, then cache it for future fast-path lookups.
+		// to find teamConfigPath, then fall back to the EL onboarding marker
+		// (`~/.config/el-tools-root` → `<root>/config/el-linear.shared.json`).
+		// The marker is the opt-in consent signal — only developers who ran
+		// `link-project.sh` get the auto-discovery; OSS users hit the silent
+		// no-op path. DEV-4258 / ALL-964.
 		personalRaw = readRawPersonalConfig(active);
 		teamConfigPath = personalRaw.teamConfigPath as string | undefined;
+		if (teamConfigPath === undefined) {
+			teamConfigPath = discoverTeamConfigViaMarker();
+		}
 		cachedTeamConfigPath.set(pathCacheKey, teamConfigPath);
 	}
 
@@ -262,8 +319,9 @@ export function loadConfig(): ElLinearConfig {
 
 /**
  * Returns the team config file path that is active for the current process
- * (from `EL_LINEAR_TEAM_CONFIG` env var or `teamConfigPath` in personal
- * config). Returns `undefined` when no team config is configured.
+ * (resolved via `EL_LINEAR_TEAM_CONFIG` env var, `teamConfigPath` in personal
+ * config, or `~/.config/el-tools-root` marker — in that order). Returns
+ * `undefined` when no team config is configured.
  *
  * Calling this before `loadConfig()` will trigger a `loadConfig()` internally
  * so the path cache is populated.
@@ -278,6 +336,37 @@ export function getActiveTeamConfigPath(): string | undefined {
 		loadConfig();
 	}
 	return cachedTeamConfigPath.get(pathCacheKey);
+}
+
+/**
+ * Returns the active team-config path AND the source it was resolved from
+ * (env var / personal config field / onboarding-marker auto-discovery).
+ * `el-linear config team show` uses this to render which resolver fired —
+ * so an operator debugging "why isn't my team config loading?" sees the
+ * answer in one command.
+ *
+ * Re-derives source on each call rather than caching it: the lookup is cheap
+ * (one file read at most for personal config, one for the marker) and only
+ * `config team show` calls it.
+ */
+export function getActiveTeamConfigInfo(): {
+	path: string | undefined;
+	source: TeamConfigSource;
+} {
+	const envPath = process.env.EL_LINEAR_TEAM_CONFIG?.trim() || undefined;
+	if (envPath !== undefined) {
+		return { path: envPath, source: "env" };
+	}
+	const personalRaw = readRawPersonalConfig(resolveActiveProfile());
+	const personalPath = personalRaw.teamConfigPath as string | undefined;
+	if (personalPath !== undefined && personalPath !== "") {
+		return { path: personalPath, source: "personal" };
+	}
+	const markerPath = discoverTeamConfigViaMarker();
+	if (markerPath !== undefined) {
+		return { path: markerPath, source: "marker" };
+	}
+	return { path: undefined, source: null };
 }
 
 /**

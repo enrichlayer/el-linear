@@ -3,6 +3,12 @@ import { createTestProgram, runCommand } from "../__tests__/test-helpers.js";
 
 const mockLoadConfig = vi.fn();
 const mockGetActiveTeamConfigPath = vi.fn().mockReturnValue(undefined);
+// `config team show` (DEV-4258) reads through this richer accessor — keep a
+// default that mirrors `getActiveTeamConfigPath`'s "no team layer" return so
+// the legacy tests that don't bother to mock it still get sensible output.
+const mockGetActiveTeamConfigInfo = vi
+	.fn()
+	.mockReturnValue({ path: undefined, source: null });
 const mockLoadLocalConfig = vi.fn(() => ({}));
 const mockOutputSuccess = vi.fn();
 const mockOutputWarning = vi.fn();
@@ -20,6 +26,8 @@ vi.mock("../config/config.js", () => ({
 	loadConfig: (...args: unknown[]) => mockLoadConfig(...args),
 	getActiveTeamConfigPath: (...args: unknown[]) =>
 		mockGetActiveTeamConfigPath(...args),
+	getActiveTeamConfigInfo: (...args: unknown[]) =>
+		mockGetActiveTeamConfigInfo(...args),
 	loadLocalConfig: (...args: unknown[]) => mockLoadLocalConfig(...args),
 }));
 
@@ -142,7 +150,10 @@ describe("config commands", () => {
 
 		it("reports no team config when none is active", async () => {
 			delete process.env.EL_LINEAR_TEAM_CONFIG;
-			mockGetActiveTeamConfigPath.mockReturnValue(undefined);
+			mockGetActiveTeamConfigInfo.mockReturnValue({
+				path: undefined,
+				source: null,
+			});
 
 			const program = createTestProgram();
 			setupConfigCommands(program);
@@ -155,7 +166,10 @@ describe("config commands", () => {
 
 		it("reports the personal-config path and the top-level keys it provides", async () => {
 			delete process.env.EL_LINEAR_TEAM_CONFIG;
-			mockGetActiveTeamConfigPath.mockReturnValue("/shared/team.json");
+			mockGetActiveTeamConfigInfo.mockReturnValue({
+				path: "/shared/team.json",
+				source: "personal",
+			});
 			mockExistsSync.mockReturnValue(true);
 			mockReadFileSync.mockReturnValue(
 				'{"teams":{"DEV":"u"},"members":{"uuids":{}},"labels":{"workspace":{}}}',
@@ -178,7 +192,10 @@ describe("config commands", () => {
 
 		it("flags the env var as the source when EL_LINEAR_TEAM_CONFIG is set", async () => {
 			process.env.EL_LINEAR_TEAM_CONFIG = "/env/team.json";
-			mockGetActiveTeamConfigPath.mockReturnValue("/env/team.json");
+			mockGetActiveTeamConfigInfo.mockReturnValue({
+				path: "/env/team.json",
+				source: "env",
+			});
 			mockExistsSync.mockReturnValue(true);
 			mockReadFileSync.mockReturnValue('{"teams":{}}');
 
@@ -197,9 +214,36 @@ describe("config commands", () => {
 			});
 		});
 
+		it("flags marker auto-discovery as the source (DEV-4258)", async () => {
+			delete process.env.EL_LINEAR_TEAM_CONFIG;
+			mockGetActiveTeamConfigInfo.mockReturnValue({
+				path: "/tools/config/el-linear.shared.json",
+				source: "marker",
+			});
+			mockExistsSync.mockReturnValue(true);
+			mockReadFileSync.mockReturnValue('{"teams":{},"members":{}}');
+
+			const program = createTestProgram();
+			setupConfigCommands(program);
+			await runCommand(program, ["config", "team", "show"]);
+
+			expect(mockOutputSuccess).toHaveBeenCalledWith({
+				data: {
+					teamConfigPath: "/tools/config/el-linear.shared.json",
+					source: "auto-discovered via ~/.config/el-tools-root",
+					exists: true,
+					valid: true,
+					providedKeys: ["members", "teams"],
+				},
+			});
+		});
+
 		it("surfaces invalid JSON without throwing", async () => {
 			delete process.env.EL_LINEAR_TEAM_CONFIG;
-			mockGetActiveTeamConfigPath.mockReturnValue("/broken/team.json");
+			mockGetActiveTeamConfigInfo.mockReturnValue({
+				path: "/broken/team.json",
+				source: "personal",
+			});
 			mockExistsSync.mockReturnValue(true);
 			mockReadFileSync.mockImplementation(() => "{not json");
 

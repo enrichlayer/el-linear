@@ -25,6 +25,16 @@ vi.mock("node:fs", () => ({
 	},
 }));
 
+// Marker-discovery tests (DEV-4258) anchor their fsFiles paths against the
+// real `process.env.HOME` so they stay consistent with the existing
+// `loadLocalConfig` tests that use the same shape. `os.homedir()` is left
+// unmocked deliberately — `paths.ts` captures the home directory into
+// module-level constants at import time, and any mock that ran later would
+// only affect the marker resolver (not the local-config resolver), which
+// would split the test environment in half.
+const MARKER_PATH = `${process.env.HOME}/.config/el-tools-root`;
+const MARKER_SHARED_FILE = "/fake-tools/config/el-linear.shared.json";
+
 describe("loadConfig", () => {
 	beforeEach(() => {
 		fsFiles.clear();
@@ -261,6 +271,167 @@ describe("loadConfig — team config layer", () => {
 		expect(config.terms).toHaveLength(2);
 		expect(config.terms[0].canonical).toBe("Foo");
 		expect(config.terms[1].canonical).toBe("Bar");
+	});
+});
+
+describe("loadConfig — auto-discovery via ~/.config/el-tools-root (DEV-4258)", () => {
+	beforeEach(() => {
+		fsFiles.clear();
+		defaultExistsReturn = false;
+		defaultReadReturn = "{}";
+		vi.resetModules();
+		delete process.env.EL_LINEAR_TEAM_CONFIG;
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+		delete process.env.EL_LINEAR_TEAM_CONFIG;
+	});
+
+	it("uses marker → <root>/config/el-linear.shared.json when env + personal teamConfigPath are absent", async () => {
+		fsFiles.set(MARKER_PATH, "/fake-tools\n"); // realistic — link-project.sh writes a trailing newline
+		fsFiles.set(
+			MARKER_SHARED_FILE,
+			JSON.stringify({ defaultTeam: "FROM_MARKER" }),
+		);
+
+		const { loadConfig } = await import("./config.js");
+		const config = loadConfig();
+		expect(config.defaultTeam).toBe("FROM_MARKER");
+	});
+
+	it("no-ops silently when marker is missing", async () => {
+		// No marker, no personal teamConfigPath, no env var: no team layer
+		// applied. Behaves identically to the pre-DEV-4258 path — the
+		// returned config is the built-in defaults.
+		const { loadConfig } = await import("./config.js");
+		const config = loadConfig();
+		expect(config.defaultTeam).toBe("");
+	});
+
+	it("no-ops silently when marker exists but shared file is missing", async () => {
+		fsFiles.set(MARKER_PATH, "/fake-tools");
+		// MARKER_SHARED_FILE deliberately NOT set — should fall through to
+		// "no team layer" rather than warn or throw.
+		fsFiles.set(MARKER_SHARED_FILE, null);
+
+		const { loadConfig } = await import("./config.js");
+		const config = loadConfig();
+		expect(config.defaultTeam).toBe("");
+	});
+
+	it("no-ops silently when marker file is empty", async () => {
+		fsFiles.set(MARKER_PATH, "   \n");
+		fsFiles.set(
+			MARKER_SHARED_FILE,
+			JSON.stringify({ defaultTeam: "SHOULD_NOT_LOAD" }),
+		);
+
+		const { loadConfig } = await import("./config.js");
+		const config = loadConfig();
+		expect(config.defaultTeam).toBe("");
+	});
+
+	it("env var EL_LINEAR_TEAM_CONFIG wins over the marker", async () => {
+		const envPath = "/env/team.json";
+		fsFiles.set(envPath, JSON.stringify({ defaultTeam: "FROM_ENV" }));
+		fsFiles.set(MARKER_PATH, "/fake-tools");
+		fsFiles.set(
+			MARKER_SHARED_FILE,
+			JSON.stringify({ defaultTeam: "FROM_MARKER" }),
+		);
+		process.env.EL_LINEAR_TEAM_CONFIG = envPath;
+
+		const { loadConfig } = await import("./config.js");
+		const config = loadConfig();
+		expect(config.defaultTeam).toBe("FROM_ENV");
+	});
+
+	it("personal teamConfigPath wins over the marker", async () => {
+		const personalTeamPath = "/personal/team.json";
+		fsFiles.set(
+			personalTeamPath,
+			JSON.stringify({ defaultTeam: "FROM_PERSONAL" }),
+		);
+		fsFiles.set(MARKER_PATH, "/fake-tools");
+		fsFiles.set(
+			MARKER_SHARED_FILE,
+			JSON.stringify({ defaultTeam: "FROM_MARKER" }),
+		);
+		// Personal config has teamConfigPath set; marker should be ignored.
+		defaultExistsReturn = true;
+		defaultReadReturn = JSON.stringify({ teamConfigPath: personalTeamPath });
+
+		const { loadConfig } = await import("./config.js");
+		const config = loadConfig();
+		expect(config.defaultTeam).toBe("FROM_PERSONAL");
+	});
+});
+
+describe("getActiveTeamConfigInfo (DEV-4258)", () => {
+	beforeEach(() => {
+		fsFiles.clear();
+		defaultExistsReturn = false;
+		defaultReadReturn = "{}";
+		vi.resetModules();
+		delete process.env.EL_LINEAR_TEAM_CONFIG;
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+		delete process.env.EL_LINEAR_TEAM_CONFIG;
+	});
+
+	it('reports source: "env" when EL_LINEAR_TEAM_CONFIG is set', async () => {
+		process.env.EL_LINEAR_TEAM_CONFIG = "/env/team.json";
+		const { getActiveTeamConfigInfo } = await import("./config.js");
+		expect(getActiveTeamConfigInfo()).toEqual({
+			path: "/env/team.json",
+			source: "env",
+		});
+	});
+
+	it('reports source: "personal" when teamConfigPath is in personal config', async () => {
+		defaultExistsReturn = true;
+		defaultReadReturn = JSON.stringify({
+			teamConfigPath: "/personal/team.json",
+		});
+		const { getActiveTeamConfigInfo } = await import("./config.js");
+		expect(getActiveTeamConfigInfo()).toEqual({
+			path: "/personal/team.json",
+			source: "personal",
+		});
+	});
+
+	it('reports source: "marker" when only the marker is set', async () => {
+		fsFiles.set(MARKER_PATH, "/fake-tools");
+		fsFiles.set(MARKER_SHARED_FILE, "{}");
+		const { getActiveTeamConfigInfo } = await import("./config.js");
+		expect(getActiveTeamConfigInfo()).toEqual({
+			path: MARKER_SHARED_FILE,
+			source: "marker",
+		});
+	});
+
+	it("reports null source when nothing is configured", async () => {
+		const { getActiveTeamConfigInfo } = await import("./config.js");
+		expect(getActiveTeamConfigInfo()).toEqual({
+			path: undefined,
+			source: null,
+		});
+	});
+
+	it("env wins over personal wins over marker (precedence sanity check)", async () => {
+		fsFiles.set(MARKER_PATH, "/fake-tools");
+		fsFiles.set(MARKER_SHARED_FILE, "{}");
+		defaultExistsReturn = true;
+		defaultReadReturn = JSON.stringify({
+			teamConfigPath: "/personal/team.json",
+		});
+		process.env.EL_LINEAR_TEAM_CONFIG = "/env/team.json";
+
+		const { getActiveTeamConfigInfo } = await import("./config.js");
+		expect(getActiveTeamConfigInfo().source).toBe("env");
 	});
 });
 

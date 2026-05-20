@@ -4,9 +4,11 @@ import path from "node:path";
 import type { Command } from "commander";
 import type { ElLinearLocalConfig } from "../config/config.js";
 import {
+	getActiveTeamConfigInfo,
 	getActiveTeamConfigPath,
 	loadConfig,
 	loadLocalConfig,
+	type TeamConfigSource,
 } from "../config/config.js";
 import { resolveActiveProfile } from "../config/paths.js";
 import {
@@ -26,6 +28,25 @@ function expandHome(p: string): string {
 	if (p === "~") return os.homedir();
 	if (p.startsWith("~/")) return path.join(os.homedir(), p.slice(2));
 	return p;
+}
+
+/**
+ * Render the team-config source token returned by `getActiveTeamConfigInfo()`
+ * as a human-readable string for `config team show`. Kept next to the command
+ * (not in `config/config.ts`) so the wire format is owned by the renderer,
+ * not the resolver. DEV-4258.
+ */
+function sourceLabel(source: TeamConfigSource): string | null {
+	switch (source) {
+		case "env":
+			return "EL_LINEAR_TEAM_CONFIG env var";
+		case "personal":
+			return "teamConfigPath in personal config";
+		case "marker":
+			return "auto-discovered via ~/.config/el-tools-root";
+		case null:
+			return null;
+	}
 }
 
 const LOCAL_SETTABLE_KEYS = [
@@ -87,22 +108,16 @@ export function setupConfigCommands(program: Command): void {
 	team
 		.command("show")
 		.description(
-			"Show the active team config layer: path, source (env var or personal config), file status, top-level keys it contributes",
+			"Show the active team config layer: path, source (env var, personal config, or auto-discovered marker), file status, top-level keys it contributes",
 		)
 		.addHelpText(
 			"after",
-			"\nResolves the team config in the same order loadConfig() does:\n  EL_LINEAR_TEAM_CONFIG (env)  >  teamConfigPath (personal config)\n\nExamples:\n  el-linear config team show",
+			"\nResolves the team config in the same order loadConfig() does:\n  EL_LINEAR_TEAM_CONFIG (env)  >  teamConfigPath (personal config)  >  ~/.config/el-tools-root marker\n\nExamples:\n  el-linear config team show",
 		)
 		.action(() => {
-			const teamPath = getActiveTeamConfigPath();
-			const envOverride =
-				process.env.EL_LINEAR_TEAM_CONFIG?.trim() || undefined;
-			const source =
-				envOverride !== undefined
-					? "EL_LINEAR_TEAM_CONFIG env var"
-					: teamPath
-						? "teamConfigPath in personal config"
-						: null;
+			const info = getActiveTeamConfigInfo();
+			const teamPath = info.path;
+			const source = sourceLabel(info.source);
 			const out: Record<string, unknown> = {
 				teamConfigPath: teamPath ?? null,
 				source,
