@@ -9,6 +9,10 @@
 		".": {
 			"types": "./dist/main.d.ts",
 			"import": "./dist/main.js"
+		},
+		"./output": {
+			"types": "./dist/output.d.ts",
+			"import": "./dist/output.js"
 		}
 	},
 	"sideEffects": false,
