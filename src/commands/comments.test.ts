@@ -233,6 +233,141 @@ describe("comments commands", () => {
 		});
 	});
 
+	// DEV-4261: handleUpdateComment used to send `bodyData` straight through
+	// without the `BODY_DATA_ERROR_RE` try/catch that handleCreateComment has,
+	// so any future schema drift in the prosemirror converter would silently
+	// break updates while creates kept working via the markdown-body fallback.
+	// These tests lock in symmetric coverage — both paths retry with raw body
+	// on the same family of validation errors. Covers create-side too since
+	// the same pattern is now exercised twice in the suite.
+	describe("bodyData fallback to raw markdown (DEV-4261)", () => {
+		// Use an @mention so the handler takes the `input.bodyData` branch
+		// (the fallback only fires when `input.bodyData` was set — a body
+		// without mentions skips the converter entirely and gets `input.body`
+		// from the start). Pass `--no-auto-mention` to skip the bare-name
+		// scan AND the `fetchSelfUserId` graphql call that would otherwise
+		// consume one of our `mockRejectedValueOnce` / `mockResolvedValueOnce`
+		// stubs before the mutation runs. Explicit `@alice` resolution is
+		// unaffected by `--no-auto-mention`; only bare names are gated.
+		const BODY_WITH_MENTION = "@alice please confirm";
+		const VALIDATOR_ERROR = new Error(
+			"GraphQL request failed: Invalid bodyData value. Value must be a valid prosemirror document.",
+		);
+
+		beforeEach(() => {
+			mockResolveUserId.mockResolvedValue("alice-uuid");
+		});
+
+		it("comments update: retries with raw body when Linear rejects bodyData", async () => {
+			// First call (with bodyData) throws the validator error; second
+			// call (the fallback, with raw `body`) succeeds.
+			mockRawRequest
+				.mockRejectedValueOnce(VALIDATOR_ERROR)
+				.mockResolvedValueOnce({
+					commentUpdate: {
+						success: true,
+						comment: {
+							id: "c1",
+							body: BODY_WITH_MENTION,
+							user: { id: "u1", name: "Test User" },
+							createdAt: "2026-01-01T00:00:00.000Z",
+							updatedAt: "2026-01-01T00:00:00.000Z",
+						},
+					},
+				});
+
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, [
+				"comments",
+				"update",
+				"comment-uuid",
+				"--body",
+				BODY_WITH_MENTION,
+				"--no-auto-mention",
+			]);
+
+			expect(mockRawRequest).toHaveBeenCalledTimes(2);
+			// First attempt used the bodyData path (the failure trigger).
+			const firstCallInput = (
+				mockRawRequest.mock.calls[0][1] as { input: Record<string, unknown> }
+			).input;
+			expect(firstCallInput).toHaveProperty("bodyData");
+			expect(firstCallInput).not.toHaveProperty("body");
+			// Retry sent raw markdown — Linear converts server-side.
+			const secondCallInput = (
+				mockRawRequest.mock.calls[1][1] as { input: Record<string, unknown> }
+			).input;
+			expect(secondCallInput).toEqual({ body: BODY_WITH_MENTION });
+			// And the update succeeded from the caller's perspective.
+			expect(mockOutputSuccess).toHaveBeenCalled();
+		});
+
+		it("comments update: does not retry on unrelated errors (e.g. auth)", async () => {
+			// A non-prosemirror error (e.g. auth failure) should NOT fall
+			// through to the markdown retry — that would mask the real
+			// failure and the caller wouldn't see the auth problem.
+			// `handleAsyncCommand` swallows the throw into an error JSON
+			// envelope (so `runCommand` resolves rather than rejecting), so
+			// we assert the no-retry invariant via call count: exactly ONE
+			// rawRequest call, never two.
+			mockRawRequest.mockRejectedValue(new Error("401 Unauthorized"));
+
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, [
+				"comments",
+				"update",
+				"comment-uuid",
+				"--body",
+				BODY_WITH_MENTION,
+				"--no-auto-mention",
+			]);
+
+			expect(mockRawRequest).toHaveBeenCalledTimes(1);
+			// The success path didn't fire, so outputSuccess wasn't called.
+			expect(mockOutputSuccess).not.toHaveBeenCalled();
+		});
+
+		it("comments create: retries with raw body when Linear rejects bodyData (symmetry check)", async () => {
+			mockRawRequest
+				.mockRejectedValueOnce(VALIDATOR_ERROR)
+				.mockResolvedValueOnce({
+					commentCreate: {
+						success: true,
+						comment: {
+							id: "c1",
+							body: BODY_WITH_MENTION,
+							user: { id: "u1", name: "Test User" },
+							createdAt: "2026-01-01T00:00:00.000Z",
+							updatedAt: "2026-01-01T00:00:00.000Z",
+						},
+					},
+				});
+
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, [
+				"comments",
+				"create",
+				"DEV-1",
+				"--body",
+				BODY_WITH_MENTION,
+				"--no-auto-link",
+				"--no-auto-mention",
+			]);
+
+			expect(mockRawRequest).toHaveBeenCalledTimes(2);
+			const secondCallInput = (
+				mockRawRequest.mock.calls[1][1] as { input: Record<string, unknown> }
+			).input;
+			expect(secondCallInput).toEqual({
+				issueId: "resolved-uuid",
+				body: BODY_WITH_MENTION,
+			});
+		});
+	});
+
 	// Handler-level integration tests for the auto-link composition on comments.
 	// Mirrors the matrix in issues.test.ts: prose keywords must produce the right
 	// relation type/direction when sent through the create/update command flow.
