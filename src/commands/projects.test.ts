@@ -5,7 +5,11 @@ import {
 	suppressExit,
 } from "../__tests__/test-helpers.js";
 
-const mockGetProjects = vi.fn().mockResolvedValue({ projects: [] });
+// `getProjects` returns `LinearProject[]`. The earlier `{ projects: [] }`
+// default was inert under the old `result.length` access (gave NaN, harmless)
+// but breaks once the command runs the result through `sortActiveFirst`,
+// which spreads its argument. An empty array is both correct and safe.
+const mockGetProjects = vi.fn().mockResolvedValue([]);
 const mockResolveProjectId = vi
 	.fn()
 	.mockImplementation((project: string) =>
@@ -165,6 +169,60 @@ describe("projects commands", () => {
 			expect(mockOutputSuccess).toHaveBeenCalledWith({
 				data: projectsData,
 				meta: { count: 1 },
+			});
+		});
+
+		// DEV-4175 — silent-truncation fix.
+		it("--all passes limit 0 to getProjects (unlimited)", async () => {
+			const program = createTestProgram();
+			setupProjectsCommands(program);
+			await runCommand(program, ["projects", "list", "--all"]);
+
+			expect(mockGetProjects).toHaveBeenCalledWith(0, {
+				nameFilter: undefined,
+				teamId: undefined,
+				states: undefined,
+				excludeStates: undefined,
+			});
+		});
+
+		it("--limit 0 is treated the same as --all (unlimited)", async () => {
+			const program = createTestProgram();
+			setupProjectsCommands(program);
+			await runCommand(program, ["projects", "list", "--limit", "0"]);
+
+			expect(mockGetProjects).toHaveBeenCalledWith(0, {
+				nameFilter: undefined,
+				teamId: undefined,
+				states: undefined,
+				excludeStates: undefined,
+			});
+		});
+
+		it("sorts active projects ahead of completed/canceled before output", async () => {
+			// Upstream order from `getProjects` is `updatedAt`-descending —
+			// a recently-touched completed project can come first. After
+			// `sortActiveFirst` the started one must lead so it survives any
+			// `--limit` clipping. DEV-4175.
+			mockGetProjects.mockResolvedValue([
+				{ id: "c1", name: "Done thing", state: "completed" },
+				{ id: "s1", name: "Live work", state: "started" },
+				{ id: "x1", name: "Killed", state: "canceled" },
+				{ id: "p1", name: "Next up", state: "planned" },
+			]);
+
+			const program = createTestProgram();
+			setupProjectsCommands(program);
+			await runCommand(program, ["projects", "list"]);
+
+			expect(mockOutputSuccess).toHaveBeenCalledWith({
+				data: [
+					{ id: "s1", name: "Live work", state: "started" },
+					{ id: "p1", name: "Next up", state: "planned" },
+					{ id: "c1", name: "Done thing", state: "completed" },
+					{ id: "x1", name: "Killed", state: "canceled" },
+				],
+				meta: { count: 4 },
 			});
 		});
 	});
