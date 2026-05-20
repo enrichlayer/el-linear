@@ -35,11 +35,35 @@ const TEAM_TYPE_LABELS: Record<string, string[]> = {
 };
 
 /**
+ * Verbs that indicate a `spike`-equivalent type. Shared between `spike` and
+ * its team-local synonym `research` so adding a new investigation verb only
+ * has to land in one place — without this constant the two arrays drift the
+ * next time someone adds e.g. `Probe`.
+ */
+const SPIKE_VERBS = [
+	"Research",
+	"Investigate",
+	"Explore",
+	"Evaluate",
+	"Audit",
+	"Benchmark",
+	"Test",
+];
+
+/**
  * Recommended leading verbs for each type label.
  * Title verb and type label should express the same intent.
  *
  * Exported so error-enrichment can reuse the same mapping when inferring a
  * type label from a title's first word.
+ *
+ * **Ambiguous-verb resolution.** When a verb belongs to multiple type sets
+ * (e.g. `Research` appears under both `spike` and `research`), the first
+ * declared type wins — `Object.entries` preserves insertion order, and
+ * `inferTypeFromTitle` filters by the team's accepted set before iterating.
+ * In practice no team accepts both `spike` and `research` (the synonyms),
+ * so the first-declared-wins rule never bites; if a future team accepts
+ * both, list the preferred one earlier in this map.
  */
 export const TYPE_VERB_MAP: Record<string, string[]> = {
 	bug: ["Fix", "Resolve", "Patch", "Handle", "Address", "Correct"],
@@ -79,28 +103,13 @@ export const TYPE_VERB_MAP: Record<string, string[]> = {
 		"Teardown",
 		"Upgrade",
 	],
-	spike: [
-		"Research",
-		"Investigate",
-		"Explore",
-		"Evaluate",
-		"Audit",
-		"Benchmark",
-		"Test",
-	],
+	spike: SPIKE_VERBS,
 	// Team-local synonym for `spike`. Active when the validator is scoped to
 	// a team whose `typeLabels` includes `research` (see `TEAM_TYPE_LABELS` /
-	// `validation.teamTypeLabels`). Reuses the spike verb set so title-verb
-	// alignment treats the two interchangeably.
-	research: [
-		"Research",
-		"Investigate",
-		"Explore",
-		"Evaluate",
-		"Audit",
-		"Benchmark",
-		"Test",
-	],
+	// `validation.teamTypeLabels`). Shares `SPIKE_VERBS` so the two stay in
+	// lockstep — drift would silently produce different inferences depending
+	// on which team you're on.
+	research: SPIKE_VERBS,
 	refactor: [
 		"Refactor",
 		"Restructure",
@@ -164,9 +173,19 @@ function getValidationConfig(): ValidationConfig {
 	// `TEAM_TYPE_LABELS` so an operator can add a new team's override
 	// without having to re-declare DEV's. A user override for an existing
 	// team key replaces the built-in entry for that key.
+	//
+	// Normalize user-config keys to uppercase before merging — Linear team
+	// keys are uppercase canonical, but an operator who writes
+	// `{ "dev": [...] }` (lowercase) should still hit DEV's override. Doing
+	// it here means `resolveTypeLabels` can rely on a uniformly uppercased
+	// map without re-walking on every lookup.
+	const userOverrides: Record<string, string[]> = {};
+	for (const [key, value] of Object.entries(validation?.teamTypeLabels ?? {})) {
+		userOverrides[key.toUpperCase()] = value;
+	}
 	const teamTypeLabels = {
 		...TEAM_TYPE_LABELS,
-		...(validation?.teamTypeLabels ?? {}),
+		...userOverrides,
 	};
 	return {
 		enabled: validation?.enabled ?? true,

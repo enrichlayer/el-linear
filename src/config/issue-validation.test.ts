@@ -541,4 +541,30 @@ describe("DEV-4084 team-scoped type labels", () => {
 		});
 		expect(r.errors.filter((e) => e.includes("type label"))).toHaveLength(0);
 	});
+
+	it("normalizes lowercase user-config team keys before merge", () => {
+		// Operator writes `{ "validation": { "teamTypeLabels": { "qe": [...] } } }`
+		// (lowercase). The team-key normalization on read means `--team QE`
+		// still picks up the override. Without normalization this test would
+		// fall through to the workspace default and reject `explore`.
+		const originalValidation = mockConfig.validation;
+		mockConfig.validation = {
+			enabled: true,
+			typeLabels: ["bug", "feature", "refactor", "chore", "spike"],
+			teamTypeLabels: {
+				qe: ["bug", "feature", "refactor", "chore", "explore"],
+			},
+		};
+		try {
+			const r = validateIssueCreation({
+				...base,
+				title: "Explore the failure mode",
+				labels: ["explore", "tools"],
+				team: "QE",
+			});
+			expect(r.errors.filter((e) => e.includes("type label"))).toHaveLength(0);
+		} finally {
+			mockConfig.validation = originalValidation;
+		}
+	});
 });
