@@ -305,6 +305,22 @@ If you prefer to edit the personal config by hand, the field looks like:
 — but the CLI path is preferred (it catches missing-file and invalid-JSON
 mistakes before they silently fall back to no team layer).
 
+**Auto-discovery from an onboarding marker.** As a third fallback, when
+neither the env var nor `teamConfigPath` is set, `el-linear` reads
+`~/.config/el-tools-root` (written by EL onboarding's `link-project.sh`)
+and uses `<root>/config/el-linear.shared.json` if it exists. This means
+developers who've already run onboarding get the team layer for free —
+no extra `set-path` step. The marker is the opt-in consent signal; users
+without it (the OSS audience) see no behavior change. Resolution order
+in full:
+
+1. `EL_LINEAR_TEAM_CONFIG` env var
+2. `teamConfigPath` in personal `config.json`
+3. `~/.config/el-tools-root` marker → `<root>/config/el-linear.shared.json`
+
+`el-linear config team show` reports which of these resolved (`source`
+field: `env` / `personal` / `marker` / `null`).
+
 **The team config file** is a standard `config.json` fragment — any `ElLinearConfig`
 field is valid except `teamConfigPath` itself. Keep it free of tokens and personal
 preferences; those stay in personal config. Example team file:
