@@ -72,7 +72,10 @@ const PROJECT_STATE_RANK: Record<string, number> = {
 	completed: 4,
 	canceled: 5,
 };
-const UNRANKED_STATE = 9;
+// Sentinel for any state Linear surfaces that isn't in the rank table above
+// (e.g. `archived`, future additions). Number.MAX_SAFE_INTEGER reads more
+// deliberately than a magic `9` and stays correct if PROJECT_STATE_RANK grows.
+const UNRANKED_STATE = Number.MAX_SAFE_INTEGER;
 
 export function sortActiveFirst(projects: LinearProject[]): LinearProject[] {
 	return [...projects].sort(
@@ -88,6 +91,12 @@ export function sortActiveFirst(projects: LinearProject[]): LinearProject[] {
  * `output.ts`). JSON buffers it into `_warnings` so the payload stays a single
  * parseable object; every human-facing format prints to stderr so it can't be
  * silently scrolled past. DEV-4175.
+ *
+ * The exact total is deliberately omitted from the message. Returning it would
+ * require a second `client.projects({ first: 0 })` round-trip (the SDK has no
+ * `count`-only helper) or a full pagination walk — both negate the cheap-page
+ * default. `--all` in the hint gives the caller a deterministic way to learn
+ * the real total without us guessing, so the absence is a feature, not a gap.
  */
 function warnProjectsTruncated(
 	count: number,
