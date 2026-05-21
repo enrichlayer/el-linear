@@ -297,7 +297,10 @@ describe("enrichValidationErrors", () => {
 		["Add a new endpoint", "feature", "Add"],
 		["Refactor the payments module", "refactor", "Refactor"],
 		["Update the deps", "chore", "Update"],
-		["Research GraphQL caching options", "spike", "Research"],
+		// DEV-4084: DEV uses `research` (not `spike`) as the spike-equivalent
+		// type label. The team-scoped inference resolves the verb to the team's
+		// canonical type rather than the workspace default.
+		["Research GraphQL caching options", "research", "Research"],
 	])("infers type label from leading verb for title %s", async (title, expectedType, expectedVerb) => {
 		const result: ValidationResult = {
 			errors: ["Missing --labels. ..."],

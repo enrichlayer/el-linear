@@ -95,6 +95,14 @@ export interface ElLinearConfig {
 	validation?: {
 		enabled: boolean;
 		typeLabels?: string[];
+		/**
+		 * Per-team overrides of the canonical type-label set. Keys are Linear
+		 * team keys (uppercase, e.g. `DEV`). When set, an `issues create
+		 * --team X` call validates labels against the team-scoped set rather
+		 * than the workspace default — see `issue-validation.ts` for the
+		 * built-in overrides (DEV-4084).
+		 */
+		teamTypeLabels?: Record<string, string[]>;
 	};
 	/**
 	 * Optional override for the Linear workspace URL key (the part after

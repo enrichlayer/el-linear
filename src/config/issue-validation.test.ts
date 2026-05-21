@@ -481,3 +481,90 @@ describe("title-verb / type-label alignment", () => {
 		expect(r.errors.filter((e) => e.includes("verb"))).toHaveLength(0);
 	});
 });
+
+// DEV-4084: team-scoped type-label set so DEV's `research` validates without
+// `--skip-validation`, while other teams keep `spike`.
+describe("DEV-4084 team-scoped type labels", () => {
+	const base = {
+		...required,
+		description:
+			"## Why we need this\n\nDescription long enough to clear the short warning.",
+	};
+
+	it("accepts `research` as a valid type label on the DEV team", () => {
+		const r = validateIssueCreation({
+			...base,
+			title: "Research GraphQL caching strategies",
+			labels: ["research", "tools"],
+			team: "DEV",
+		});
+		expect(r.errors.filter((e) => e.includes("type label"))).toHaveLength(0);
+	});
+
+	it("rejects `spike` on the DEV team (DEV-3768 no-silent-alias preserved)", () => {
+		const r = validateIssueCreation({
+			...base,
+			title: "Research GraphQL caching strategies",
+			labels: ["spike", "tools"],
+			team: "DEV",
+		});
+		// `spike` isn't in DEV's accepted set, so validation rejects.
+		expect(r.errors.some((e) => e.includes("Missing type label"))).toBe(true);
+		expect(r.errors[0]).toContain("research");
+	});
+
+	it("still accepts `spike` on teams that use the workspace default", () => {
+		const r = validateIssueCreation({
+			...base,
+			title: "Research GraphQL caching strategies",
+			labels: ["spike", "tools"],
+			team: "INF",
+		});
+		expect(r.errors.filter((e) => e.includes("type label"))).toHaveLength(0);
+	});
+
+	it("falls back to the workspace default when no team is provided", () => {
+		const r = validateIssueCreation({
+			...base,
+			title: "Research GraphQL caching strategies",
+			labels: ["spike", "tools"],
+		});
+		expect(r.errors.filter((e) => e.includes("type label"))).toHaveLength(0);
+	});
+
+	it("normalizes the team key case-insensitively", () => {
+		const r = validateIssueCreation({
+			...base,
+			title: "Research GraphQL caching strategies",
+			labels: ["research", "tools"],
+			team: "dev",
+		});
+		expect(r.errors.filter((e) => e.includes("type label"))).toHaveLength(0);
+	});
+
+	it("normalizes lowercase user-config team keys before merge", () => {
+		// Operator writes `{ "validation": { "teamTypeLabels": { "qe": [...] } } }`
+		// (lowercase). The team-key normalization on read means `--team QE`
+		// still picks up the override. Without normalization this test would
+		// fall through to the workspace default and reject `explore`.
+		const originalValidation = mockConfig.validation;
+		mockConfig.validation = {
+			enabled: true,
+			typeLabels: ["bug", "feature", "refactor", "chore", "spike"],
+			teamTypeLabels: {
+				qe: ["bug", "feature", "refactor", "chore", "explore"],
+			},
+		};
+		try {
+			const r = validateIssueCreation({
+				...base,
+				title: "Explore the failure mode",
+				labels: ["explore", "tools"],
+				team: "QE",
+			});
+			expect(r.errors.filter((e) => e.includes("type label"))).toHaveLength(0);
+		} finally {
+			mockConfig.validation = originalValidation;
+		}
+	});
+});
