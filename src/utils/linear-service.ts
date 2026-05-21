@@ -605,7 +605,24 @@ export class LinearService {
 		return chosen.id;
 	}
 
-	async resolveProjectId(projectInput: string): Promise<string> {
+	/**
+	 * Resolve a user-supplied project identifier to a UUID.
+	 *
+	 * Inputs (in order): UUID (pass-through), Linear URL or slug-id pair
+	 * (unique by slug, resolved via `slugId` filter), or a plain name (case
+	 * insensitive). DEV-4103: when a name resolution returns multiple matches
+	 * across teams, the resolver disambiguates by `--team` when provided and
+	 * throws an `ambiguous project` error otherwise — replacing the prior
+	 * silent `first: 1` pick that could cross team boundaries.
+	 *
+	 * `teamInput` is the same string a user would pass to `--team`
+	 * (key / name / UUID); it is resolved here when present so callers don't
+	 * have to double-resolve.
+	 */
+	async resolveProjectId(
+		projectInput: string,
+		teamInput?: string,
+	): Promise<string> {
 		if (isUuid(projectInput)) {
 			return projectInput;
 		}
@@ -635,15 +652,55 @@ export class LinearService {
 			// not-found error as the name path.
 			throw notFoundError("Project", projectInput);
 		}
-		const filter = { name: { eqIgnoreCase: projectInput } };
+		// DEV-4103: scope by team when provided so a name shared across teams
+		// doesn't resolve to a different team's project. Same SDK filter shape
+		// `getProjects` already uses for `--team` filtering.
+		const teamId = teamInput ? await this.resolveTeamId(teamInput) : undefined;
+		const filter: Record<string, unknown> = {
+			name: { eqIgnoreCase: projectInput },
+		};
+		if (teamId) {
+			// Matches the filter shape `getProjects` uses for `--team`.
+			filter.teams = { some: { id: { eq: teamId } } };
+		}
+		// `first: 5` is wide enough to detect ambiguity (same name across
+		// multiple teams) without paying for a deeper page. Linear's UI caps
+		// effective project-name collisions at a handful in practice; if a
+		// workspace ever exceeds this we'll see it as a still-ambiguous error
+		// listing the first 5 teams — better than a silent wrong pick.
 		const projectsConnection = await this.client.projects({
 			filter,
-			first: 1,
+			first: 5,
 		});
 		if (projectsConnection.nodes.length === 0) {
-			throw notFoundError("Project", projectInput);
+			const context = teamInput ? `on team "${teamInput}"` : undefined;
+			throw notFoundError("Project", projectInput, context);
 		}
-		return projectsConnection.nodes[0].id;
+		if (projectsConnection.nodes.length === 1) {
+			return projectsConnection.nodes[0].id;
+		}
+		// Multiple candidates — collect team keys per candidate so the error
+		// names them concretely. Bounded N ≤ 5 keeps the per-edge resolver
+		// promise cheap (handful of round-trips on the rare ambiguous path).
+		const candidates = await Promise.all(
+			projectsConnection.nodes.map(async (p) => {
+				const teams = await p.teams();
+				return {
+					id: p.id,
+					name: p.name,
+					teamKeys: teams.nodes.map((t) => t.key),
+				};
+			}),
+		);
+		const descriptions = candidates.map(
+			(c) => `${c.id} (teams: ${c.teamKeys.join(", ") || "none"})`,
+		);
+		throw multipleMatchesError(
+			"project",
+			projectInput,
+			descriptions,
+			"scope with --team, or pass the project URL/slug-id",
+		);
 	}
 
 	/**

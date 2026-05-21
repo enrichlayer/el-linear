@@ -156,11 +156,14 @@ export const BATCH_RESOLVE_FOR_UPDATE_QUERY = `
   ) {
     projectsByName: projects(
       filter: { name: { eqIgnoreCase: $projectName } }
-      first: 1
+      first: 5
     ) @include(if: $hasProjectName) {
       nodes {
         id
         name
+        teams {
+          nodes { id key }
+        }
         projectMilestones {
           nodes {
             id
@@ -328,7 +331,7 @@ export const BATCH_RESOLVE_FOR_CREATE_QUERY = `
 
     projectsByName: projects(
       filter: { name: { eqIgnoreCase: $projectName } }
-      first: 1
+      first: 5
     ) @include(if: $hasProjectName) {
       nodes {
         id

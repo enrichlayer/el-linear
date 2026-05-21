@@ -40,7 +40,7 @@ async function handleCreateDocument(
 		title: options.title,
 		content: options.content,
 		projectId: options.project
-			? await linearService.resolveProjectId(options.project)
+			? await linearService.resolveProjectId(options.project, options.team)
 			: undefined,
 		teamId: options.team
 			? await linearService.resolveTeamId(options.team)

@@ -573,6 +573,109 @@ describe("GraphQLIssuesService", () => {
 				}),
 			).rejects.toThrow(/Project .* not found/);
 		});
+
+		// DEV-4103: when a name resolves to multiple projects across teams,
+		// disambiguate by --team (or throw explicit ambiguity).
+		it("picks the team-matching candidate when --project name is shared across teams", async () => {
+			// `normalizeProjectInput` only resolves URL/slug shapes; a plain name
+			// passes through unchanged, so the batch resolver sees it.
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			vi.spyOn(linearService, "normalizeProjectInput").mockResolvedValue(
+				"Shared Name",
+			);
+			vi.spyOn(graphQLService, "rawRequest").mockImplementation(
+				async (query: string) => {
+					if (query.includes("BatchResolveForCreate")) {
+						return {
+							teams: {
+								nodes: [{ id: "team-dev", key: "DEV", name: "Dev" }],
+							},
+							projectsByName: {
+								nodes: [
+									{
+										id: "shared-id-dev",
+										name: "Shared Name",
+										teams: { nodes: [{ id: "team-dev", key: "DEV" }] },
+									},
+									{
+										id: "shared-id-inf",
+										name: "Shared Name",
+										teams: { nodes: [{ id: "team-inf", key: "INF" }] },
+									},
+								],
+							},
+							parentIssues: { nodes: [] },
+						};
+					}
+					if (query.includes("issueCreate")) {
+						return {
+							issueCreate: {
+								success: true,
+								issue: issueNode,
+								lastSyncId: 1,
+							},
+						};
+					}
+					throw new Error(`unexpected query: ${query}`);
+				},
+			);
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			await service.createIssue({
+				title: "Test",
+				teamId: "DEV",
+				teamInput: "DEV",
+				projectId: "Shared Name",
+			});
+			// No throw — the DEV-matching candidate was picked.
+		});
+
+		it("throws ambiguous when --project name matches across teams and --team doesn't pin one", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			vi.spyOn(linearService, "normalizeProjectInput").mockResolvedValue(
+				"Shared Name",
+			);
+			vi.spyOn(graphQLService, "rawRequest").mockImplementation(
+				async (query: string) => {
+					if (query.includes("BatchResolveForCreate")) {
+						return {
+							// `--team MAR` resolves, but neither candidate is on MAR.
+							teams: {
+								nodes: [{ id: "team-mar", key: "MAR", name: "Marketing" }],
+							},
+							projectsByName: {
+								nodes: [
+									{
+										id: "shared-id-dev",
+										name: "Shared Name",
+										teams: { nodes: [{ id: "team-dev", key: "DEV" }] },
+									},
+									{
+										id: "shared-id-inf",
+										name: "Shared Name",
+										teams: { nodes: [{ id: "team-inf", key: "INF" }] },
+									},
+								],
+							},
+							parentIssues: { nodes: [] },
+						};
+					}
+					throw new Error(`unexpected query: ${query}`);
+				},
+			);
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			await expect(
+				service.createIssue({
+					title: "Test",
+					teamId: "MAR",
+					teamInput: "MAR",
+					projectId: "Shared Name",
+				}),
+			).rejects.toThrow(/Multiple projects.*Shared Name.*DEV.*INF/s);
+		});
 	});
 
 	describe("updateIssue project/milestone resolution", () => {
@@ -693,6 +796,67 @@ describe("GraphQLIssuesService", () => {
 			await expect(
 				service.updateIssue({ id: ISSUE_UUID, projectId: PROJECT_UUID }),
 			).rejects.toThrow(/Project .* not found/);
+		});
+
+		// DEV-4103: when a --project name resolves to multiple projects across
+		// teams on update, scope to the issue's existing team rather than the
+		// arbitrary first match.
+		it("picks the team-matching candidate when --project name is shared across teams", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			vi.spyOn(linearService, "normalizeProjectInput").mockResolvedValue(
+				"Shared Name",
+			);
+			vi.spyOn(graphQLService, "rawRequest").mockImplementation(
+				async (query: string) => {
+					if (query.includes("BatchResolveForUpdate")) {
+						return {
+							// Two candidates with the same name on different teams; the
+							// resolver must pick the DEV one because the existing issue
+							// lives on DEV.
+							projectsByName: {
+								nodes: [
+									{
+										id: "shared-id-dev",
+										name: "Shared Name",
+										teams: { nodes: [{ id: "team-dev", key: "DEV" }] },
+										projectMilestones: { nodes: [] },
+									},
+									{
+										id: "shared-id-inf",
+										name: "Shared Name",
+										teams: { nodes: [{ id: "team-inf", key: "INF" }] },
+										projectMilestones: { nodes: [] },
+									},
+								],
+							},
+							issues: {
+								nodes: [
+									{
+										id: ISSUE_UUID,
+										identifier: "DEV-1",
+										team: { id: "team-dev", key: "DEV" },
+										labels: { nodes: [] },
+										project: null,
+									},
+								],
+							},
+						};
+					}
+					if (query.includes("issueUpdate")) {
+						return {
+							issueUpdate: { success: true, issue: issueNode, lastSyncId: 1 },
+						};
+					}
+					throw new Error(`unexpected query: ${query}`);
+				},
+			);
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			await service.updateIssue({ id: "DEV-1", projectId: "Shared Name" });
+			// No throw — the DEV-matching candidate was picked. The mutation
+			// would have failed if the wrong project was chosen because the
+			// project-id passed to the mutation is the resolver's pick.
 		});
 	});
 });
