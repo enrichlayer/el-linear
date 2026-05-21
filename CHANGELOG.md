@@ -4,6 +4,18 @@ All notable changes to `@enrichlayer/el-linear` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.0](https://github.com/enrichlayer/el-linear/compare/v1.15.0...v1.16.0) (2026-05-21)
+
+
+### Features
+
+* **output:** expose @enrichlayer/el-linear/output secondary entry point (DEV-3799) ([#125](https://github.com/enrichlayer/el-linear/issues/125)) ([fb989b0](https://github.com/enrichlayer/el-linear/commit/fb989b00b43e7dd15aaaf6753f67539ac7e5d65b))
+
+
+### Bug Fixes
+
+* **comments:** add bodyData fallback to update (parity with create) (DEV-4261) ([#119](https://github.com/enrichlayer/el-linear/issues/119)) ([c54cd8e](https://github.com/enrichlayer/el-linear/commit/c54cd8e98fbac84ea0c84af4d580992703c5eee1))
+
 ## [1.15.0](https://github.com/enrichlayer/el-linear/compare/v1.14.0...v1.15.0) (2026-05-20)
 
 
