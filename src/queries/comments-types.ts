@@ -56,3 +56,9 @@ export interface UpdateCommentResponse {
 		comment: UpdatedCommentResourceNode | null;
 	};
 }
+
+export interface DeleteCommentResponse {
+	commentDelete: {
+		success: boolean;
+	};
+}

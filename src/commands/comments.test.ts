@@ -555,4 +555,117 @@ describe("comments commands", () => {
 			});
 		});
 	});
+
+	// DEV-4306: a multi-element body (lists + bold) with a resolved mention must
+	// go through the `bodyData` converter path on update and *succeed on the
+	// first attempt* — no fallback to raw markdown (which would drop the
+	// mention). Locks create/update parity at the handler level; the converter
+	// shape itself is covered in mention-resolver.test.ts.
+	describe("comments update: rich body takes the bodyData path (DEV-4306)", () => {
+		it("sends bodyData (not raw body) and does not fall back for a list + bold + mention", async () => {
+			mockResolveUserId.mockResolvedValue("alice-uuid");
+			mockRawRequest.mockResolvedValue({
+				commentUpdate: {
+					success: true,
+					comment: {
+						id: "c1",
+						body: "updated",
+						user: { id: "u1", name: "Test User" },
+						createdAt: "2026-01-01T00:00:00.000Z",
+						updatedAt: "2026-01-01T00:00:00.000Z",
+					},
+				},
+			});
+
+			const richBody = [
+				"@alice please review:",
+				"",
+				"- **Item one** with detail",
+				"- Item two",
+				"",
+				"Done.",
+			].join("\n");
+
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, [
+				"comments",
+				"update",
+				"comment-uuid",
+				"--body",
+				richBody,
+				// Skip auto-link (and its ref-validation roundtrips) and the
+				// bare-name self-id fetch so the only rawRequest is the mutation.
+				"--no-auto-link",
+				"--no-auto-mention",
+			]);
+
+			// Exactly one rawRequest: no validator rejection, no retry.
+			expect(mockRawRequest).toHaveBeenCalledTimes(1);
+			const input = (
+				mockRawRequest.mock.calls[0][1] as { input: Record<string, unknown> }
+			).input;
+			expect(input).toHaveProperty("bodyData");
+			expect(input).not.toHaveProperty("body");
+
+			// The converted doc carries the rich structure AND the mention.
+			const types = new Set<string>();
+			const walk = (node: { type: string; content?: unknown[] }) => {
+				types.add(node.type);
+				for (const c of (node.content ?? []) as (typeof node)[]) walk(c);
+			};
+			walk(
+				(input.bodyData as { type: string; content?: unknown[] }) ?? {
+					type: "",
+				},
+			);
+			expect(types.has("bullet_list")).toBe(true);
+			expect(types.has("suggestion_userMentions")).toBe(true);
+			expect(mockOutputSuccess).toHaveBeenCalled();
+		});
+	});
+
+	describe("comments delete", () => {
+		it("deletes a comment by id and reports success", async () => {
+			mockRawRequest.mockResolvedValue({ commentDelete: { success: true } });
+
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, ["comments", "delete", "comment-uuid"]);
+
+			expect(mockRawRequest).toHaveBeenCalledWith(
+				expect.stringContaining("commentDelete"),
+				{ id: "comment-uuid" },
+			);
+			expect(mockOutputSuccess).toHaveBeenCalledWith({
+				id: "comment-uuid",
+				deleted: true,
+			});
+		});
+
+		it("aliases: 'rm' resolves to the same handler", async () => {
+			mockRawRequest.mockResolvedValue({ commentDelete: { success: true } });
+
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, ["comments", "rm", "comment-uuid"]);
+
+			expect(mockRawRequest).toHaveBeenCalledWith(
+				expect.stringContaining("commentDelete"),
+				{ id: "comment-uuid" },
+			);
+		});
+
+		it("throws (no success output) when the API reports failure", async () => {
+			mockRawRequest.mockResolvedValue({ commentDelete: { success: false } });
+
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, ["comments", "delete", "comment-uuid"]);
+
+			// handleAsyncCommand swallows the throw into an error envelope, so
+			// the success path must not have fired.
+			expect(mockOutputSuccess).not.toHaveBeenCalled();
+		});
+	});
 });

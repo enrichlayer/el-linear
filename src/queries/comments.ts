@@ -64,3 +64,17 @@ export const UPDATE_COMMENT_MUTATION = `
     }
   }
 `;
+
+// commentDelete returns a DeletePayload (`{ success }`) — no `comment` node,
+// since the entity is gone. The @linear/sdk exposes this as
+// `client.deleteComment(id)`, but the standalone comment commands all go
+// through raw mutations on `graphQLService` (create/update need `bodyData`,
+// which the SDK's typed input wraps awkwardly), so delete stays on the same
+// raw path for a consistent, single-mock test surface.
+export const DELETE_COMMENT_MUTATION = `
+  mutation DeleteComment($id: String!) {
+    commentDelete(id: $id) {
+      success
+    }
+  }
+`;
