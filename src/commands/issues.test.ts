@@ -1,4 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	createTestProgram,
 	runCommand,
@@ -534,6 +538,79 @@ describe("issues commands", () => {
 					statusId: "status-uuid",
 				}),
 			);
+		});
+	});
+
+	// DEV-4293: `create --checkout` must record branch.<branch>.linearIssue.
+	// Runs against a real temp git repo (the checkout + git config writes are
+	// real); chdir is restored in afterEach so it can't leak into other tests.
+	describe("issues create --checkout writes the Linear issue marker (DEV-4293)", () => {
+		let repo: string;
+		let cwd: string;
+
+		beforeEach(() => {
+			cwd = process.cwd();
+			repo = mkdtempSync(join(tmpdir(), "create-checkout-"));
+			process.chdir(repo);
+			execFileSync("git", ["init", "-q"], { stdio: "pipe" });
+			execFileSync("git", ["config", "user.email", "t@example.com"], {
+				stdio: "pipe",
+			});
+			execFileSync("git", ["config", "user.name", "Test"], { stdio: "pipe" });
+			// One commit so HEAD is born and `checkout -b` has a base.
+			execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "init"], {
+				stdio: "pipe",
+			});
+		});
+
+		afterEach(() => {
+			process.chdir(cwd);
+			rmSync(repo, { recursive: true, force: true });
+		});
+
+		it("checks out the branch and records the marker with the issue identifier", async () => {
+			mockCreateIssue.mockResolvedValue({
+				id: "new-issue-id",
+				identifier: "DEV-4293",
+				branchName: "dev-4293-add-marker",
+			});
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Add marker",
+				"--team",
+				"DEV",
+				"--assignee",
+				"bob",
+				"--project",
+				"Infrastructure",
+				"--checkout",
+			]);
+
+			const branch = "feature/DEV-4293-add-marker";
+			// The branch was actually created and checked out.
+			expect(
+				execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+					stdio: "pipe",
+				})
+					.toString()
+					.trim(),
+			).toBe(branch);
+			// And the marker points at the issue identifier (read raw to avoid
+			// importing branch.js at module top, which would load the mocked
+			// output.js before its mock vars initialize).
+			expect(
+				execFileSync(
+					"git",
+					["config", "--get", `branch.${branch}.linearIssue`],
+					{ stdio: "pipe" },
+				)
+					.toString()
+					.trim(),
+			).toBe("DEV-4293");
 		});
 	});
 
