@@ -7,6 +7,7 @@ import {
 	runCommand,
 	suppressExit,
 } from "../__tests__/test-helpers.js";
+import { logger } from "../utils/logger.js";
 
 const mockResolveIssueId = vi.fn().mockResolvedValue("resolved-uuid");
 const mockResolveUserId = vi.fn();
@@ -658,14 +659,27 @@ describe("comments commands", () => {
 
 		it("throws (no success output) when the API reports failure", async () => {
 			mockRawRequest.mockResolvedValue({ commentDelete: { success: false } });
+			// handleAsyncCommand routes the throw to outputError, which emits the
+			// `{ error }` envelope via logger.info — spy it to assert the message.
+			const loggerInfo = vi.spyOn(logger, "info").mockImplementation(() => {});
 
 			const program = createTestProgram();
 			setupCommentsCommands(program);
 			await runCommand(program, ["comments", "delete", "comment-uuid"]);
 
-			// handleAsyncCommand swallows the throw into an error envelope, so
-			// the success path must not have fired.
+			// The delete WAS attempted (so we're guarding the `if (!success)`
+			// branch, not an early bail)...
+			expect(mockRawRequest).toHaveBeenCalledWith(
+				expect.stringContaining("commentDelete"),
+				{ id: "comment-uuid" },
+			);
+			// ...the success path did NOT fire...
 			expect(mockOutputSuccess).not.toHaveBeenCalled();
+			// ...and the error envelope names the comment that failed.
+			expect(loggerInfo).toHaveBeenCalledWith(
+				expect.stringContaining('Failed to delete comment \\"comment-uuid\\"'),
+			);
+			loggerInfo.mockRestore();
 		});
 	});
 });
