@@ -692,19 +692,25 @@ async function handleCreateIssue(
 
 	let branch: string | undefined;
 	if (options.checkout && result.branchName) {
-		branch = toBranchName(result.branchName);
-		gitCheckoutBranch(branch);
-		// Record the issue→branch link as git metadata (DEV-4293) so the
-		// DEV-4241 hook can confirm a workflow was established without parsing
-		// the branch name. Best-effort: never let a marker-write failure abort
-		// a successful issue creation.
-		try {
-			setBranchLinearIssue(branch, result.identifier);
-		} catch {
-			outputWarning(
-				`Created branch ${branch} but could not record its Linear issue marker. ` +
-					`Run 'el-linear issues mark-branch ${result.identifier}' from the branch to set it.`,
-			);
+		const branchName = toBranchName(result.branchName);
+		// Only treat the branch as created (and surface it in the output) when
+		// the checkout actually happened — outside a git repo gitCheckoutBranch
+		// warns and skips, and claiming a branch / a missing marker afterward
+		// would be a contradictory second warning (DEV-4293 cycle-1).
+		if (gitCheckoutBranch(branchName)) {
+			branch = branchName;
+			// Record the issue→branch link as git metadata (DEV-4293) so the
+			// DEV-4241 hook can confirm a workflow was established without parsing
+			// the branch name. Best-effort: never let a marker-write failure abort
+			// a successful issue creation.
+			try {
+				setBranchLinearIssue(branch, result.identifier);
+			} catch {
+				outputWarning(
+					`Created branch ${branch} but could not record its Linear issue marker. ` +
+						`Run 'el-linear issues mark-branch ${result.identifier}' from the branch to set it.`,
+				);
+			}
 		}
 	}
 

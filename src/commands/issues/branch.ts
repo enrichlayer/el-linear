@@ -32,15 +32,21 @@ export function toBranchName(
 /**
  * Check out a new git branch. Warns and skips if not in a git repo.
  * Throws if the branch already exists.
+ *
+ * Returns `true` if the branch was actually checked out, `false` if the
+ * checkout was skipped (not in a git repo). Callers gate follow-on work
+ * (e.g. writing the `branch.<branch>.linearIssue` marker) on the result so
+ * they don't emit a second, contradictory warning about a branch that was
+ * never created.
  */
-export function gitCheckoutBranch(branchName: string): void {
+export function gitCheckoutBranch(branchName: string): boolean {
 	try {
 		execFileSync("git", ["rev-parse", "--is-inside-work-tree"], {
 			stdio: "pipe",
 		});
 	} catch {
 		outputWarning("Not inside a git repository — skipping branch checkout.");
-		return;
+		return false;
 	}
 	// `--` separates the new-branch name from any ref. Without it, a
 	// branch name starting with `-` (server bug, malicious team member
@@ -51,6 +57,7 @@ export function gitCheckoutBranch(branchName: string): void {
 	// prefix callers would lose the defense without this terminator.
 	// Defense-in-depth (DEV-4064).
 	execFileSync("git", ["checkout", "-b", branchName, "--"], { stdio: "pipe" });
+	return true;
 }
 
 // First Linear-style identifier token in a branch name, in any position, so
@@ -86,6 +93,12 @@ export function extractIssueIdentifierFromBranch(
  * context wrap this and warn on failure; the standalone `mark-branch`
  * command does its own repo/branch validation first so it can surface a
  * clear error instead.
+ *
+ * No `--` ref-terminator (unlike the checkout/rename calls above): `git
+ * config <key> <value>` takes exactly two positional operands, the key is
+ * always our `branch.`-prefixed literal, and a value beginning with `-` is
+ * stored verbatim rather than parsed as a flag — so there's no
+ * flag-injection surface to defend here.
  */
 export function setBranchLinearIssue(branch: string, identifier: string): void {
 	execFileSync("git", ["config", `branch.${branch}.linearIssue`, identifier], {

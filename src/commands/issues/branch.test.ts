@@ -7,6 +7,7 @@ import {
 	currentGitBranch,
 	extractIssueIdentifierFromBranch,
 	getBranchLinearIssue,
+	gitCheckoutBranch,
 	setBranchLinearIssue,
 	toBranchName,
 } from "./branch.js";
@@ -118,5 +119,34 @@ describe("branch.<branch>.linearIssue marker (DEV-4293)", () => {
 	it("scopes the marker to the named branch", () => {
 		setBranchLinearIssue("dev-4293-marker-test", "DEV-4293");
 		expect(getBranchLinearIssue("some-other-branch")).toBeNull();
+	});
+
+	it("gitCheckoutBranch returns true and creates the branch when in a repo", () => {
+		expect(gitCheckoutBranch("feature/DEV-1-some-work")).toBe(true);
+		expect(currentGitBranch()).toBe("feature/DEV-1-some-work");
+	});
+});
+
+// gitCheckoutBranch's false return (skip) gates the marker write in
+// `issues create --checkout` so it doesn't emit a contradictory second
+// warning outside a repo (DEV-4293 cycle-1).
+describe("gitCheckoutBranch outside a git repo", () => {
+	let dir: string;
+	let cwd: string;
+
+	beforeEach(() => {
+		cwd = process.cwd();
+		dir = mkdtempSync(join(tmpdir(), "not-a-repo-"));
+		process.chdir(dir);
+	});
+
+	afterEach(() => {
+		process.chdir(cwd);
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	it("returns false and does not throw", () => {
+		// A bare mkdtemp dir is not a git work tree, so the checkout is skipped.
+		expect(gitCheckoutBranch("feature/DEV-1-x")).toBe(false);
 	});
 });
