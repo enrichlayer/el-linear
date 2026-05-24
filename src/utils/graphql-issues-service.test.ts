@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { multipleMatchesError, notFoundError } from "./error-messages.js";
 
 vi.mock("@linear/sdk", () => ({
 	LinearClient: class MockLinearClient {
@@ -910,14 +911,37 @@ describe("GraphQLIssuesService", () => {
 		it("propagates a clear not-found error instead of an opaque GraphQL error", async () => {
 			const graphQLService = new GraphQLService({ apiKey: "token" });
 			const linearService = new LinearService({ apiKey: "token" });
+			// Reject with the real factory error rather than a hand-written
+			// string, so the test stays coupled to the actual message contract.
 			vi.spyOn(linearService, "resolveUserId").mockRejectedValue(
-				new Error('User "Nobody Here" not found'),
+				notFoundError("User", "Nobody Here"),
 			);
 			const service = new GraphQLIssuesService(graphQLService, linearService);
 
 			await expect(
 				service.searchIssues({ assigneeId: "Nobody Here", limit: 5 }),
-			).rejects.toThrow(/not found/i);
+			).rejects.toThrow(/User "Nobody Here" not found/);
+		});
+
+		it("propagates the structured ambiguous error when a name matches multiple users", async () => {
+			// DEV-4312 "Done when": an ambiguous assignee yields the structured
+			// multiple-matches error (not an opaque GraphQL failure). The
+			// behavior is resolveUserId's; we assert searchIssues surfaces it.
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			vi.spyOn(linearService, "resolveUserId").mockRejectedValue(
+				multipleMatchesError(
+					"User",
+					"Alex",
+					["Alex Shephard (alex@x.com)", "Alex Chen (achen@x.com)"],
+					"use the full email or UUID instead",
+				),
+			);
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			await expect(
+				service.searchIssues({ assigneeId: "Alex", limit: 5 }),
+			).rejects.toThrow(/Multiple Users found matching "Alex"\. Candidates:/);
 		});
 	});
 });
