@@ -4,6 +4,19 @@ All notable changes to `@enrichlayer/el-linear` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.18.0](https://github.com/enrichlayer/el-linear/compare/v1.17.0...v1.18.0) (2026-05-24)
+
+
+### Features
+
+* **comments:** add 'comments delete' + lock multi-element update parity (DEV-4306) ([#127](https://github.com/enrichlayer/el-linear/issues/127)) ([4dafdef](https://github.com/enrichlayer/el-linear/commit/4dafdefe9d0f6f42966e7ebacf5d36927f763e72))
+* **issues:** record branch.&lt;branch&gt;.linearIssue marker on branch creation (DEV-4293) ([#128](https://github.com/enrichlayer/el-linear/issues/128)) ([be59c1d](https://github.com/enrichlayer/el-linear/commit/be59c1da04e7bce600f837290cd22b2101e639fe))
+
+
+### Bug Fixes
+
+* **issues:** resolve full-name --assignee in list/search (DEV-4312) ([#129](https://github.com/enrichlayer/el-linear/issues/129)) ([a95cd6a](https://github.com/enrichlayer/el-linear/commit/a95cd6a237a3c2b4f6153e6473b4cc907ebc4536))
+
 ## [1.17.0](https://github.com/enrichlayer/el-linear/compare/v1.16.0...v1.17.0) (2026-05-21)
 
 
