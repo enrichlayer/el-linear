@@ -66,7 +66,14 @@ import {
 	splitList,
 	validatePriority,
 } from "../utils/validators.js";
-import { gitCheckoutBranch, toBranchName } from "./issues/branch.js";
+import {
+	currentGitBranch,
+	extractIssueIdentifierFromBranch,
+	getBranchLinearIssue,
+	gitCheckoutBranch,
+	setBranchLinearIssue,
+	toBranchName,
+} from "./issues/branch.js";
 import {
 	maybeAutoLink,
 	prepareAutoLinkedDescription,
@@ -685,8 +692,26 @@ async function handleCreateIssue(
 
 	let branch: string | undefined;
 	if (options.checkout && result.branchName) {
-		branch = toBranchName(result.branchName);
-		gitCheckoutBranch(branch);
+		const branchName = toBranchName(result.branchName);
+		// Only treat the branch as created (and surface it in the output) when
+		// the checkout actually happened — outside a git repo gitCheckoutBranch
+		// warns and skips, and claiming a branch / a missing marker afterward
+		// would be a contradictory second warning (DEV-4293 cycle-1).
+		if (gitCheckoutBranch(branchName)) {
+			branch = branchName;
+			// Record the issue→branch link as git metadata (DEV-4293) so the
+			// DEV-4241 hook can confirm a workflow was established without parsing
+			// the branch name. Best-effort: never let a marker-write failure abort
+			// a successful issue creation.
+			try {
+				setBranchLinearIssue(branch, result.identifier);
+			} catch {
+				outputWarning(
+					`Created branch ${branch} but could not record its Linear issue marker. ` +
+						`Run 'el-linear issues mark-branch ${result.identifier}' from the branch to set it.`,
+				);
+			}
+		}
 	}
 
 	const output = {
@@ -1117,12 +1142,70 @@ async function handleRetrolink(
 		execFileSync("git", ["branch", "-m", "--", oldBranch, newBranch], {
 			stdio: "pipe",
 		});
+		// Record the issue→branch link (DEV-4293), same as `create --checkout`.
+		try {
+			setBranchLinearIssue(newBranch, result.identifier);
+		} catch {
+			outputWarning(
+				`Renamed branch to ${newBranch} but could not record its Linear issue marker. ` +
+					`Run 'el-linear issues mark-branch ${result.identifier}' from the branch to set it.`,
+			);
+		}
 	}
 
 	outputSuccess({
 		...result,
 		oldBranch,
 		...(newBranch ? { branch: newBranch } : {}),
+	});
+}
+
+async function handleMarkBranch(
+	issueId: string | undefined,
+	_options: OptionValues,
+	_command: Command,
+): Promise<void> {
+	const branch = currentGitBranch();
+	if (!branch) {
+		throw new Error(
+			"Not on a named git branch (detached HEAD or not in a repository).",
+		);
+	}
+	if (branch === "main" || branch === "master") {
+		throw new Error(`Refusing to mark the '${branch}' branch.`);
+	}
+
+	// Resolve the identifier to record. An explicit arg wins; otherwise infer
+	// it from the branch name. Both paths are offline — the marker's whole
+	// value is letting the hook verify a workflow without a network call, so
+	// we don't round-trip to the API just to normalize an identifier.
+	let identifier: string | null;
+	if (issueId) {
+		// Accepts a bare identifier (DEV-123), a branch-style token
+		// (dev-123-slug), or a Linear URL — extract normalizes all three.
+		identifier = extractIssueIdentifierFromBranch(issueId);
+		if (!identifier) {
+			throw new Error(
+				`'${issueId}' is not a Linear issue identifier (expected a shape like DEV-123).`,
+			);
+		}
+	} else {
+		identifier = extractIssueIdentifierFromBranch(branch);
+		if (!identifier) {
+			throw new Error(
+				`Branch '${branch}' has no Linear identifier to infer. ` +
+					`Pass one explicitly: 'el-linear issues mark-branch DEV-123'.`,
+			);
+		}
+	}
+
+	const previous = getBranchLinearIssue(branch);
+	setBranchLinearIssue(branch, identifier);
+	outputSuccess({
+		branch,
+		linearIssue: identifier,
+		...(previous && previous !== identifier ? { previous } : {}),
+		marked: true,
 	});
 }
 
@@ -1524,4 +1607,17 @@ export function setupIssuesCommands(program: Command): void {
 		)
 		.option("--base <branch>", "base branch for log comparison", "main")
 		.action(handleAsyncCommand(handleRetrolink));
+
+	issues
+		.command("mark-branch [issueId]")
+		.description(
+			"Record the current branch's Linear issue as git metadata (branch.<branch>.linearIssue).",
+		)
+		.addHelpText(
+			"after",
+			"\nManual recovery for branches not created via 'issues create --checkout' / 'retrolink'.\n" +
+				"With no argument, infers the identifier from the branch name (e.g. dev-4293-slug -> DEV-4293).\n" +
+				"Accepts a bare identifier (DEV-123), a branch-style token, or a Linear URL.",
+		)
+		.action(handleAsyncCommand(handleMarkBranch));
 }
