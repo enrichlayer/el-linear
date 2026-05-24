@@ -3,12 +3,14 @@ import type { Command, OptionValues } from "commander";
 import { resolveUserDisplayName } from "../config/resolver.js";
 import {
 	CREATE_COMMENT_MUTATION,
+	DELETE_COMMENT_MUTATION,
 	LIST_COMMENTS_QUERY,
 	UPDATE_COMMENT_MUTATION,
 } from "../queries/comments.js";
 import type {
 	CommentResourceNode,
 	CreateCommentResponse,
+	DeleteCommentResponse,
 	ListCommentsResponse,
 	UpdateCommentResponse,
 } from "../queries/comments-types.js";
@@ -357,6 +359,23 @@ async function handleListComments(
 	});
 }
 
+async function handleDeleteComment(
+	commentId: string,
+	_options: OptionValues,
+	command: Command,
+): Promise<void> {
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const result = await graphQLService.rawRequest<DeleteCommentResponse>(
+		DELETE_COMMENT_MUTATION,
+		{ id: commentId },
+	);
+	if (!result.commentDelete.success) {
+		throw new Error(`Failed to delete comment "${commentId}"`);
+	}
+	outputSuccess({ id: commentId, deleted: true });
+}
+
 export function setupCommentsCommands(program: Command): void {
 	const comments = program
 		.command("comments")
@@ -412,4 +431,15 @@ export function setupCommentsCommands(program: Command): void {
 		)
 		.option("-l, --limit <number>", "limit results", "25")
 		.action(handleAsyncCommand(handleListComments));
+
+	comments
+		.command("delete <commentId>")
+		.alias("remove")
+		.alias("rm")
+		.description("Delete a comment by its id.")
+		.addHelpText(
+			"after",
+			"\nTakes a comment id (the `id` field from `comments list` / `comments create`), not an issue identifier.",
+		)
+		.action(handleAsyncCommand(handleDeleteComment));
 }

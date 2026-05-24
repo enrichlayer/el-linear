@@ -410,6 +410,75 @@ describe("resolveMentions — DEV-3785 schema regression", () => {
 		expect(types.has("suggestion_userMentions")).toBe(true);
 	});
 
+	it("injects mentions inside list items alongside links + bold without empty text nodes (DEV-4306)", async () => {
+		// DEV-4306 repro shape: a multi-element body (lists + bold + several
+		// already-wrapped issue-ref links + bare-name mentions, one of them
+		// *inside* a list item). The `comments update` path forced this through
+		// the `bodyData` converter once auto-mention resolved a name; on the
+		// stale npm build it surfaced as "Invalid bodyData value". Empirically,
+		// current output is accepted by Linear on both create and update — this
+		// locks the structure so future converter drift can't silently regress
+		// it back to a fallback-to-plaintext (which drops the mention).
+		const body = [
+			"Status for Bob:",
+			"",
+			"- **Blocker:** [DEV-100](https://linear.app/acme/issue/DEV-100/) — Bob owns it",
+			"- Linked [DEV-200](https://linear.app/acme/issue/DEV-200/) and [DEV-300](https://linear.app/acme/issue/DEV-300/)",
+			"",
+			"Related: [DEV-400](https://linear.app/acme/issue/DEV-400/), Erin to confirm.",
+		].join("\n");
+
+		const result = await resolveMentions(body, mockLinearService());
+		expect(result).not.toBeNull();
+
+		type Node = {
+			type: string;
+			text?: string;
+			attrs?: Record<string, unknown>;
+			marks?: { type: string }[];
+			content?: Node[];
+		};
+		const mentions: Node[] = [];
+		let mentionInsideListItem = false;
+		const linkMarks: string[] = [];
+		const walk = (node: Node, inListItem: boolean) => {
+			if (node.type === "suggestion_userMentions") {
+				mentions.push(node);
+				if (inListItem) mentionInsideListItem = true;
+			}
+			// Linear's validator rejects empty text nodes — assert none slipped
+			// in from the split-on-mention logic (e.g. a mention at a boundary).
+			if (node.type === "text") {
+				expect((node.text ?? "").length).toBeGreaterThan(0);
+			}
+			for (const m of node.marks ?? []) {
+				if (m.type === "link") linkMarks.push(node.text ?? "");
+			}
+			for (const child of node.content ?? []) {
+				walk(child, inListItem || node.type === "list_item");
+			}
+		};
+		walk(result!.bodyData as Node, false);
+
+		// Both bare names resolved to mention nodes.
+		const labels = mentions.map((m) => m.attrs?.label).sort();
+		expect(labels).toEqual(["Bob", "Bob", "Erin"]);
+		// Every mention is a content-less leaf carrying an id.
+		for (const m of mentions) {
+			expect(m.content).toBeUndefined();
+			expect(m.attrs?.id).toBeTruthy();
+		}
+		// The whole point of DEV-4306: a mention landed *inside* a list item.
+		expect(mentionInsideListItem).toBe(true);
+		// Link marks survived the mention walk intact.
+		expect(linkMarks.sort()).toEqual([
+			"DEV-100",
+			"DEV-200",
+			"DEV-300",
+			"DEV-400",
+		]);
+	});
+
 	it("handles a long single-paragraph body with one mention (the original repro)", async () => {
 		// Matches the DEV-3785 issue example almost verbatim — single
 		// paragraph, one mention, no other markdown. Documented as the case
