@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { multipleMatchesError, notFoundError } from "./error-messages.js";
 
 vi.mock("@linear/sdk", () => ({
 	LinearClient: class MockLinearClient {
@@ -857,6 +858,90 @@ describe("GraphQLIssuesService", () => {
 			// No throw — the DEV-matching candidate was picked. The mutation
 			// would have failed if the wrong project was chosen because the
 			// project-id passed to the mutation is the resolver's pick.
+		});
+	});
+
+	// DEV-4312: the search/list path resolved an assignee only by email, so a
+	// plain full name fell through unchanged and the raw string was sent to the
+	// GraphQL filter as a bogus UUID ("Argument Validation Error"). It must now
+	// resolve names via resolveUserId — symmetric with delegate resolution.
+	describe("searchIssues assignee resolution (DEV-4312)", () => {
+		it("resolves a full-name assignee via resolveUserId and filters by the UUID", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			const resolveUserId = vi
+				.spyOn(linearService, "resolveUserId")
+				.mockResolvedValue("assignee-uuid");
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValue({ issues: { nodes: [] } });
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			await service.searchIssues({ assigneeId: "Yury Tsukerman", limit: 5 });
+
+			// The name was resolved via the user lookup (not sent raw).
+			expect(resolveUserId).toHaveBeenCalledWith("Yury Tsukerman");
+			// The filtered-search query received the resolved UUID, not the name.
+			const filteredCall = rawRequest.mock.calls.find(([q]) =>
+				String(q).includes("IssueFilter"),
+			);
+			expect(filteredCall).toBeDefined();
+			const filter = (filteredCall?.[1] as { filter: Record<string, unknown> })
+				.filter;
+			expect(filter.assignee).toEqual({ id: { eq: "assignee-uuid" } });
+		});
+
+		it("passes a UUID assignee through without a lookup", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			const resolveUserId = vi.spyOn(linearService, "resolveUserId");
+			vi.spyOn(graphQLService, "rawRequest").mockResolvedValue({
+				issues: { nodes: [] },
+			});
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			await service.searchIssues({
+				assigneeId: "11111111-1111-4111-8111-111111111111",
+				limit: 5,
+			});
+
+			expect(resolveUserId).not.toHaveBeenCalled();
+		});
+
+		it("propagates a clear not-found error instead of an opaque GraphQL error", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			// Reject with the real factory error rather than a hand-written
+			// string, so the test stays coupled to the actual message contract.
+			vi.spyOn(linearService, "resolveUserId").mockRejectedValue(
+				notFoundError("User", "Nobody Here"),
+			);
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			await expect(
+				service.searchIssues({ assigneeId: "Nobody Here", limit: 5 }),
+			).rejects.toThrow(/User "Nobody Here" not found/);
+		});
+
+		it("propagates the structured ambiguous error when a name matches multiple users", async () => {
+			// DEV-4312 "Done when": an ambiguous assignee yields the structured
+			// multiple-matches error (not an opaque GraphQL failure). The
+			// behavior is resolveUserId's; we assert searchIssues surfaces it.
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			vi.spyOn(linearService, "resolveUserId").mockRejectedValue(
+				multipleMatchesError(
+					"User",
+					"Alex",
+					["Alex Shephard (alex@x.com)", "Alex Chen (achen@x.com)"],
+					"use the full email or UUID instead",
+				),
+			);
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			await expect(
+				service.searchIssues({ assigneeId: "Alex", limit: 5 }),
+			).rejects.toThrow(/Multiple Users found matching "Alex"\. Candidates:/);
 		});
 	});
 });

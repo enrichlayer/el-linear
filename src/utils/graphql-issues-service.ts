@@ -732,7 +732,7 @@ export class GraphQLIssuesService {
 			? this.resolveProjectId(projectIdArg, resolveResult)
 			: undefined;
 
-		const finalAssigneeId = this.resolveAssigneeId(
+		const finalAssigneeId = await this.resolveAssigneeId(
 			args.assigneeId,
 			resolveResult,
 		);
@@ -1440,12 +1440,22 @@ export class GraphQLIssuesService {
 		return filter;
 	}
 
-	private resolveAssigneeId(
+	private async resolveAssigneeId(
 		assigneeId: string | undefined,
 		resolveResult: BatchResolveResult,
-	): string | undefined {
-		if (!assigneeId || isUuid(assigneeId) || !assigneeId.includes("@")) {
+	): Promise<string | undefined> {
+		if (!assigneeId || isUuid(assigneeId)) {
 			return assigneeId;
+		}
+		// A plain name (no `@`) resolves via the user lookup — same as
+		// `resolveDelegateId`. Without this, a non-config full name like
+		// "Yury Tsukerman" fell through unchanged and was sent to the
+		// GraphQL filter as a bogus UUID, producing an opaque "Argument
+		// Validation Error" instead of resolving (or a clean not-found).
+		// `resolveUserId` matches displayName then name and throws a
+		// structured notFound / multiple-matches error (DEV-4312).
+		if (!assigneeId.includes("@")) {
+			return this.linearService.resolveUserId(assigneeId);
 		}
 		const userNodes = resolveResult.users?.nodes;
 		if (!userNodes?.length) {
