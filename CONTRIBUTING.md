@@ -28,6 +28,41 @@ You'll need:
   in `LINEAR_API_TOKEN` or `~/.config/el-linear/token` for any test that hits the
   live API. The default test suite mocks Linear and runs offline.
 
+## Architecture
+
+```
+src/
+├── main.ts               # commander entry; wires every setupXCommands()
+├── commands/             # user-facing subcommands
+│   ├── issues.ts         # CRUD + history + relations + auto-link
+│   ├── comments.ts       # comment CRUD with mention resolution
+│   ├── labels.ts
+│   ├── projects.ts, teams.ts, users.ts, cycles.ts, releases.ts, …
+│   ├── search.ts         # semantic search
+│   ├── graphql.ts        # raw GraphQL escape hatch
+│   └── config.ts         # config show/init
+├── config/
+│   ├── config.ts         # ~/.config/el-linear/config.json loader
+│   ├── resolver.ts       # name → UUID resolution (teams, members, labels)
+│   ├── term-enforcer.ts  # configurable term-spelling enforcement
+│   ├── issue-validation.ts
+│   └── status-defaults.ts
+├── queries/              # GraphQL query/mutation strings, per resource
+├── utils/
+│   ├── graphql-service.ts        # raw GraphQL client (uses @linear/sdk's transport)
+│   ├── linear-service.ts         # SDK wrapper for paginated lists
+│   ├── auth.ts                   # token resolution
+│   ├── mention-resolver.ts       # @user → prosemirror mention
+│   ├── issue-reference-wrapper.ts # ENG-100 → markdown link
+│   ├── auto-link-references.ts   # creates sidebar relations
+│   ├── workspace-url.ts          # caches viewer.organization.urlKey
+│   └── output.ts, table-formatter.ts, validators.ts, logger.ts
+└── types/                # shared types
+```
+
+Profile resolution (multi-workspace support) is centralized in
+`src/config/paths.ts` — see the **Profiles** section of the README.
+
 ## Workflow
 
 We use trunk-based development. Branch off `main`, open a PR, get a green CI,
@@ -71,12 +106,19 @@ Most Linear resources are reachable via the existing `el-linear graphql` escape
 hatch — that's often enough. If you find yourself running the same query
 repeatedly, that's a candidate for a first-class command.
 
-1. Add the GraphQL query to `src/queries/<resource>.ts`.
-2. Add a service method to `src/utils/linear-service.ts` if SDK pagination
-   helps, or call `graphQLService.rawRequest` directly otherwise.
-3. Add the command to `src/commands/<resource>.ts` with a `setup<Resource>Commands(program)` export.
-4. Wire it into `src/main.ts`.
-5. Tests: cover the command with mocked `graphQLService` / `linearService`.
+1. **Check the `@linear/sdk` first.** If the call is expressible as
+   `client.foo({...})`, add a service method on `LinearService` and skip the
+   raw-query step — the SDK gives typed inputs, pagination helpers, and one
+   place to absorb schema changes (see the SDK-preference rule in `CLAUDE.md`).
+2. Only if the SDK can't express it: add the GraphQL query to
+   `src/queries/<resource>.ts`, with a docstring naming the SDK gap (batching,
+   missing field, mutation the SDK doesn't expose) so the next maintainer can
+   revisit on SDK upgrades.
+3. Call it from a service method in `src/utils/linear-service.ts` (for
+   paginated lists) or via `graphQLService.rawRequest` for the raw-query path.
+4. Add the command to `src/commands/<resource>.ts` with a `setup<Resource>Commands(program)` export.
+5. Wire it into `src/main.ts`.
+6. Tests: cover the command with mocked `graphQLService` / `linearService`.
 
 The structural test in `src/commands/cli-consistency.test.ts` enforces:
 

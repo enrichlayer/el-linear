@@ -10,35 +10,9 @@ built with [commander](https://www.npmjs.com/package/commander).
 
 ## Architecture
 
-```
-src/
-├── main.ts               # commander entry; wires every setupXCommands()
-├── commands/             # user-facing subcommands
-│   ├── issues.ts         # CRUD + history + relations + auto-link
-│   ├── comments.ts       # comment CRUD with mention resolution
-│   ├── labels.ts
-│   ├── projects.ts, teams.ts, users.ts, cycles.ts, releases.ts, …
-│   ├── search.ts         # semantic search
-│   ├── graphql.ts        # raw GraphQL escape hatch
-│   └── config.ts         # config show/init
-├── config/
-│   ├── config.ts         # ~/.config/el-linear/config.json loader
-│   ├── resolver.ts       # name → UUID resolution (teams, members, labels)
-│   ├── term-enforcer.ts  # configurable term-spelling enforcement
-│   ├── issue-validation.ts
-│   └── status-defaults.ts
-├── queries/              # GraphQL query/mutation strings, per resource
-├── utils/
-│   ├── graphql-service.ts        # raw GraphQL client (uses @linear/sdk's transport)
-│   ├── linear-service.ts         # SDK wrapper for paginated lists
-│   ├── auth.ts                   # token resolution
-│   ├── mention-resolver.ts       # @user → prosemirror mention
-│   ├── issue-reference-wrapper.ts # ENG-100 → markdown link
-│   ├── auto-link-references.ts   # creates sidebar relations
-│   ├── workspace-url.ts          # caches viewer.organization.urlKey
-│   └── output.ts, table-formatter.ts, validators.ts, logger.ts
-└── types/                # shared types
-```
+The annotated `src/` source-tree map lives in
+[CONTRIBUTING.md](CONTRIBUTING.md#architecture) — read it on demand rather than
+carrying it in every session's context.
 
 ## Profiles
 
@@ -90,37 +64,16 @@ behavior change — multi-profile is purely opt-in.
 
   Bare "we want a custom field set" is not a sufficient reason — `client.issues({ ... })` already lets you destructure exactly the fields you need.
 
-- **Always prefer deterministic CLI behavior over skill markdown.** This is the default — the skill is a last resort. When the same outcome can be achieved by code in this CLI or by a markdown rule in `claude-skills/`, code wins, every time. A rule in `SKILL.md` relies on every agent reading and following it — probabilistic, and it fails silently when the agent skims past the section. A check or affordance in the CLI runs every time, returns structured output, and is unit-testable. Before adding a step to a skill ("do X, then check Y, then ask Z"), ask whether the CLI could: (a) make X automatic, (b) detect Y and emit a structured warning, or (c) refuse Z with a typed error. If yes, file a Linear issue or write the code first; the skill should only fill the gaps the tool genuinely can't close. Concrete patterns that belong in the tool, not the skill:
+  This rule and the deterministic-CLI rule below own **different layers** and don't conflict: the `@linear/sdk` preference governs the **data-fetch layer** (how a command talks to Linear — typing, pagination, schema absorption), while "deterministic CLI over skill prose" governs the **command/surfacing layer** (turning those results into structured output, truncation cues, and typed errors). The CLI doesn't re-implement what the SDK already provides — it surfaces it.
 
-  - **Pagination / truncation cues** — emit `pageInfo.hasNextPage` or a `results_truncated` warning when `nodes.length === limit`, instead of telling agents to "bump `--limit`".
-  - **Identifier shapes** — accept the formats users actually paste (URLs, slugs, short UUID prefixes) in resolvers, instead of telling agents to parse them in markdown.
-  - **Disambiguation** — return a structured `ambiguous` error with candidate matches, instead of telling agents to "ask the user."
-  - **Title / label conventions** — enforce in `issue-validation.ts` so the create call rejects bad shapes (or enriches the error with suggestions), instead of documenting "use this verb."
-
-  **Skill prose is reserved for non-deterministic, judgment-based problems** that the tool genuinely cannot encode: when to broaden a search, who to ask, what to do when a CLI call returns ambiguous results, when to escalate to the user vs. proceed. If a rule can be expressed as "the CLI does X, then if Y, do Z" with no human judgment in the middle, it belongs in the CLI. Reverse pressure: when a skill PR is proposed, the default reviewer question is **"why isn't this in the CLI?"** — and the burden is on the skill change to justify why a deterministic implementation isn't feasible.
+- **Prefer deterministic CLI behavior over skill prose** — the team-wide rationale lives in the canonical **"Deterministic Tools Over Prose"** section of `tools/CLAUDE.md`; don't restate it here. In *this* repo it means the affordances belong in code, not in `claude-skills/` markdown: truncation cues via `outputWarning` when `nodes.length === limit`; identifier-shape acceptance (URLs, slugs, short UUID prefixes) in the resolvers; structured `ambiguous` / not-found errors with candidate matches; and title/label-shape enforcement in `issue-validation.ts`. When tempted to add a "do X, then check Y" step to a skill, make the CLI do/detect/refuse it instead — the default reviewer question on a skill PR is **"why isn't this in the CLI?"**
 
 ## Common tasks
 
 ### Add a Linear command
 
-Most things should start as a `el-linear graphql` invocation. If you find
-yourself running the same query repeatedly, promote it to a first-class
-command:
-
-1. **Check the SDK first.** Open `@linear/sdk`'s exported `LinearClient`
-   methods. If the call is expressible as `client.foo({...})`, add a
-   service method on `LinearService` and skip steps 2-3 of the GraphQL
-   path. The SDK-preference rule above applies.
-2. Only if the SDK can't express it: add the GraphQL query to
-   `src/queries/<resource>.ts` with a docstring naming the SDK gap
-   (batching, missing field, etc.) so the next maintainer can revisit
-   on SDK upgrades.
-3. Call it from a service method in `src/utils/linear-service.ts` (for
-   paginated lists, where the SDK's pagination helper saves work) or via
-   `graphQLService.rawRequest()` for the raw-query path.
-4. Add the command in `src/commands/<resource>.ts` with a setup function.
-5. Wire it into `src/main.ts`.
-6. Test with mocked `graphQLService` and `linearService`.
+The full step-by-step (SDK-first check → query → service → command → wire →
+test) lives in [CONTRIBUTING.md](CONTRIBUTING.md#adding-a-linear-command).
 
 ### Debug a failing test
 
