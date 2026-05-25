@@ -1,0 +1,19 @@
+# gitleaks configuration for el-linear.
+#
+# The CI job runs `gitleaks detect --source .`, which auto-loads this file.
+# We extend the full default ruleset (so real secrets are still caught
+# everywhere) and add a single path-scoped allowlist for the Sentry scrubber's
+# unit test, which by design contains synthetic, credential-SHAPED strings
+# (fake `glpat-`/`ghp_`/`lin_api_`/`xoxb-` tokens) used to verify that the
+# redaction logic actually redacts them. Those are not real secrets, and
+# scoping the allowlist to the one test file keeps detection active in all
+# real source. See `src/sentry.ts` / DEV-4349.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Synthetic credential-shaped fixtures in the Sentry scrubber test"
+paths = [
+  '''src/sentry\.test\.ts''',
+]
