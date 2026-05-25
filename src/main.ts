@@ -50,10 +50,11 @@ const packageJson = JSON.parse(
 	version: string;
 };
 
-// Opt-in error reporting (DEV-4349): no-ops unless a SENTRY_DSN(_CLI) env var is
-// set AND the optional `@sentry/node` dependency is installed. Fire-and-forget —
-// the dynamic SDK import must never delay or break the CLI; the global handlers
-// it installs catch async failures once it resolves (a tick later).
+// Opt-in error reporting (DEV-4349): no-ops unless the namespaced SENTRY_DSN_CLI
+// env var is set AND the optional `@sentry/node` dependency is installed.
+// Fire-and-forget — the dynamic SDK import must never delay or break the CLI;
+// the global handlers it installs catch async failures once it resolves (a tick
+// later).
 void initCliSentry("el-linear", { version: packageJson.version });
 
 program

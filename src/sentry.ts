@@ -8,9 +8,10 @@
  *  - `@sentry/node` is an OPTIONAL dependency, loaded via a dynamic
  *    `import("@sentry/node")` ONLY when a DSN resolves. `npm i @enrichlayer/el-linear`
  *    never forces Sentry, and a missing/uninstalled SDK is a clean no-op.
- *  - The DSN comes from the environment only (`SENTRY_DSN_CLI` / `SENTRY_DSN`) —
- *    no Vault (that is internal infra OSS users do not have). Default OFF; only
- *    active when we set the env var in our own environment.
+ *  - The DSN comes from the environment only (`SENTRY_DSN_CLI`) — no Vault (that
+ *    is internal infra OSS users do not have), and NOT the conventional
+ *    `SENTRY_DSN` (which would collide with an OSS user's own app). Default OFF;
+ *    only active when we set our namespaced env var in our own environment.
  *
  * One line at the top of `main.ts`:
  *
@@ -97,14 +98,21 @@ export function scrubEvent(event: Json): Json {
  * Resolve the CLI Sentry DSN from the environment. Returns null when reporting
  * is disabled or no DSN is configured (→ init no-ops). No Vault: OSS users do
  * not have it, so this path is intentionally env-only.
+ *
+ * Only the namespaced `SENTRY_DSN_CLI` is read — NOT the conventional
+ * `SENTRY_DSN`. el-linear ships open-source, and `SENTRY_DSN` is the var the
+ * `@sentry/node` SDK reads by default, so an OSS user running their own
+ * Sentry-instrumented app very likely has it set; falling back to it would make
+ * el-linear silently report into *their* project. Requiring our explicit,
+ * namespaced var keeps activation unambiguous and collision-free (DEV-4349
+ * cycle-1 review). The internal tools build uses `SENTRY_DSN_CLI` too, so we
+ * lose nothing.
  */
 export function resolveDsn(): string | null {
 	if (process.env.EL_SENTRY_DISABLED === "1") {
 		return null;
 	}
-	return (
-		process.env.SENTRY_DSN_CLI?.trim() || process.env.SENTRY_DSN?.trim() || null
-	);
+	return process.env.SENTRY_DSN_CLI?.trim() || null;
 }
 
 /** Minimal structural subset of `@sentry/node` we use — avoids a type-time dep. */
@@ -135,7 +143,10 @@ export interface InitCliSentryOptions {
  * is active, false when it no-ops (disabled / no DSN / SDK not installed).
  *
  * When active, installs global uncaughtException + unhandledRejection handlers
- * that capture → flush → exit(1).
+ * that capture → flush → exit(1). Because the SDK loads via a dynamic import
+ * (resolving a tick after the caller's fire-and-forget `void`), a synchronous
+ * throw during the very first tick of CLI startup — before the handlers install
+ * — is out of scope; this is best-effort reporting, not a crash guarantee.
  */
 export async function initCliSentry(
 	cliName: string,

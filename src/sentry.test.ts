@@ -148,16 +148,20 @@ describe("resolveDsn (env-only — no Vault)", () => {
 
 	it("returns null when EL_SENTRY_DISABLED=1", () => {
 		process.env.EL_SENTRY_DISABLED = "1";
-		process.env.SENTRY_DSN = FAKE_DSN;
+		process.env.SENTRY_DSN_CLI = FAKE_DSN;
 		expect(resolveDsn()).toBeNull();
 	});
 
-	it("prefers SENTRY_DSN_CLI, then falls back to SENTRY_DSN", () => {
+	it("reads only the namespaced SENTRY_DSN_CLI", () => {
 		process.env.SENTRY_DSN_CLI = FAKE_DSN;
-		process.env.SENTRY_DSN = "https://env@o.sentry.io/9";
 		expect(resolveDsn()).toBe(FAKE_DSN);
-		delete process.env.SENTRY_DSN_CLI;
-		expect(resolveDsn()).toBe("https://env@o.sentry.io/9");
+	});
+
+	it("does NOT fall back to the conventional SENTRY_DSN (OSS collision foot-gun)", () => {
+		// An OSS user's own app commonly sets SENTRY_DSN; el-linear must not
+		// hijack it. Only our namespaced var activates reporting (DEV-4349).
+		process.env.SENTRY_DSN = "https://someone-elses@o.sentry.io/9";
+		expect(resolveDsn()).toBeNull();
 	});
 
 	it("returns null when nothing is configured", () => {
