@@ -72,5 +72,8 @@
 		"tsx": "^4.21.0",
 		"typescript": "^6.0.3",
 		"vitest": "^4.0.18"
+	},
+	"optionalDependencies": {
+		"@sentry/node": "^8.55.2"
 	}
 }
