@@ -29,6 +29,7 @@ import { setupTemplatesCommands } from "./commands/templates.js";
 import { setupUsersCommands } from "./commands/users.js";
 import { setActiveProfileForSession } from "./config/paths.js";
 import { initCliSentry } from "./sentry.js";
+import { logger } from "./utils/logger.js";
 import { applyIpv4Preference } from "./utils/network-preference.js";
 import {
 	setFieldsFilter,
@@ -42,7 +43,14 @@ import { splitList } from "./utils/validators.js";
 // Prefer IPv4 for outbound API calls before any network I/O (Sentry init or a
 // command) runs — works around broken-IPv6 networks stalling Node's fetch.
 // Opt out with EL_LINEAR_NETWORK_VERBATIM=1. See DEV-4415 / network-preference.ts.
-applyIpv4Preference();
+const ipv4Preferred = applyIpv4Preference();
+if (process.env.EL_LINEAR_DEBUG ?? process.env.LINCTL_DEBUG) {
+	logger.error(
+		ipv4Preferred
+			? "[el-linear] network: preferring IPv4 (dns=ipv4first, autoSelectFamily=off)"
+			: "[el-linear] network: verbatim mode (EL_LINEAR_NETWORK_VERBATIM=1)",
+	);
+}
 
 // Read the version from package.json at startup so `--version` can never
 // drift from the published release (pre-fix: a stale 1.8.1 literal lived
