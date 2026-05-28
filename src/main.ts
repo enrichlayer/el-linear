@@ -29,6 +29,7 @@ import { setupTemplatesCommands } from "./commands/templates.js";
 import { setupUsersCommands } from "./commands/users.js";
 import { setActiveProfileForSession } from "./config/paths.js";
 import { initCliSentry } from "./sentry.js";
+import { applyIpv4Preference } from "./utils/network-preference.js";
 import {
 	setFieldsFilter,
 	setJqFilter,
@@ -37,6 +38,11 @@ import {
 } from "./utils/output.js";
 import { outputUsageInfo } from "./utils/usage.js";
 import { splitList } from "./utils/validators.js";
+
+// Prefer IPv4 for outbound API calls before any network I/O (Sentry init or a
+// command) runs — works around broken-IPv6 networks stalling Node's fetch.
+// Opt out with EL_LINEAR_NETWORK_VERBATIM=1. See DEV-4415 / network-preference.ts.
+applyIpv4Preference();
 
 // Read the version from package.json at startup so `--version` can never
 // drift from the published release (pre-fix: a stale 1.8.1 literal lived

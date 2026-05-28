@@ -247,6 +247,19 @@ A full reference with every key documented lives in [config.example.json](./conf
 UUIDs come from the Linear UI (URL bars, settings pages) or via el-linear
 itself: `el-linear teams list --raw | jq '.[] | {key, id}'`, etc.
 
+### Networking (IPv4 preference)
+
+el-linear talks only to `api.linear.app` (Cloudflare, dual-stack). On a network
+whose IPv6 route is broken or blackholed, Node's defaults (DNS result order
+`verbatim`, often IPv6-first, plus Happy Eyeballs) can make every call stall
+until it times out — surfacing as `GraphQL request failed: fetch failed`. To
+avoid that, el-linear prefers IPv4 by default (`ipv4first` DNS ordering with
+`autoSelectFamily` disabled).
+
+If you're on a **pure IPv6-only** network (no IPv4 route at all), set
+`EL_LINEAR_NETWORK_VERBATIM=1` to restore Node's native verbatim /
+Happy-Eyeballs behavior.
+
 ### Workspace URL key
 
 `refs wrap` and the auto-link paths build canonical issue URLs like
