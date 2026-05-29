@@ -4,6 +4,13 @@ All notable changes to `@enrichlayer/el-linear` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.18.1](https://github.com/enrichlayer/el-linear/compare/v1.18.0...v1.18.1) (2026-05-29)
+
+
+### Bug Fixes
+
+* **network:** prefer IPv4 for API calls to survive broken-IPv6 networks (DEV-4415) ([#136](https://github.com/enrichlayer/el-linear/issues/136)) ([1ff9290](https://github.com/enrichlayer/el-linear/commit/1ff92908ea5d9a742cdfaf80272ee5e615ae0743))
+
 ## [1.18.0](https://github.com/enrichlayer/el-linear/compare/v1.17.0...v1.18.0) (2026-05-24)
 
 
