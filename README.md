@@ -356,6 +356,27 @@ preferences; those stay in personal config. Example team file:
 Run `el-linear config show` to see the resolved config and confirm which team
 config path is active (`teamConfig` field in the output).
 
+#### Migrating a personal-heavy config
+
+Before the team-config split, members typically carried full local copies of
+`members` / `teams` / `labels` / `statusDefaults` / `teamAliases` — and often
+a deprecated `brand: { name, reject }` key. Once a team config is in place
+those local copies just silently shadow the shared values (and silently
+*diverge* when they drift). To clean it up safely:
+
+```bash
+el-linear config migrate-from-personal           # dry-run — prints the plan per file
+el-linear config migrate-from-personal --apply   # write the slimmed files (with .bak-<ts> backups)
+```
+
+Targets the global personal config + every named profile's `config.json`. For
+each top-level shadowable key, the slim drops it **only** when the local copy
+is a strict subset of team (zero divergence, zero non-trivial personal-only
+entries); otherwise the key is left untouched and the divergence is reported
+in the plan so a human resolves it. The deprecated `brand` key is dropped
+when content-identical to a team `terms[]` entry, or converted to a personal
+`terms[]` entry when it differs (with a warning).
+
 ## Term enforcement (with brand-promotion examples)
 
 The `terms` rules let you keep a list of canonical names and the misspellings
