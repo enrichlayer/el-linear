@@ -59,7 +59,11 @@ export interface KeyAction {
 
 /** What we did with the deprecated `brand` key. */
 export interface BrandAction {
-	status: "absent" | "drop-duplicate" | "convert-to-term";
+	status:
+		| "absent"
+		| "drop-duplicate"
+		| "convert-to-term" /** Couldn't convert safely (e.g. existing personal `terms` is malformed). */
+		| "keep-malformed";
 	/** When status === "convert-to-term", the new entry appended to terms[]. */
 	convertedTo?: { canonical: string; reject: string[] };
 	reason?: string;
@@ -265,6 +269,20 @@ export function planMigration(
 				status: "drop-duplicate",
 				reason: `brand is content-identical to team terms entry "${dup.canonical}"`,
 			};
+		} else if (personal.terms !== undefined && !Array.isArray(personal.terms)) {
+			// Refuse to convert: an existing personal `terms` field is not an
+			// array (likely a hand-edit gone wrong). The strict-subset gate
+			// elsewhere never silently destroys info — neither should this
+			// path. Leave brand AND terms as-is; surface as a warning so a
+			// human can resolve.
+			brand = {
+				status: "keep-malformed",
+				reason:
+					"existing personal 'terms' field is not an array; leaving 'brand' and 'terms' untouched for human review",
+			};
+			warnings.push(
+				`Cannot convert deprecated 'brand': existing 'terms' field is not an array (got ${typeof personal.terms}). Left 'brand' and 'terms' as-is — fix 'terms' to a proper array of { canonical, reject } entries and re-run.`,
+			);
 		} else {
 			// Convert: append a personal terms entry, drop brand.
 			delete slimmed.brand;

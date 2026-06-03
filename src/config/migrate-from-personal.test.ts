@@ -217,6 +217,23 @@ describe("planMigration — deprecated brand", () => {
 		]);
 	});
 
+	it("refuses to convert brand when personal.terms is malformed (not an array) — preserves both", () => {
+		// Brand divergent from team's terms (so the planner would normally
+		// convert), but personal.terms is a string from a hand-edit gone wrong.
+		// Strict-subset principle: never silently destroy info. Leave both as-is
+		// and warn so a human resolves it.
+		const personal: JsonObject = {
+			brand: { name: "Acme", reject: ["acme"] },
+			terms: "I am a malformed string" as unknown as JsonValue,
+		};
+		const { slimmed, plan } = planMigration(personal, TEAM);
+		expect(plan.brand.status).toBe("keep-malformed");
+		expect(slimmed.brand).toEqual({ name: "Acme", reject: ["acme"] });
+		expect(slimmed.terms).toBe("I am a malformed string");
+		expect(plan.warnings.length).toBe(1);
+		expect(plan.warnings[0]).toContain("not an array");
+	});
+
 	it("reports 'absent' when brand isn't present", () => {
 		const { plan } = planMigration({} as JsonObject, TEAM);
 		expect(plan.brand.status).toBe("absent");

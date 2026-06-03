@@ -293,7 +293,7 @@ export function setupConfigCommands(program: Command): void {
 		)
 		.addHelpText(
 			"after",
-			`\nThe slim only drops a shadowable top-level key when the personal copy is a strict subset of team (zero divergence and zero non-trivial personal-only entries). Anything that would silently shadow a team value, or carry a personal-only entry team doesn't have, is left untouched and reported in the plan so a human can decide.\n\nUses the currently-active team config for every target. If you have profiles pointing at different team configs, run --file <path> per profile with EL_LINEAR_TEAM_CONFIG set.\n\nExamples:\n  el-linear config migrate-from-personal\n  el-linear config migrate-from-personal --apply\n  el-linear config migrate-from-personal --file ~/.config/el-linear/profiles/foo/config.json --apply`,
+			`\nThe slim only drops a shadowable top-level key when the personal copy is a strict subset of team (zero divergence and zero non-trivial personal-only entries). Anything that would silently shadow a team value, or carry a personal-only entry team doesn't have, is left untouched and reported in the plan so a human can decide.\n\nThe active team config is never a target — passing --file <team-path> is rejected, and a profile config that happens to coincide with the team path is skipped silently with a warning. The first --apply may re-format JSON to 2-space indent + trailing newline; this is harmless but the .bak-<ts> backup preserves the original byte-for-byte.\n\nUses the currently-active team config for every target. If you have profiles pointing at different team configs, run --file <path> per profile with EL_LINEAR_TEAM_CONFIG set.\n\nExamples:\n  el-linear config migrate-from-personal\n  el-linear config migrate-from-personal --apply\n  el-linear config migrate-from-personal --file ~/.config/el-linear/profiles/foo/config.json --apply`,
 		)
 		.action(
 			handleAsyncCommand(async (opts: { apply?: boolean; file?: string }) => {
@@ -313,13 +313,52 @@ export function setupConfigCommands(program: Command): void {
 				}
 
 				const apply = opts.apply ?? false;
-				const targets = opts.file
+				const resolvedTeamPath = path.resolve(teamPath);
+
+				// Self-diff guard: refuse to migrate the team config against itself
+				// (cycle-1 nit). Without this, every shadowable key in team would
+				// classify as "drop" (a key is trivially a subset of itself) and
+				// --apply would gut the team config.
+				if (
+					opts.file &&
+					path.resolve(expandHome(opts.file)) === resolvedTeamPath
+				) {
+					throw new Error(
+						`--file resolves to the active team config (${resolvedTeamPath}). Refusing to migrate the team config against itself.`,
+					);
+				}
+
+				const targetsBeforeFilter = opts.file
 					? [path.resolve(expandHome(opts.file))]
 					: enumerateMigrationTargets();
+				const targets: string[] = [];
+				for (const t of targetsBeforeFilter) {
+					if (path.resolve(t) === resolvedTeamPath) {
+						outputWarning(
+							`Skipping ${t} — it resolves to the active team config; migrating it against itself would erase team-shared keys.`,
+						);
+						continue;
+					}
+					targets.push(t);
+				}
 
 				const results = targets.map((file) =>
 					migrateOneFile(file, team, apply),
 				);
+
+				// Forward per-file plan warnings to the standard _warnings envelope
+				// (cycle-1 nit) so scripters reading the stable warning channel see
+				// them without having to inspect each target.
+				for (const r of results) {
+					for (const w of r.warnings) outputWarning(`${r.file}: ${w}`);
+				}
+
+				// --file <single>: an unreadable / unparseable target is a hard
+				// failure (cycle-1 nit). Default enumeration stays soft so one bad
+				// profile doesn't crash the run for the rest.
+				if (opts.file && results.length === 1 && results[0].error) {
+					throw new Error(results[0].error);
+				}
 
 				outputSuccess({
 					data: {
@@ -404,12 +443,13 @@ function migrateOneFile(
 	};
 
 	if (apply && changed) {
-		const ts = backupTimestamp();
-		const backup = `${file}.bak-${ts}`;
-		fs.copyFileSync(file, backup);
-		// Atomic replace via temp + rename in the same directory.
-		const tmp = `${file}.tmp-${ts}`;
-		fs.writeFileSync(tmp, slimmedText, "utf8");
+		// Backup names include milliseconds (sub-second collisions on rapid
+		// re-apply would otherwise overwrite the original backup) AND copy
+		// with COPYFILE_EXCL so a same-millisecond collision throws instead
+		// of clobbering. Same for the temp file via `wx` flag.
+		const { backup, tmp } = acquireBackupAndTempPaths(file);
+		fs.copyFileSync(file, backup, fs.constants.COPYFILE_EXCL);
+		fs.writeFileSync(tmp, slimmedText, { encoding: "utf8", flag: "wx" });
 		fs.renameSync(tmp, file);
 		result.backup = backup;
 	}
@@ -420,8 +460,34 @@ function migrateOneFile(
 function backupTimestamp(): string {
 	const d = new Date();
 	const pad = (n: number) => n.toString().padStart(2, "0");
+	const pad3 = (n: number) => n.toString().padStart(3, "0");
 	return (
 		`${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}` +
-		`-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+		`-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}` +
+		`-${pad3(d.getMilliseconds())}`
+	);
+}
+
+/**
+ * Pick a `.bak-<ts>` and `.tmp-<ts>` pair that don't collide with anything
+ * on disk. Millisecond resolution makes a collision extraordinarily rare,
+ * but a tight retry loop closes the remaining gap (and the `COPYFILE_EXCL`
+ * / `wx` flags at the call site fail loudly if the gap is ever crossed).
+ */
+function acquireBackupAndTempPaths(file: string): {
+	backup: string;
+	tmp: string;
+} {
+	for (let attempt = 0; attempt < 100; attempt++) {
+		const ts = backupTimestamp();
+		const suffix = attempt === 0 ? ts : `${ts}-${attempt}`;
+		const backup = `${file}.bak-${suffix}`;
+		const tmp = `${file}.tmp-${suffix}`;
+		if (!fs.existsSync(backup) && !fs.existsSync(tmp)) {
+			return { backup, tmp };
+		}
+	}
+	throw new Error(
+		`Could not pick a unique backup name for ${file} after 100 attempts; clean up old .bak-/.tmp- siblings and retry.`,
 	);
 }
