@@ -66,6 +66,30 @@ function matchHeader(line: string): HeaderMatch | null {
 	return null;
 }
 
+/**
+ * Multi-section variant of `extractField`. Extracts each requested section
+ * by name in one call and returns a `{section -> text|null}` map preserving
+ * the caller's order. Missing sections map to `null` so the caller can
+ * distinguish "absent" from "empty" the same way `extractField` does.
+ *
+ * Each name is matched independently via `extractField` — semantics are
+ * identical (first-match wins, case-insensitive, fenced-code-block aware).
+ *
+ * DEV-4479: this is the primitive behind `el-linear issues read --fields
+ * "Done when,Out of scope"` so agents can pull several sections in one
+ * call instead of N spawns.
+ */
+export function extractFields(
+	body: string,
+	fieldNames: readonly string[],
+): Map<string, string | null> {
+	const out = new Map<string, string | null>();
+	for (const name of fieldNames) {
+		out.set(name, extractField(body, name));
+	}
+	return out;
+}
+
 export function extractField(body: string, fieldName: string): string | null {
 	if (!body) return null;
 	const target = normalize(fieldName);

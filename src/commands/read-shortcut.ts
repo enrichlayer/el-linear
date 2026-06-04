@@ -1,9 +1,13 @@
 import type { Command } from "commander";
 import { downloadLinearUploads } from "../utils/download-uploads.js";
-import { extractField } from "../utils/extract-field.js";
+import { extractField, extractFields } from "../utils/extract-field.js";
 import { createFileService } from "../utils/file-service.js";
 import { createIssuesService } from "../utils/issues-service-bootstrap.js";
-import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
+import {
+	handleAsyncCommand,
+	outputSuccess,
+	outputWarning,
+} from "../utils/output.js";
 import { getRootOpts } from "../utils/root-opts.js";
 
 /**
@@ -29,9 +33,15 @@ export function setupReadShortcut(program: Command): void {
 				"Matches H2/H3 headers and bold pseudo-headers case-insensitively. " +
 				"Outputs the section text only — no JSON envelope.",
 		)
+		.option(
+			"--sections <names>",
+			'Extract multiple named description sections in one call (comma-separated, e.g. "Done when,Out of scope,Steps"). ' +
+				"Single-issue only. Returns a JSON envelope { identifier, sections: { name -> text|null } }; missing sections appear as null + a _warnings entry. " +
+				"Sibling of --field (singular). Named --sections rather than --fields because the program already has a global --fields for output-key filtering.",
+		)
 		.addHelpText(
 			"after",
-			'\nExamples:\n  el-linear read ADM-652\n  el-linear get DEV-123 DEV-456\n  el-linear ADM-652          (auto-detected)\n  el-linear read DEV-123 --field "Done when"   (just that section)',
+			'\nExamples:\n  el-linear read ADM-652\n  el-linear get DEV-123 DEV-456\n  el-linear ADM-652          (auto-detected)\n  el-linear read DEV-123 --field "Done when"   (just that section)\n  el-linear read DEV-123 --sections "Done when,Out of scope"',
 		)
 		.action(handleAsyncCommand(readIssues));
 
@@ -89,14 +99,37 @@ export async function readIssues(
 	const fileService = await createFileService(rootOpts);
 
 	const fieldName = typeof options.field === "string" ? options.field : null;
+	const sectionsRaw =
+		typeof options.sections === "string" ? options.sections : null;
 
-	// --field is single-issue only. With multiple issues, a section
-	// extraction can't sensibly fan out to N different bodies — the
-	// caller almost always wants one section from one issue.
-	if (fieldName && issueIds.length > 1) {
+	if (fieldName && sectionsRaw) {
 		throw new Error(
-			"--field is single-issue only; pass exactly one issueId. " +
-				"For multiple issues, drop --field and use --jq or --format summary.",
+			"--field and --sections are mutually exclusive. Use --field for a single section (plain-text output) or --sections for multiple (JSON map).",
+		);
+	}
+
+	// Both --field and --sections are single-issue only — section extraction
+	// can't sensibly fan out to N different bodies, the caller almost always
+	// wants the named sections of one issue.
+	if ((fieldName || sectionsRaw) && issueIds.length > 1) {
+		throw new Error(
+			"--field / --sections are single-issue only; pass exactly one issueId. " +
+				"For multiple issues, drop the section flags and use --jq or --format summary.",
+		);
+	}
+
+	// Parse the comma-separated --sections list once. Preserve the caller's
+	// order, trim each entry, and drop empties so trailing commas don't
+	// surface as ghost "" sections.
+	const sectionNames: string[] | null = sectionsRaw
+		? sectionsRaw
+				.split(",")
+				.map((s) => s.trim())
+				.filter((s) => s.length > 0)
+		: null;
+	if (sectionNames !== null && sectionNames.length === 0) {
+		throw new Error(
+			"--sections was empty after trimming. Pass a comma-separated list of section names.",
 		);
 	}
 
@@ -115,6 +148,28 @@ export async function readIssues(
 				process.exit(1);
 			}
 			process.stdout.write(`${section}\n`);
+			return;
+		}
+		if (sectionNames !== null) {
+			const sectionsMap = extractFields(
+				resolved.description ?? "",
+				sectionNames,
+			);
+			const sections: Record<string, string | null> = {};
+			const missing: string[] = [];
+			for (const [name, text] of sectionsMap) {
+				sections[name] = text;
+				if (text === null) missing.push(name);
+			}
+			for (const name of missing) {
+				outputWarning(
+					`section "${name}" not found in ${resolved.identifier}'s description`,
+				);
+			}
+			outputSuccess({
+				identifier: resolved.identifier,
+				sections,
+			});
 			return;
 		}
 		outputSuccess(resolved);

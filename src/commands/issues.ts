@@ -1464,9 +1464,15 @@ export function setupIssuesCommands(program: Command): void {
 				"Matches H2/H3 headers and bold pseudo-headers case-insensitively. " +
 				"Outputs the section text only — no JSON envelope. Single-issue only.",
 		)
+		.option(
+			"--sections <names>",
+			'Extract multiple named description sections in one call (comma-separated, e.g. "Done when,Out of scope"). ' +
+				"Single-issue only. Returns a JSON envelope { identifier, sections: { name -> text|null } }; missing sections appear as null + a _warnings entry. " +
+				"Sibling of --field (singular). Named --sections rather than --fields because the program already has a global --fields for output-key filtering.",
+		)
 		.addHelpText(
 			"after",
-			'\nBoth UUID and identifiers like ABC-123 are supported.\nMultiple IDs: el-linear issue get DEV-123 DEV-456 DEV-789\nExtract a section: el-linear issue read DEV-123 --field "Done when"',
+			'\nBoth UUID and identifiers like ABC-123 are supported.\nMultiple IDs: el-linear issue get DEV-123 DEV-456 DEV-789\nExtract a section: el-linear issue read DEV-123 --field "Done when"\nMulti-section: el-linear issue read DEV-123 --sections "Done when,Out of scope"',
 		)
 		.action(handleAsyncCommand(readIssues));
 
