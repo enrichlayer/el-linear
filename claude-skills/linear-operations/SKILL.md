@@ -123,7 +123,11 @@ and outreach tracked in one place.
 **Search before creating. No exceptions.**
 
 ```bash
-el-linear issues search "keywords from proposed title" 2>&1
+# --include-closed is required so previously-completed duplicates surface.
+# `issues search` defaults to open states (DEV-4478); the duplicate check
+# intentionally widens to Done/Canceled because a closed-out duplicate is
+# still a duplicate.
+el-linear issues search "keywords from proposed title" --include-closed 2>&1
 ```
 
 1. Extract 2–3 key terms from the proposed title (skip generic words).

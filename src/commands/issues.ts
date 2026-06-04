@@ -277,10 +277,14 @@ async function handleListIssues(
 		options.project === false ||
 		options.priority;
 	const limit = parsePositiveInt(options.limit, "--limit");
-	// excludeTerminalStates is itself a filter — route through searchIssues so
-	// the GraphQL filter is applied. The "no filters" path only runs for an
-	// explicit --include-closed with no other criteria.
-	if (hasOtherFilters || excludeTerminalStates) {
+	// Route through searchIssues whenever the CLI needs to control the GraphQL
+	// state filter: any explicit filter, the default `excludeTerminalStates`,
+	// OR an explicit `--include-closed`. The last case is load-bearing —
+	// getIssues' query hard-codes `state: { type: { neq: "completed" } }`, so
+	// falling through to it on `--include-closed --no-other-filters` would
+	// silently drop Done issues, the exact opposite of the flag's intent.
+	// (DEV-4478 cycle-1.)
+	if (hasOtherFilters || excludeTerminalStates || options.includeClosed) {
 		const searchArgs: SearchIssueArgs = {
 			teamId: options.team ? resolveTeam(options.team) : undefined,
 			assigneeId: options.assignee

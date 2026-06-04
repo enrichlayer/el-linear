@@ -160,15 +160,52 @@ describe("issues commands", () => {
 			expect(mockGetIssues).not.toHaveBeenCalled();
 		});
 
-		it("--include-closed opts back into the raw getIssues path (no implicit filter)", async () => {
-			mockGetIssues.mockResolvedValue([]);
+		it("--include-closed alone routes through searchIssues with excludeTerminalStates:false (DEV-4478 cycle-1)", async () => {
+			// Cycle-1 bug: falling through to getIssues silently dropped Done
+			// issues because GET_ISSUES_QUERY hard-codes `state.type.neq: "completed"`.
+			// The fix: any --include-closed invocation goes through searchIssues
+			// so the CLI controls the GraphQL filter end-to-end (no state filter
+			// when both excludeTerminalStates and status are absent).
+			mockSearchIssues.mockResolvedValue([]);
 
 			const program = createTestProgram();
 			setupIssuesCommands(program);
 			await runCommand(program, ["issues", "list", "--include-closed"]);
 
-			expect(mockGetIssues).toHaveBeenCalledWith(25);
-			expect(mockSearchIssues).not.toHaveBeenCalled();
+			expect(mockSearchIssues).toHaveBeenCalledWith(
+				expect.objectContaining({
+					excludeTerminalStates: false,
+					status: undefined,
+					limit: 25,
+				}),
+			);
+			expect(mockGetIssues).not.toHaveBeenCalled();
+		});
+
+		it("--include-closed combined with --team also routes through searchIssues with excludeTerminalStates:false (DEV-4478)", async () => {
+			// The pre-cycle-1 routing already handled this case correctly via
+			// hasOtherFilters; lock it in so the cycle-1 fix doesn't regress
+			// the multi-flag combination.
+			mockSearchIssues.mockResolvedValue([]);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"list",
+				"--include-closed",
+				"--team",
+				"DEV",
+			]);
+
+			expect(mockSearchIssues).toHaveBeenCalledWith(
+				expect.objectContaining({
+					teamId: "team-id-DEV",
+					excludeTerminalStates: false,
+					status: undefined,
+				}),
+			);
+			expect(mockGetIssues).not.toHaveBeenCalled();
 		});
 
 		it("explicit --status wins over the implicit terminal-state filter", async () => {
