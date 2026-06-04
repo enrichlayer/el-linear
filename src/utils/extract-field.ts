@@ -75,9 +75,11 @@ function matchHeader(line: string): HeaderMatch | null {
  * Each name is matched independently via `extractField` — semantics are
  * identical (first-match wins, case-insensitive, fenced-code-block aware).
  *
- * DEV-4479: this is the primitive behind `el-linear issues read --fields
+ * DEV-4479: this is the primitive behind `el-linear issues read --sections
  * "Done when,Out of scope"` so agents can pull several sections in one
- * call instead of N spawns.
+ * call instead of N spawns. (The CLI flag landed as `--sections` rather
+ * than `--fields` because `--fields` is already the program-level
+ * output-key filter — see the option's `addHelpText` for context.)
  */
 export function extractFields(
 	body: string,

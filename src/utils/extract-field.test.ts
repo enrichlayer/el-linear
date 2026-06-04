@@ -164,4 +164,15 @@ describe("extractFields (multi-section)", () => {
 		expect(out.get("Done when")).toBeNull();
 		expect(out.get("Out of scope")).toBeNull();
 	});
+
+	it("accepts comma-bearing section names as the primitive — only the CLI layer splits on commas", () => {
+		// The CLI `--sections` flag uses comma as a separator, so a section
+		// whose name contains a comma can't be expressed at the CLI. But
+		// programmatic callers (and a future flag variant) should still get
+		// exact-match semantics, so we document and lock that here.
+		const body = "## Foo, bar\n\nbody-1\n\n## Baz\n\nbody-2";
+		const out = extractFields(body, ["Foo, bar", "Baz"]);
+		expect(out.get("Foo, bar")).toBe("body-1");
+		expect(out.get("Baz")).toBe("body-2");
+	});
 });

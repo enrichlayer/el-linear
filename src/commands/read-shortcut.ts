@@ -161,9 +161,13 @@ export async function readIssues(
 				sections[name] = text;
 				if (text === null) missing.push(name);
 			}
-			for (const name of missing) {
+			if (missing.length > 0) {
+				// Coalesce: one warning naming every missing section is denser than
+				// N entries and easier for an agent to act on (cycle-1 nit).
 				outputWarning(
-					`section "${name}" not found in ${resolved.identifier}'s description`,
+					`sections not found in ${resolved.identifier}'s description: ${missing
+						.map((n) => `"${n}"`)
+						.join(", ")}`,
 				);
 			}
 			outputSuccess({
