@@ -141,6 +141,11 @@ export interface GetIssueByIdentifierResponse {
 	issues: { nodes: IssueWithCommentsNode[] };
 }
 
+/** Response shape for `BATCH_GET_ISSUES_QUERY` (DEV-4477). */
+export interface BatchGetIssuesResponse {
+	issues: { nodes: IssueWithCommentsNode[] };
+}
+
 /** Response shape for `GET_ISSUES_QUERY`. */
 export interface GetIssuesResponse {
 	issues: { nodes: IssueNode[] };
