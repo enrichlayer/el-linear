@@ -27,6 +27,12 @@ import type { LinearPriority } from "../types/linear.js";
 interface IdNameRef {
 	id: string;
 	name: string;
+	/**
+	 * Workflow-state type — selected only on state fragments. Optional so
+	 * non-state IdNameRef users (project, team, assignee, etc.) stay valid.
+	 * DEV-4478.
+	 */
+	type?: string;
 }
 
 interface IdKeyNameRef {

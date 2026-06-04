@@ -142,28 +142,65 @@ describe("issues commands", () => {
 	});
 
 	describe("issues list", () => {
-		it("calls getIssues with default limit 25", async () => {
-			mockGetIssues.mockResolvedValue([]);
+		it("defaults to excluding terminal states — routes through searchIssues with excludeTerminalStates:true (DEV-4478)", async () => {
+			mockSearchIssues.mockResolvedValue([]);
 
 			const program = createTestProgram();
 			setupIssuesCommands(program);
 			await runCommand(program, ["issues", "list"]);
 
-			expect(mockGetIssues).toHaveBeenCalledWith(25);
-			expect(mockOutputSuccess).toHaveBeenCalledWith({
-				data: [],
-				meta: { count: 0 },
-			});
+			expect(mockSearchIssues).toHaveBeenCalledWith(
+				expect.objectContaining({
+					excludeTerminalStates: true,
+					status: undefined,
+					limit: 25,
+				}),
+			);
+			// No raw getIssues fetch when the filter is on by default.
+			expect(mockGetIssues).not.toHaveBeenCalled();
 		});
 
-		it("calls getIssues with custom limit", async () => {
+		it("--include-closed opts back into the raw getIssues path (no implicit filter)", async () => {
 			mockGetIssues.mockResolvedValue([]);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, ["issues", "list", "--include-closed"]);
+
+			expect(mockGetIssues).toHaveBeenCalledWith(25);
+			expect(mockSearchIssues).not.toHaveBeenCalled();
+		});
+
+		it("explicit --status wins over the implicit terminal-state filter", async () => {
+			mockSearchIssues.mockResolvedValue([]);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"list",
+				"--status",
+				"Done,Canceled",
+			]);
+
+			expect(mockSearchIssues).toHaveBeenCalledWith(
+				expect.objectContaining({
+					status: ["Done", "Canceled"],
+					excludeTerminalStates: false,
+				}),
+			);
+		});
+
+		it("passes --limit through with the default filter on", async () => {
+			mockSearchIssues.mockResolvedValue([]);
 
 			const program = createTestProgram();
 			setupIssuesCommands(program);
 			await runCommand(program, ["issues", "list", "--limit", "10"]);
 
-			expect(mockGetIssues).toHaveBeenCalledWith(10);
+			expect(mockSearchIssues).toHaveBeenCalledWith(
+				expect.objectContaining({ limit: 10, excludeTerminalStates: true }),
+			);
 		});
 
 		it("filters results by --team", async () => {
@@ -185,6 +222,7 @@ describe("issues commands", () => {
 				project: undefined,
 				labelNames: undefined,
 				status: undefined,
+				excludeTerminalStates: true,
 				priority: undefined,
 				orderBy: "updatedAt",
 				limit: 25,
