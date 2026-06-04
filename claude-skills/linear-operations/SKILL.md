@@ -269,6 +269,7 @@ Run `el-linear usage` for the full command reference. Non-obvious rules:
 - **Subcommand aliases** — `read`/`view`/`get`/`show`, `update`/`edit`/`set`.
 - **`--jq` for GraphQL filtering** — never pipe through `jq` directly (zsh escaping breaks `!=`).
 - **`--raw` flag** strips the `{ data, meta }` wrapper — emits just the array.
+- **Body/description from a file** — `issues create`/`update` take `--description-file <path>`; `comments create`/`update` take `--body-file <path>`. Prefer the file form for any body with backticks, fenced code, or markdown tables — it sidesteps shell-quoting traps (the same reason `el-git mr comment --body-file` exists). `--body` and `--body-file` are **mutually exclusive** (passing both errors); file-sourced bodies get the same auto-link / auto-mention treatment as inline `--body`.
 
 ### Output format
 

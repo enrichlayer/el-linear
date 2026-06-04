@@ -168,6 +168,26 @@ describe("comments commands", () => {
 
 			expect(mockRawRequest).not.toHaveBeenCalled();
 		});
+
+		it("does not call API when both --body and --body-file are given (mutually exclusive)", async () => {
+			tmpDir = mkdtempSync(join(tmpdir(), "comments-test-"));
+			const filePath = join(tmpDir, "body.md");
+			writeFileSync(filePath, "Body from file");
+
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, [
+				"comments",
+				"create",
+				"ENG-123",
+				"--body",
+				"inline body",
+				"--body-file",
+				filePath,
+			]);
+
+			expect(mockRawRequest).not.toHaveBeenCalled();
+		});
 	});
 
 	describe("comments update", () => {
@@ -229,6 +249,26 @@ describe("comments commands", () => {
 			const program = createTestProgram();
 			setupCommentsCommands(program);
 			await runCommand(program, ["comments", "update", "comment-uuid"]);
+
+			expect(mockRawRequest).not.toHaveBeenCalled();
+		});
+
+		it("does not call API when both --body and --body-file are given (mutually exclusive)", async () => {
+			tmpDir = mkdtempSync(join(tmpdir(), "comments-test-"));
+			const filePath = join(tmpDir, "body.md");
+			writeFileSync(filePath, "Updated from file");
+
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, [
+				"comments",
+				"update",
+				"comment-uuid",
+				"--body",
+				"inline body",
+				"--body-file",
+				filePath,
+			]);
 
 			expect(mockRawRequest).not.toHaveBeenCalled();
 		});
