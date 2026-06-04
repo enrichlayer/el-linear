@@ -144,8 +144,10 @@ export const GET_ISSUE_BY_IDENTIFIER_QUERY = `
  * Linear returns nodes in DB order, NOT input order — the caller is
  * responsible for re-sorting to match the input list before surfacing.
  *
- * `$first` is `refCount * 2` (with a floor of 100) to absorb the rare case
- * where Linear's pagination cap drops mid-result; tests assert the floor.
+ * `$first` is `refCount * 2`, clamped to [100, 250] — the floor absorbs the
+ * rare case where Linear returns more rows than requested via OR-clause
+ * collisions; the ceiling is Linear's connection-page cap, beyond which the
+ * server silently truncates.
  *
  * Raw GraphQL (not @linear/sdk) is required because the SDK's
  * `client.issues({ filter: ... })` strips through the same query under
