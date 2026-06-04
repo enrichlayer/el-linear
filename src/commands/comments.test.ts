@@ -173,6 +173,7 @@ describe("comments commands", () => {
 			tmpDir = mkdtempSync(join(tmpdir(), "comments-test-"));
 			const filePath = join(tmpDir, "body.md");
 			writeFileSync(filePath, "Body from file");
+			const infoSpy = vi.spyOn(logger, "info");
 
 			const program = createTestProgram();
 			setupCommentsCommands(program);
@@ -187,6 +188,12 @@ describe("comments commands", () => {
 			]);
 
 			expect(mockRawRequest).not.toHaveBeenCalled();
+			// Pin the actual contract: it's the mutual-exclusivity guard that
+			// fired, not some other early throw (outputError logs the JSON error
+			// via logger.info).
+			expect(infoSpy).toHaveBeenCalledWith(
+				expect.stringContaining("mutually exclusive"),
+			);
 		});
 	});
 
@@ -257,6 +264,7 @@ describe("comments commands", () => {
 			tmpDir = mkdtempSync(join(tmpdir(), "comments-test-"));
 			const filePath = join(tmpDir, "body.md");
 			writeFileSync(filePath, "Updated from file");
+			const infoSpy = vi.spyOn(logger, "info");
 
 			const program = createTestProgram();
 			setupCommentsCommands(program);
@@ -271,6 +279,9 @@ describe("comments commands", () => {
 			]);
 
 			expect(mockRawRequest).not.toHaveBeenCalled();
+			expect(infoSpy).toHaveBeenCalledWith(
+				expect.stringContaining("mutually exclusive"),
+			);
 		});
 	});
 
