@@ -42,6 +42,14 @@ const BODY_DATA_ERROR_RE = /prosemirror|bodydata|invalid.*body/i;
 const ISSUE_IDENTIFIER_REGEX = /^[A-Z][A-Z0-9]*-\d+$/;
 
 function readBody(options: OptionValues): string {
+	// --body and --body-file are two sources for the same field; accepting both
+	// would silently drop one. Reject up front (DEV-4450) — the same mutual-
+	// exclusivity contract resolveDescription() enforces for --template.
+	if (options.body && options.bodyFile) {
+		throw new Error(
+			"--body and --body-file are mutually exclusive — pass one or the other",
+		);
+	}
 	if (options.bodyFile) {
 		return readFileSync(options.bodyFile, "utf-8");
 	}
