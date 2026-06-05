@@ -17,7 +17,6 @@ function node(
 		title,
 		state: opts.state ? { id: "s", ...opts.state } : null,
 		assignee: opts.assignee ? { id: "u", name: opts.assignee } : null,
-		priority: null,
 		children: opts.children ? { nodes: opts.children } : undefined,
 	};
 }

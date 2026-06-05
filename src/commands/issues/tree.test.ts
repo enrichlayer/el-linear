@@ -55,7 +55,6 @@ describe("issues tree (DEV-4480)", () => {
 			title: "Root",
 			state: { id: "s", name: "Todo", type: "unstarted" },
 			assignee: null,
-			priority: null,
 			children: { nodes: [] },
 		};
 		mockRawRequest.mockResolvedValue({ issue: issueNode });
@@ -82,7 +81,6 @@ describe("issues tree (DEV-4480)", () => {
 				title: "Root",
 				state: null,
 				assignee: null,
-				priority: null,
 				children: { nodes: [] },
 			},
 		});
@@ -124,7 +122,6 @@ describe("issues tree (DEV-4480)", () => {
 				title: "Root",
 				state: { id: "s", name: "In Progress", type: "started" },
 				assignee: null,
-				priority: null,
 				children: {
 					nodes: [
 						{
@@ -133,7 +130,6 @@ describe("issues tree (DEV-4480)", () => {
 							title: "Alive",
 							state: { id: "s2", name: "Todo", type: "unstarted" },
 							assignee: null,
-							priority: null,
 							children: { nodes: [] },
 						},
 						{
@@ -142,7 +138,6 @@ describe("issues tree (DEV-4480)", () => {
 							title: "Done",
 							state: { id: "s3", name: "Done", type: "completed" },
 							assignee: null,
-							priority: null,
 							children: { nodes: [] },
 						},
 					],
@@ -171,7 +166,6 @@ describe("issues tree (DEV-4480)", () => {
 			title: "Root",
 			state: null,
 			assignee: null,
-			priority: null,
 			children: {
 				nodes: [
 					{
@@ -180,7 +174,6 @@ describe("issues tree (DEV-4480)", () => {
 						title: "Done",
 						state: { id: "s", name: "Done", type: "completed" },
 						assignee: null,
-						priority: null,
 						children: { nodes: [] },
 					},
 				],
@@ -194,5 +187,134 @@ describe("issues tree (DEV-4480)", () => {
 		const emitted = mockOutputSuccess.mock.calls[0][0];
 		expect(emitted.children.nodes).toHaveLength(1);
 		expect(emitted.children.nodes[0].state.type).toBe("completed");
+	});
+
+	it("--format summary writes ASCII tree to stdout (cycle-1 blocker)", async () => {
+		// The cycle-1 blocker: `--format` is a *root-program* option, so the
+		// subcommand action's local `options` parameter doesn't see it.
+		// Reading from `getRootOpts(command).format` is the correct dispatch.
+		// This test would have caught the original bug — `outputSuccess`
+		// vs. `process.stdout.write` is observable here.
+		mockResolveIssueId.mockResolvedValue("uuid-1");
+		mockRawRequest.mockResolvedValue({
+			issue: {
+				id: "uuid-1",
+				identifier: "DEV-1",
+				title: "Root",
+				state: null,
+				assignee: null,
+				children: {
+					nodes: [
+						{
+							id: "uuid-2",
+							identifier: "DEV-2",
+							title: "Child",
+							state: null,
+							assignee: null,
+							children: { nodes: [] },
+						},
+					],
+				},
+			},
+		});
+
+		const writes: string[] = [];
+		const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
+			chunk: string | Uint8Array,
+		) => {
+			writes.push(typeof chunk === "string" ? chunk : chunk.toString());
+			return true;
+		}) as typeof process.stdout.write);
+
+		try {
+			const program = createTestProgram();
+			// `--format` is a root-program option in production (declared in
+			// main.ts). Mirror that here so the action sees it via getRootOpts.
+			program.option("--format <kind>", "json or summary");
+			const issues = program.command("issues");
+			setupTreeCommand(issues);
+			await runCommand(program, [
+				"--format",
+				"summary",
+				"issues",
+				"tree",
+				"DEV-1",
+			]);
+
+			const all = writes.join("");
+			// Box-drawing prefix proves formatTree ran; outputSuccess was NOT called.
+			expect(all).toContain("DEV-1 Root");
+			expect(all).toContain("└── DEV-2 Child");
+			expect(mockOutputSuccess).not.toHaveBeenCalled();
+		} finally {
+			stdoutSpy.mockRestore();
+		}
+	});
+
+	it("--no-include-closed drops a terminal child's entire subtree (cycle-1 nit)", async () => {
+		// A terminal-state PARENT with a non-terminal grandchild — the
+		// grandchild should NOT re-emerge under the surviving children
+		// (the prune drops the whole subtree, per the docstring).
+		mockResolveIssueId.mockResolvedValue("uuid-1");
+		mockRawRequest.mockResolvedValue({
+			issue: {
+				id: "uuid-1",
+				identifier: "DEV-1",
+				title: "Root",
+				state: { id: "s", name: "In Progress", type: "started" },
+				assignee: null,
+				children: {
+					nodes: [
+						{
+							id: "uuid-2",
+							identifier: "DEV-2",
+							title: "Alive-Parent",
+							state: { id: "s2", name: "Todo", type: "unstarted" },
+							assignee: null,
+							children: { nodes: [] },
+						},
+						{
+							id: "uuid-3",
+							identifier: "DEV-3",
+							title: "Done-Parent",
+							state: { id: "s3", name: "Done", type: "completed" },
+							assignee: null,
+							children: {
+								nodes: [
+									{
+										id: "uuid-4",
+										identifier: "DEV-4",
+										title: "Alive-Grandchild",
+										state: {
+											id: "s4",
+											name: "In Progress",
+											type: "started",
+										},
+										assignee: null,
+										children: { nodes: [] },
+									},
+								],
+							},
+						},
+					],
+				},
+			},
+		});
+
+		const program = setupProgram();
+		await runCommand(program, [
+			"issues",
+			"tree",
+			"DEV-1",
+			"--no-include-closed",
+		]);
+
+		const emitted = mockOutputSuccess.mock.calls[0][0];
+		expect(emitted.children.nodes).toHaveLength(1);
+		expect(emitted.children.nodes[0].identifier).toBe("DEV-2");
+		// DEV-4 (alive grandchild of pruned DEV-3) must NOT reappear at the
+		// top level — the prune is subtree-scoped, not per-node.
+		const flatIds = JSON.stringify(emitted);
+		expect(flatIds).not.toContain("DEV-4");
 	});
 });

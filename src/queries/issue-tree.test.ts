@@ -1,3 +1,4 @@
+import { parse } from "graphql";
 import { describe, expect, it } from "vitest";
 import {
 	buildIssueTreeQuery,
@@ -59,5 +60,16 @@ describe("buildIssueTreeQuery", () => {
 		expect(MAX_TREE_DEPTH).toBe(5);
 		expect(DEFAULT_TREE_DEPTH).toBeGreaterThanOrEqual(MIN_TREE_DEPTH);
 		expect(DEFAULT_TREE_DEPTH).toBeLessThanOrEqual(MAX_TREE_DEPTH);
+	});
+
+	it("emits structurally-valid GraphQL at every allowed depth (cycle-1 nit)", () => {
+		// The `ALL_QUERIES` gate in graphql-queries.test.ts runs `parse()`
+		// across the static-query inventory. `buildIssueTreeQuery` is
+		// runtime-generated and isn't in that gate, so round-trip parse here
+		// instead for every depth in [MIN, MAX]. Catches typos in the
+		// nested-children block, missing braces, etc.
+		for (let d = MIN_TREE_DEPTH; d <= MAX_TREE_DEPTH; d++) {
+			expect(() => parse(buildIssueTreeQuery(d))).not.toThrow();
+		}
 	});
 });

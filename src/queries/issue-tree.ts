@@ -22,13 +22,17 @@ export const MIN_TREE_DEPTH = 1;
 export const MAX_TREE_DEPTH = 5;
 export const DEFAULT_TREE_DEPTH = 3;
 
+// Field set per tree node — kept minimal so the depth-N query stays small.
+// `state.type` is required client-side for `--no-include-closed` pruning;
+// `state.name` for the [Done]/[Canceled] suffix on terminal nodes.
+// `priority` was intentionally dropped after cycle-1: the ASCII formatter
+// doesn't render it and including it inflates the query string by ~N nodes.
 const TREE_NODE_FIELDS = `
 	id
 	identifier
 	title
 	state { id name type }
 	assignee { id name }
-	priority
 `;
 
 /**
@@ -81,7 +85,6 @@ export interface IssueTreeNode {
 	title: string;
 	state: { id: string; name: string; type: string } | null;
 	assignee: { id: string; name: string } | null;
-	priority: number | null;
 	children?: { nodes: IssueTreeNode[] };
 }
 

@@ -90,7 +90,12 @@ export async function handleTreeCommand(
 		? result.issue
 		: pruneTerminalStates(result.issue);
 
-	if (options.format === "summary") {
+	// `--format` is a *root-program* option (see main.ts), so commander
+	// surfaces it via `command.parent.opts()` — NOT via the subcommand
+	// action's local `options` parameter. Reading from `rootOpts` mirrors
+	// the precedent in `read-shortcut.ts`'s `--field` handling.
+	// (DEV-4480 cycle-1 blocker.)
+	if (rootOpts.format === "summary") {
 		process.stdout.write(`${formatTree(filtered)}\n`);
 		return;
 	}
@@ -115,6 +120,13 @@ function parseDepth(raw: string | undefined): number {
  * `completed` or `canceled`. Pure function — does not mutate the input.
  * A pruned child takes its entire subtree with it (consistent with how
  * `issues list --no-include-closed` excludes closed work entirely).
+ *
+ * Assumes Linear's parent → children graph stays single-parent (a tree,
+ * not a DAG). If Linear ever ships multi-parent issues, this recursion
+ * would re-emit nodes reachable via multiple paths — at that point add
+ * a `Set<string>` of seen `id`s to the walk. Today the assumption is
+ * safe. Bounded recursion: `MAX_TREE_DEPTH=5` caps the call stack at
+ * ≤6 frames (root + 5 children levels). (Cycle-1 nit.)
  */
 function pruneTerminalStates(root: IssueTreeNode): IssueTreeNode {
 	const kids = root.children?.nodes ?? [];
