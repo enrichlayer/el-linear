@@ -1472,7 +1472,7 @@ export function setupIssuesCommands(program: Command): void {
 		)
 		.option(
 			"--with <names>",
-			"Comma-separated opt-in includes (DEV-4476). Each value fetches an extra " +
+			"Comma-separated opt-in includes. Each value fetches an extra " +
 				'block of data and adds it to the JSON envelope. Currently supported: "relations" ' +
 				"(adds an array of cross-issue relations under a top-level `relations` key).",
 		)

@@ -196,7 +196,7 @@ describe("read-shortcut", () => {
 			const i1 = { id: "uuid-1", identifier: "DEV-1" };
 			const i2 = { id: "uuid-2", identifier: "DEV-2" };
 			// DEV-4477 batch path: the multi-issue read resolves all issues in one
-			// getIssuesByRefs call (not per-id getIssueById), then --with relations
+			// `getIssuesByRefs` call (not per-id getIssueById), then --with relations
 			// (DEV-4476) enriches each over that batch result. Mocking getIssueById
 			// with a once-queue here would leave unconsumed values that bleed into
 			// later tests (clearAllMocks does not drain once-queues).
@@ -228,6 +228,101 @@ describe("read-shortcut", () => {
 			expect(arg).toHaveLength(2);
 			expect(arg[0]).toHaveProperty("relations");
 			expect(arg[1]).toHaveProperty("relations");
+		});
+
+		it("merges incoming relations (inverseRelations) into the envelope (cycle-1 nit)", async () => {
+			const issue = { id: "uuid-1", identifier: "DEV-1", title: "Parent" };
+			mockGetIssueById.mockResolvedValue(issue);
+			// Outgoing AND incoming — pins the merge order (outgoing first,
+			// then incoming) and exercises normalizeInverseType for the
+			// `blocks` → `blockedBy` flip on the incoming side.
+			mockRawRequest.mockResolvedValue({
+				issue: {
+					id: "uuid-1",
+					identifier: "DEV-1",
+					title: "Parent",
+					description: null,
+					relations: {
+						nodes: [
+							{
+								id: "rel-out",
+								type: "related",
+								relatedIssue: {
+									id: "uuid-2",
+									identifier: "DEV-2",
+									title: "Outgoing",
+									state: null,
+									priority: null,
+									assignee: null,
+									team: null,
+								},
+							},
+						],
+					},
+					inverseRelations: {
+						nodes: [
+							{
+								id: "rel-in",
+								type: "blocks",
+								issue: {
+									id: "uuid-3",
+									identifier: "DEV-3",
+									title: "Incoming-Blocker",
+									state: null,
+									priority: null,
+									assignee: null,
+									team: null,
+								},
+							},
+						],
+					},
+				},
+			});
+
+			const program = createTestProgram();
+			setupReadShortcut(program);
+			await runCommand(program, ["read", "DEV-1", "--with", "relations"]);
+
+			const arg = mockOutputSuccess.mock.calls[0][0];
+			expect(arg.relations).toHaveLength(2);
+			// Outgoing first.
+			expect(arg.relations[0]).toEqual(
+				expect.objectContaining({
+					direction: "outgoing",
+					type: "related",
+					issue: expect.objectContaining({ identifier: "DEV-2" }),
+				}),
+			);
+			// Incoming with inverted type ("blocks" → "blockedBy").
+			expect(arg.relations[1]).toEqual(
+				expect.objectContaining({
+					direction: "incoming",
+					type: "blockedBy",
+					issue: expect.objectContaining({ identifier: "DEV-3" }),
+				}),
+			);
+		});
+
+		it("emits relations: [] when Linear loses the issue between fetches (race; cycle-1 nit)", async () => {
+			// getIssueById succeeds → we have a UUID and emit the base
+			// envelope. The relations query then returns `issue: null`
+			// (true race: issue deleted between calls). Contract: surface
+			// the base issue with relations: [] rather than throwing.
+			const issue = { id: "uuid-1", identifier: "DEV-1" };
+			mockGetIssueById.mockResolvedValue(issue);
+			mockRawRequest.mockResolvedValue({ issue: null });
+
+			const program = createTestProgram();
+			setupReadShortcut(program);
+			await runCommand(program, ["read", "DEV-1", "--with", "relations"]);
+
+			expect(mockOutputSuccess).toHaveBeenCalledWith(
+				expect.objectContaining({
+					id: "uuid-1",
+					identifier: "DEV-1",
+					relations: [],
+				}),
+			);
 		});
 	});
 });

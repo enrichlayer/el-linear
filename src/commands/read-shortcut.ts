@@ -250,6 +250,15 @@ export async function readIssues(
  * via the shared relations builders. `relatedIssue` / `issue` peers that
  * Linear omits (rare — deleted-relation edge case) are skipped, matching
  * the `issues related` command's behavior.
+ *
+ * Race semantics: when `result.issue` is null (the issue existed at the
+ * `getIssueById` call upstream but is missing here — Linear deleted /
+ * unarchived it between the two calls), returns `[]` rather than
+ * throwing. The base issue is still emitted, and the caller sees an
+ * empty `relations` array — preferable to failing the whole envelope
+ * for a rare race. This intentionally diverges from `handleRelatedIssues`
+ * (which throws), because that command's *primary* output is relations,
+ * whereas here relations are an opt-in side dish.
  */
 async function fetchRelations(
 	graphQLService: GraphQLService,
