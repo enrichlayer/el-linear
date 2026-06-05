@@ -1,7 +1,10 @@
 import type { Command } from "commander";
+import { GET_ISSUE_RELATIONS_QUERY } from "../queries/issues.js";
+import type { GetIssueRelationsResponse } from "../queries/issues-types.js";
 import { downloadLinearUploads } from "../utils/download-uploads.js";
 import { extractField, extractFields } from "../utils/extract-field.js";
 import { createFileService } from "../utils/file-service.js";
+import type { GraphQLService } from "../utils/graphql-service.js";
 import { createIssuesService } from "../utils/issues-service-bootstrap.js";
 import {
 	handleAsyncCommand,
@@ -9,6 +12,15 @@ import {
 	outputWarning,
 } from "../utils/output.js";
 import { getRootOpts } from "../utils/root-opts.js";
+import {
+	type ParsedWithIncludes,
+	parseWithIncludes,
+} from "../utils/with-includes.js";
+import {
+	buildIncomingRelationEntries,
+	buildOutgoingRelationEntries,
+	type RelatedIssueEntry,
+} from "./issues/relations.js";
 
 /**
  * Issue ID pattern: 1-5 uppercase letters, dash, 1+ digits (e.g. ADM-652, DEV-12).
@@ -39,9 +51,15 @@ export function setupReadShortcut(program: Command): void {
 				"Single-issue only. Returns a JSON envelope { identifier, sections: { name -> text|null } }; missing sections appear as null + a _warnings entry. " +
 				"Sibling of --field (singular). Named --sections rather than --fields because the program already has a global --fields for output-key filtering.",
 		)
+		.option(
+			"--with <names>",
+			"Comma-separated opt-in includes. Each value fetches an extra " +
+				'block of data and adds it to the JSON envelope. Currently supported: "relations" ' +
+				"(adds an array of cross-issue relations under a top-level `relations` key).",
+		)
 		.addHelpText(
 			"after",
-			'\nExamples:\n  el-linear read ADM-652\n  el-linear get DEV-123 DEV-456\n  el-linear ADM-652          (auto-detected)\n  el-linear read DEV-123 --field "Done when"   (just that section)\n  el-linear read DEV-123 --sections "Done when,Out of scope"',
+			'\nExamples:\n  el-linear read ADM-652\n  el-linear get DEV-123 DEV-456\n  el-linear ADM-652          (auto-detected)\n  el-linear read DEV-123 --field "Done when"   (just that section)\n  el-linear read DEV-123 --sections "Done when,Out of scope"\n  el-linear read DEV-123 --with relations       (issue + cross-issue links)',
 		)
 		.action(handleAsyncCommand(readIssues));
 
@@ -95,12 +113,19 @@ export async function readIssues(
 	command: Command,
 ): Promise<void> {
 	const rootOpts = getRootOpts(command);
-	const { issuesService } = await createIssuesService(rootOpts);
+	const { graphQLService, issuesService } = await createIssuesService(rootOpts);
 	const fileService = await createFileService(rootOpts);
 
 	const fieldName = typeof options.field === "string" ? options.field : null;
 	const sectionsRaw =
 		typeof options.sections === "string" ? options.sections : null;
+	// DEV-4476: --with opt-in includes (currently `relations`). Throws on
+	// unknown values via parseWithIncludes — fail fast in the CLI per the
+	// deterministic-CLI doctrine.
+	const includes: ParsedWithIncludes =
+		typeof options.with === "string"
+			? parseWithIncludes(options.with)
+			: { relations: false };
 
 	if (fieldName && sectionsRaw) {
 		throw new Error(
@@ -130,6 +155,15 @@ export async function readIssues(
 	if (sectionNames !== null && sectionNames.length === 0) {
 		throw new Error(
 			"--sections was empty after trimming. Pass a comma-separated list of section names.",
+		);
+	}
+
+	// --field is also an extract-this-section operation; pairing it with
+	// --with would produce ambiguous output (section text vs. JSON envelope).
+	// Reject up front rather than silently dropping one.
+	if (fieldName && includes.relations) {
+		throw new Error(
+			"--field and --with are mutually exclusive (--field outputs raw section text; --with extends the JSON envelope).",
 		);
 	}
 
@@ -176,7 +210,15 @@ export async function readIssues(
 			});
 			return;
 		}
-		outputSuccess(resolved);
+		// DEV-4476: --with relations (mutually exclusive with --sections, which
+		// returns above). Enrich the single-issue envelope when requested.
+		const envelope = includes.relations
+			? {
+					...resolved,
+					relations: await fetchRelations(graphQLService, resolved.id),
+				}
+			: resolved;
+		outputSuccess(envelope);
 	} else {
 		// DEV-4477: one batched GraphQL call instead of N parallel single-issue
 		// queries. The service preserves input order and throws notFoundError
@@ -185,8 +227,43 @@ export async function readIssues(
 		// there's nothing to download.
 		const issues = await issuesService.getIssuesByRefs(issueIds);
 		const results = await Promise.all(
-			issues.map((issue) => downloadLinearUploads(issue, fileService)),
+			// Apply --with relations over the batch-fetched issues (DEV-4476),
+			// preserving DEV-4477's single batched GraphQL fetch above — don't
+			// re-fetch per id, which would defeat the batch optimization.
+			issues.map(async (issue) => {
+				const resolved = await downloadLinearUploads(issue, fileService);
+				if (!includes.relations) {
+					return resolved;
+				}
+				return {
+					...resolved,
+					relations: await fetchRelations(graphQLService, resolved.id),
+				};
+			}),
 		);
 		outputSuccess(results);
 	}
+}
+
+/**
+ * Fetch relations for a known-UUID issue and flatten outgoing + incoming
+ * via the shared relations builders. `relatedIssue` / `issue` peers that
+ * Linear omits (rare — deleted-relation edge case) are skipped, matching
+ * the `issues related` command's behavior.
+ */
+async function fetchRelations(
+	graphQLService: GraphQLService,
+	issueId: string,
+): Promise<RelatedIssueEntry[]> {
+	const result = await graphQLService.rawRequest<GetIssueRelationsResponse>(
+		GET_ISSUE_RELATIONS_QUERY,
+		{ id: issueId },
+	);
+	if (!result.issue) {
+		return [];
+	}
+	return [
+		...buildOutgoingRelationEntries(result.issue.relations.nodes),
+		...buildIncomingRelationEntries(result.issue.inverseRelations.nodes),
+	];
 }

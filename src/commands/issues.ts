@@ -1470,9 +1470,15 @@ export function setupIssuesCommands(program: Command): void {
 				"Single-issue only. Returns a JSON envelope { identifier, sections: { name -> text|null } }; missing sections appear as null + a _warnings entry. " +
 				"Sibling of --field (singular). Named --sections rather than --fields because the program already has a global --fields for output-key filtering.",
 		)
+		.option(
+			"--with <names>",
+			"Comma-separated opt-in includes (DEV-4476). Each value fetches an extra " +
+				'block of data and adds it to the JSON envelope. Currently supported: "relations" ' +
+				"(adds an array of cross-issue relations under a top-level `relations` key).",
+		)
 		.addHelpText(
 			"after",
-			'\nBoth UUID and identifiers like ABC-123 are supported.\nMultiple IDs: el-linear issue get DEV-123 DEV-456 DEV-789\nExtract a section: el-linear issue read DEV-123 --field "Done when"\nMulti-section: el-linear issue read DEV-123 --sections "Done when,Out of scope"',
+			'\nBoth UUID and identifiers like ABC-123 are supported.\nMultiple IDs: el-linear issue get DEV-123 DEV-456 DEV-789\nExtract a section: el-linear issue read DEV-123 --field "Done when"\nMulti-section: el-linear issue read DEV-123 --sections "Done when,Out of scope"\nWith relations: el-linear issue read DEV-123 --with relations',
 		)
 		.action(handleAsyncCommand(readIssues));
 
