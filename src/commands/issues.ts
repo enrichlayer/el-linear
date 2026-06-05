@@ -87,6 +87,7 @@ import {
 	createRelations,
 	type RelatedIssueEntry,
 } from "./issues/relations.js";
+import { setupTreeCommand } from "./issues/tree.js";
 import { readIssues } from "./read-shortcut.js";
 
 const IMAGE_EXTENSIONS = new Set([
@@ -1215,6 +1216,11 @@ export function setupIssuesCommands(program: Command): void {
 		.alias("issue")
 		.description("Issue operations");
 	issues.action(() => issues.help());
+
+	// DEV-4480: `issues tree <ID>` lives in its own file because the
+	// recursive query builder + ASCII formatter belong together and are
+	// substantial enough to warrant the split.
+	setupTreeCommand(issues);
 
 	issues
 		.command("list")

@@ -535,6 +535,28 @@ el-linear read ADM-652 --field "Out of scope"
 Single-issue only — pair it with `--jq` on full JSON for batch
 extraction across many issues.
 
+### Render an issue's tree: `issues tree`
+
+`issues tree <ID>` walks the parent → children graph for an issue in a
+single GraphQL round-trip and returns either a nested JSON envelope
+(default) or an ASCII tree (`--format summary`).
+
+```bash
+el-linear issues tree DEV-100 --format summary
+# DEV-100 Migrate auth middleware
+# ├── DEV-101 Write design doc
+# │   ├── DEV-104 Survey existing auth flows [Done]
+# │   └── DEV-105 Draft RFC
+# ├── DEV-102 Build new session store (@Alice)
+# └── DEV-103 Cutover plan
+```
+
+Depth defaults to **3** (max 5 — Linear has no native depth-N recursion,
+so each level adds a `children { nodes { ... } }` block to the generated
+query). Terminal-state branches (`Done` / `Canceled`) are **kept** by
+default because the tree's value is *structural*; pass
+`--no-include-closed` to prune them.
+
 ## Wrapping Linear references in arbitrary text
 
 `el-linear refs wrap` takes plain text on stdin (or via `--file`) and rewrites
