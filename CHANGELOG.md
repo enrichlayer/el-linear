@@ -4,6 +4,17 @@ All notable changes to `@enrichlayer/el-linear` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.20.0](https://github.com/enrichlayer/el-linear/compare/v1.19.0...v1.20.0) (2026-06-06)
+
+
+### Features
+
+* **comments:** enforce --body/--body-file mutual exclusivity + document body-file (DEV-4450) ([#143](https://github.com/enrichlayer/el-linear/issues/143)) ([262e017](https://github.com/enrichlayer/el-linear/commit/262e017e24a60099a1ea863cd95d9d95ed2c823a))
+* **issues read:** add --sections for multi-section extraction (DEV-4479) ([#145](https://github.com/enrichlayer/el-linear/issues/145)) ([eeb9a0f](https://github.com/enrichlayer/el-linear/commit/eeb9a0f2e2f405eeeceba37afdd6d05f1d70ed25))
+* **issues:** add `issues tree <ID>` for depth-N parent→children walks (DEV-4480) ([#149](https://github.com/enrichlayer/el-linear/issues/149)) ([19ebdbb](https://github.com/enrichlayer/el-linear/commit/19ebdbbc2be74553b324b2d722d4e89a5da4ba34))
+* **issues:** default --include-closed off on list/search (DEV-4478) ([#146](https://github.com/enrichlayer/el-linear/issues/146)) ([5edf798](https://github.com/enrichlayer/el-linear/commit/5edf798de1aa6ef8684e7fb4498a36aff6886ed3))
+* **read:** batch `issues read <id...>` into a single GraphQL call (DEV-4477) ([#147](https://github.com/enrichlayer/el-linear/issues/147)) ([d0fc818](https://github.com/enrichlayer/el-linear/commit/d0fc81818735a8904ac04a3458716155aef2d6e5))
+
 ## [1.19.0](https://github.com/enrichlayer/el-linear/compare/v1.18.1...v1.19.0) (2026-06-03)
 
 
