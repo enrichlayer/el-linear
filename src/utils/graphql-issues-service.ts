@@ -1,6 +1,7 @@
 import { resolveUserDisplayName } from "../config/resolver.js";
 import {
 	ARCHIVE_ISSUE_MUTATION,
+	BATCH_GET_ISSUES_QUERY,
 	BATCH_RESOLVE_FOR_CREATE_QUERY,
 	BATCH_RESOLVE_FOR_SEARCH_QUERY,
 	BATCH_RESOLVE_FOR_UPDATE_QUERY,
@@ -19,6 +20,7 @@ import {
 } from "../queries/issues.js";
 import type {
 	ArchiveIssueResponse,
+	BatchGetIssuesResponse,
 	BatchResolveForCreateResponse,
 	BatchResolveForSearchResponse,
 	BatchResolveForUpdateResponse,
@@ -273,6 +275,103 @@ export class GraphQLIssuesService {
 			issueData = nodes[0];
 		}
 		return this.transformIssueData(issueData);
+	}
+
+	/**
+	 * Batch-fetches N issues in a single GraphQL round-trip (DEV-4477).
+	 *
+	 * Replaces `Promise.all(refs.map(getIssueById))` — that pattern issues N
+	 * concurrent queries; this one issues exactly one. Useful for
+	 * `el-linear issues read <id...>`, the only caller today.
+	 *
+	 * Identifier shapes accepted (mirrors `getIssueById`):
+	 *   - UUIDs (`isUuid(ref)` matches) — batched into a single `id.in` clause.
+	 *   - `TEAM-N` identifiers (`parseIssueIdentifier(ref)` matches) — grouped
+	 *     by team key into one `{ team.key.eq, number.in }` clause per team.
+	 *
+	 * Linear returns nodes in DB order; this method re-sorts to match the
+	 * input list and throws `notFoundError` if any ref did not resolve, with
+	 * the first missing ref named in the error. Order-preservation matters
+	 * for the read handler — the JSON envelope is a positional array.
+	 */
+	async getIssuesByRefs(refs: string[]): Promise<LinearIssue[]> {
+		if (refs.length === 0) {
+			return [];
+		}
+		if (refs.length === 1) {
+			// Single ref → fall through to the single-issue path, which has
+			// the right error semantics (notFoundError on miss) and avoids
+			// building an OR clause with one branch.
+			return [await this.getIssueById(refs[0])];
+		}
+
+		const uuids: string[] = [];
+		const byTeam = new Map<string, number[]>();
+		for (const ref of refs) {
+			if (isUuid(ref)) {
+				uuids.push(ref);
+				continue;
+			}
+			const { teamKey, issueNumber } = parseIssueIdentifier(ref);
+			const existing = byTeam.get(teamKey);
+			if (existing) {
+				existing.push(issueNumber);
+			} else {
+				byTeam.set(teamKey, [issueNumber]);
+			}
+		}
+
+		const orClauses: Record<string, unknown>[] = [];
+		if (uuids.length > 0) {
+			orClauses.push({ id: { in: uuids } });
+		}
+		for (const [teamKey, numbers] of byTeam) {
+			orClauses.push({
+				team: { key: { eq: teamKey } },
+				number: { in: numbers },
+			});
+		}
+
+		// `first` is sized at 2x refs.length to absorb the rare case where
+		// Linear returns extra rows from the OR clauses (e.g. a typo-collision
+		// across teams). Floor of 100 covers small batches comfortably; ceiling
+		// of 250 is Linear's connection cap — exceeding it would silently
+		// truncate and we'd `notFoundError` on the truncated refs. With the
+		// ceiling clamped, a >125-ref batch would risk under-fetching, but
+		// `read <id...>` is typed-by-hand and never approaches that scale.
+		// (Cycle-1 nit.)
+		const first = Math.min(Math.max(refs.length * 2, 100), 250);
+		const result = await this.graphQLService.rawRequest<BatchGetIssuesResponse>(
+			BATCH_GET_ISSUES_QUERY,
+			{ filter: { or: orClauses }, first },
+		);
+		const nodes = result.issues?.nodes ?? [];
+
+		// Build an index for O(1) per-ref lookup, then re-emit in input order.
+		// A node is reachable by both its UUID and its identifier; both index
+		// keys point at the same node object. This is intentional: if a caller
+		// passes both forms for the same issue (`["xxxxxx-...", "DEV-1"]`),
+		// or the same ref twice (`["DEV-1", "DEV-1"]`), each input ref gets
+		// its own output entry — the contract is "output shape mirrors input
+		// shape", not "dedupe by underlying issue". (Cycle-1 nit.)
+		const byUuid = new Map<string, IssueWithCommentsNode>();
+		const byIdentifier = new Map<string, IssueWithCommentsNode>();
+		for (const node of nodes) {
+			byUuid.set(node.id, node);
+			if (node.identifier) {
+				byIdentifier.set(node.identifier, node);
+			}
+		}
+
+		const ordered: IssueWithCommentsNode[] = [];
+		for (const ref of refs) {
+			const node = isUuid(ref) ? byUuid.get(ref) : byIdentifier.get(ref);
+			if (!node) {
+				throw notFoundError("Issue", ref);
+			}
+			ordered.push(node);
+		}
+		return ordered.map((issue) => this.transformIssueData(issue));
 	}
 
 	async startIssue(issueId: string): Promise<StartIssueResult> {

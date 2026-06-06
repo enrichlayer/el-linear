@@ -119,11 +119,14 @@ export async function readIssues(
 		}
 		outputSuccess(resolved);
 	} else {
+		// DEV-4477: one batched GraphQL call instead of N parallel single-issue
+		// queries. The service preserves input order and throws notFoundError
+		// on any missing ref. Attachment download still fans out per-issue —
+		// that's HTTP, not GraphQL, and downloadLinearUploads is a no-op when
+		// there's nothing to download.
+		const issues = await issuesService.getIssuesByRefs(issueIds);
 		const results = await Promise.all(
-			issueIds.map(async (id) => {
-				const issue = await issuesService.getIssueById(id);
-				return downloadLinearUploads(issue, fileService);
-			}),
+			issues.map((issue) => downloadLinearUploads(issue, fileService)),
 		);
 		outputSuccess(results);
 	}

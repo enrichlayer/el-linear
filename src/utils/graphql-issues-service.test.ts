@@ -944,4 +944,227 @@ describe("GraphQLIssuesService", () => {
 			).rejects.toThrow(/Multiple Users found matching "Alex"\. Candidates:/);
 		});
 	});
+
+	describe("getIssuesByRefs (DEV-4477)", () => {
+		// Minimal node — only the fields the test logic checks. `transformIssueData`
+		// fills in defaults from missing fields, so we don't have to enumerate all.
+		function makeNode(id: string, identifier: string, title = identifier) {
+			return {
+				id,
+				identifier,
+				title,
+				description: null,
+				priority: 0,
+				estimate: null,
+				createdAt: "2026-01-01T00:00:00.000Z",
+				updatedAt: "2026-01-01T00:00:00.000Z",
+				dueDate: null,
+				state: { id: "s", name: "Todo", type: "unstarted" },
+				assignee: null,
+				labels: { nodes: [] },
+				team: { id: "t", key: identifier.split("-")[0], name: "Team" },
+				project: null,
+				parent: null,
+				cycle: null,
+				attachments: { nodes: [] },
+				comments: { nodes: [] },
+				url: `https://linear.app/x/issue/${identifier}`,
+				archivedAt: null,
+				canceledAt: null,
+				completedAt: null,
+				startedAt: null,
+				snoozedUntilAt: null,
+				subscriberIds: [],
+				trashed: null,
+				identifier_lower: identifier.toLowerCase(),
+				number: Number.parseInt(identifier.split("-")[1] ?? "0", 10),
+			};
+		}
+
+		it("batches mixed UUIDs and identifiers into a single GraphQL call", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			const nodes = [
+				makeNode("11111111-1111-1111-1111-111111111111", "DEV-1"),
+				makeNode("22222222-2222-2222-2222-222222222222", "PROD-9"),
+				makeNode("33333333-3333-3333-3333-333333333333", "DEV-2"),
+			];
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValue({ issues: { nodes } });
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			const refs = [
+				"DEV-1",
+				"11111111-1111-1111-1111-111111111111",
+				"PROD-9",
+				"DEV-2",
+			];
+			const result = await service.getIssuesByRefs(refs);
+
+			// Exactly one GraphQL call — that's the whole point of DEV-4477.
+			expect(rawRequest).toHaveBeenCalledTimes(1);
+			expect(rawRequest).toHaveBeenCalledWith(
+				expect.stringContaining("BatchGetIssues"),
+				expect.objectContaining({
+					filter: {
+						or: expect.arrayContaining([
+							{ id: { in: ["11111111-1111-1111-1111-111111111111"] } },
+							{ team: { key: { eq: "DEV" } }, number: { in: [1, 2] } },
+							{ team: { key: { eq: "PROD" } }, number: { in: [9] } },
+						]),
+					},
+					first: expect.any(Number),
+				}),
+			);
+			expect(result).toHaveLength(4);
+			// Order matches input refs, NOT Linear's DB order from `nodes`.
+			expect(result[0].identifier).toBe("DEV-1");
+			expect(result[1].id).toBe("11111111-1111-1111-1111-111111111111");
+			expect(result[2].identifier).toBe("PROD-9");
+			expect(result[3].identifier).toBe("DEV-2");
+		});
+
+		it("falls back to a single getIssueById call for one ref", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			const node = makeNode("uuid-1", "DEV-7");
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValue({ issues: { nodes: [node] } });
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			const result = await service.getIssuesByRefs(["DEV-7"]);
+
+			// Single-ref path uses GET_ISSUE_BY_IDENTIFIER_QUERY (single-issue),
+			// not BATCH_GET_ISSUES_QUERY. Either is acceptable behaviorally;
+			// the contract is "one GraphQL call". Lock that in.
+			expect(rawRequest).toHaveBeenCalledTimes(1);
+			expect(result).toHaveLength(1);
+			expect(result[0].identifier).toBe("DEV-7");
+		});
+
+		it("returns an empty array when refs is empty (no GraphQL call)", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			const rawRequest = vi.spyOn(graphQLService, "rawRequest");
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			const result = await service.getIssuesByRefs([]);
+
+			expect(result).toEqual([]);
+			expect(rawRequest).not.toHaveBeenCalled();
+		});
+
+		it("throws notFoundError naming the first missing ref", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			vi.spyOn(graphQLService, "rawRequest").mockResolvedValue({
+				issues: { nodes: [makeNode("uuid-1", "DEV-1")] },
+			});
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			// DEV-1 resolves, DEV-2 does not — error should name DEV-2.
+			await expect(service.getIssuesByRefs(["DEV-1", "DEV-2"])).rejects.toThrow(
+				notFoundError("Issue", "DEV-2"),
+			);
+		});
+
+		it("groups multiple identifiers from the same team into one OR clause", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			vi.spyOn(graphQLService, "rawRequest").mockResolvedValue({
+				issues: {
+					nodes: [
+						makeNode("u1", "DEV-1"),
+						makeNode("u2", "DEV-2"),
+						makeNode("u3", "DEV-3"),
+					],
+				},
+			});
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			await service.getIssuesByRefs(["DEV-1", "DEV-2", "DEV-3"]);
+
+			// Three identifiers, one team → one OR clause, not three.
+			const rawRequestSpy = graphQLService.rawRequest as ReturnType<
+				typeof vi.fn
+			>;
+			const call = rawRequestSpy.mock.calls[0];
+			const variables = call[1] as { filter: { or: unknown[] } };
+			expect(variables.filter.or).toHaveLength(1);
+			expect(variables.filter.or[0]).toEqual({
+				team: { key: { eq: "DEV" } },
+				number: { in: [1, 2, 3] },
+			});
+		});
+
+		it("batches an all-UUID list into one id.in clause (cycle-1 nit)", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			const uuids = [
+				"11111111-1111-1111-1111-111111111111",
+				"22222222-2222-2222-2222-222222222222",
+				"33333333-3333-3333-3333-333333333333",
+			];
+			vi.spyOn(graphQLService, "rawRequest").mockResolvedValue({
+				issues: {
+					nodes: uuids.map((u, i) => makeNode(u, `DEV-${i + 1}`)),
+				},
+			});
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			await service.getIssuesByRefs(uuids);
+
+			const rawRequestSpy = graphQLService.rawRequest as ReturnType<
+				typeof vi.fn
+			>;
+			const variables = rawRequestSpy.mock.calls[0][1] as {
+				filter: { or: unknown[] };
+			};
+			// All UUIDs → exactly one clause: `id.in`.
+			expect(variables.filter.or).toHaveLength(1);
+			expect(variables.filter.or[0]).toEqual({ id: { in: uuids } });
+		});
+
+		it("returns one output per input ref when the same ref is passed twice (cycle-1 nit)", async () => {
+			// Contract: output array length === input array length. The dual
+			// UUID/identifier index resolves both occurrences to the same node;
+			// `transformIssueData` is called once per occurrence, so callers
+			// see two output entries pointing at the same underlying issue.
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			vi.spyOn(graphQLService, "rawRequest").mockResolvedValue({
+				issues: { nodes: [makeNode("uuid-1", "DEV-1")] },
+			});
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			const result = await service.getIssuesByRefs(["DEV-1", "DEV-1"]);
+
+			expect(result).toHaveLength(2);
+			expect(result[0].identifier).toBe("DEV-1");
+			expect(result[1].identifier).toBe("DEV-1");
+		});
+
+		it("clamps `first` to [100, 250] (floor for small batches; ceiling at Linear's connection cap)", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			vi.spyOn(graphQLService, "rawRequest").mockResolvedValue({
+				issues: { nodes: [] },
+			});
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			// Small batch → floor: 3 refs * 2 = 6, clamped up to 100.
+			await service.getIssuesByRefs(["DEV-1", "DEV-2", "DEV-3"]).catch(() => {
+				// notFoundError is expected since nodes is empty; we only care
+				// about the `first` arg in the call signature.
+			});
+			const rawRequestSpy = graphQLService.rawRequest as ReturnType<
+				typeof vi.fn
+			>;
+			expect(rawRequestSpy.mock.calls[0][1]).toEqual(
+				expect.objectContaining({ first: 100 }),
+			);
+		});
+	});
 });

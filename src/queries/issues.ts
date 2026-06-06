@@ -135,6 +135,37 @@ export const GET_ISSUE_BY_IDENTIFIER_QUERY = `
 `;
 
 /**
+ * Batch issue fetch. Used by `issues read <id...>` (DEV-4477) to collapse
+ * N parallel single-issue queries into one round-trip. The `$filter` is
+ * a top-level OR built client-side; each OR clause is either:
+ *   { id: { in: [...uuids] } }                                  ← all UUIDs in one IN
+ *   { team: { key: { eq: <key> } }, number: { in: [...nums] } } ← identifiers
+ *                                                                  grouped by team
+ * Linear returns nodes in DB order, NOT input order — the caller is
+ * responsible for re-sorting to match the input list before surfacing.
+ *
+ * `$first` is `refCount * 2`, clamped to [100, 250] — the floor absorbs the
+ * rare case where Linear returns more rows than requested via OR-clause
+ * collisions; the ceiling is Linear's connection-page cap, beyond which the
+ * server silently truncates.
+ *
+ * Raw GraphQL (not @linear/sdk) is required because the SDK's
+ * `client.issues({ filter: ... })` strips through the same query under
+ * the hood but forces one round-trip per call site; the doctrine in
+ * CLAUDE.md ("Performance-critical loops where the SDK's per-edge
+ * resolver promises produce N+1 round-trips") explicitly authorizes this.
+ */
+export const BATCH_GET_ISSUES_QUERY = `
+  query BatchGetIssues($filter: IssueFilter!, $first: Int!) {
+    issues(filter: $filter, first: $first) {
+      nodes {
+        ${COMPLETE_ISSUE_WITH_COMMENTS_FRAGMENT}
+      }
+    }
+  }
+`;
+
+/**
  * Batch-resolves an update's project/milestone/issue inputs.
  *
  * The project and milestone blocks are `@include`-gated for the same

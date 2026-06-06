@@ -2,12 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestProgram, runCommand } from "../__tests__/test-helpers.js";
 
 const mockGetIssueById = vi.fn();
+const mockGetIssuesByRefs = vi.fn();
 const mockOutputSuccess = vi.fn();
 const mockDownloadLinearUploads = vi.fn((issue: unknown) => issue);
 
 vi.mock("../utils/graphql-issues-service.js", () => ({
 	GraphQLIssuesService: class {
 		getIssueById = mockGetIssueById;
+		getIssuesByRefs = mockGetIssuesByRefs;
 	},
 }));
 
@@ -55,19 +57,19 @@ describe("read-shortcut", () => {
 		expect(mockOutputSuccess).toHaveBeenCalledWith(issue);
 	});
 
-	it("reads multiple issues via top-level read command", async () => {
+	it("reads multiple issues via top-level read command (DEV-4477: batched into one GraphQL call)", async () => {
 		const issue1 = { id: "uuid-1", identifier: "DEV-123" };
 		const issue2 = { id: "uuid-2", identifier: "DEV-456" };
-		mockGetIssueById
-			.mockResolvedValueOnce(issue1)
-			.mockResolvedValueOnce(issue2);
+		mockGetIssuesByRefs.mockResolvedValue([issue1, issue2]);
 
 		const program = createTestProgram();
 		setupReadShortcut(program);
 		await runCommand(program, ["read", "DEV-123", "DEV-456"]);
 
-		expect(mockGetIssueById).toHaveBeenCalledWith("DEV-123");
-		expect(mockGetIssueById).toHaveBeenCalledWith("DEV-456");
+		// One batched call, not two single-issue calls.
+		expect(mockGetIssuesByRefs).toHaveBeenCalledTimes(1);
+		expect(mockGetIssuesByRefs).toHaveBeenCalledWith(["DEV-123", "DEV-456"]);
+		expect(mockGetIssueById).not.toHaveBeenCalled();
 		expect(mockOutputSuccess).toHaveBeenCalledWith([issue1, issue2]);
 	});
 
