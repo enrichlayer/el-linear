@@ -575,6 +575,30 @@ query). Terminal-state branches (`Done` / `Canceled`) are **kept** by
 default because the tree's value is *structural*; pass
 `--no-include-closed` to prune them.
 
+### Extract several sections in one call: `--sections`
+
+When you want multiple sections (e.g. `Done when`, `Out of scope`, and
+`Steps`), don't issue N separate `--field` calls — pass a comma-separated
+list to `--sections` instead:
+
+```bash
+el-linear issues read DEV-123 --sections "Done when,Out of scope"
+# {
+#   "identifier": "DEV-123",
+#   "sections": {
+#     "Done when": "...",
+#     "Out of scope": "..."
+#   }
+# }
+```
+
+Returns a JSON envelope `{ identifier, sections: { name → text|null } }`.
+Missing sections map to `null` and surface in `_warnings` so scripts can
+detect them deterministically. Single-issue only, mutually exclusive
+with `--field`. (Named `--sections` rather than the seemingly-obvious
+`--fields` because `--fields` is already taken at the program level for
+output-key filtering — `el-linear` is the namespace owner.)
+
 ## Wrapping Linear references in arbitrary text
 
 `el-linear refs wrap` takes plain text on stdin (or via `--file`) and rewrites

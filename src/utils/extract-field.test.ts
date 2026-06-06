@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractField } from "./extract-field.js";
+import { extractField, extractFields } from "./extract-field.js";
 
 describe("extractField", () => {
 	const body = `## Why we need this
@@ -103,5 +103,76 @@ Stuff we won't do.`;
 	it("DOES treat a short bold line with a trailing colon as a pseudo-header", () => {
 		const body = "**Done when:**\n\nfoo\n\n**Note:**\n\nbar";
 		expect(extractField(body, "Done when")).toBe("foo");
+	});
+});
+
+describe("extractFields (multi-section)", () => {
+	const BODY = [
+		"## Why we need this",
+		"Backstory.",
+		"",
+		"## Done when",
+		"- Foo",
+		"- Bar",
+		"",
+		"## Out of scope",
+		"Nothing else.",
+	].join("\n");
+
+	it("extracts every requested section in caller order", () => {
+		const out = extractFields(BODY, [
+			"Done when",
+			"Out of scope",
+			"Why we need this",
+		]);
+		expect(Array.from(out.keys())).toEqual([
+			"Done when",
+			"Out of scope",
+			"Why we need this",
+		]);
+		expect(out.get("Done when")).toBe("- Foo\n- Bar");
+		expect(out.get("Out of scope")).toBe("Nothing else.");
+		expect(out.get("Why we need this")).toBe("Backstory.");
+	});
+
+	it("maps missing sections to null (callers distinguish absent from empty)", () => {
+		const out = extractFields(BODY, ["Done when", "No such section"]);
+		expect(out.get("Done when")).toBe("- Foo\n- Bar");
+		expect(out.get("No such section")).toBeNull();
+		expect(out.has("No such section")).toBe(true);
+	});
+
+	it("returns an empty map for an empty input list", () => {
+		const out = extractFields(BODY, []);
+		expect(out.size).toBe(0);
+	});
+
+	it("collapses duplicate names without crashing (Map semantics)", () => {
+		const out = extractFields(BODY, ["Done when", "Done when"]);
+		expect(out.size).toBe(1);
+		expect(out.get("Done when")).toBe("- Foo\n- Bar");
+	});
+
+	it("is case-insensitive on section names just like extractField", () => {
+		const out = extractFields(BODY, ["DONE WHEN", "out of scope"]);
+		expect(out.get("DONE WHEN")).toBe("- Foo\n- Bar");
+		expect(out.get("out of scope")).toBe("Nothing else.");
+	});
+
+	it("works on an empty body (every requested section is null)", () => {
+		const out = extractFields("", ["Done when", "Out of scope"]);
+		expect(out.get("Done when")).toBeNull();
+		expect(out.get("Out of scope")).toBeNull();
+	});
+
+	it("accepts comma-bearing section names as the primitive — only the CLI layer splits on commas", () => {
+		// The CLI `--sections` flag uses comma as a separator, so a section
+		// whose name contains a comma can't be expressed at the CLI. But
+		// programmatic callers (and a future flag variant) should still get
+		// exact-match semantics, so we document and lock that here.
+		const body = "## Foo, bar\n\nbody-1\n\n## Baz\n\nbody-2";
+		const out = extractFields(body, ["Foo, bar", "Baz"]);
+		expect(out.get("Foo, bar")).toBe("body-1");
+		expect(out.get("Baz")).toBe("body-2");
 	});
 });
