@@ -262,7 +262,13 @@ async function handleListIssues(
 	const rootOpts = getRootOpts(command);
 	const { issuesService } = await createIssuesService(rootOpts);
 
-	const hasFilters =
+	const explicitStatus = options.status ? splitList(options.status) : undefined;
+	// DEV-4478: default-exclude terminal states (Done/Canceled) unless the
+	// user passes --include-closed OR explicit --status. Explicit status
+	// wins because the user already named the workflow states they want.
+	const excludeTerminalStates =
+		!options.includeClosed && explicitStatus === undefined;
+	const hasOtherFilters =
 		options.team ||
 		options.labels ||
 		options.status ||
@@ -272,7 +278,14 @@ async function handleListIssues(
 		options.project === false ||
 		options.priority;
 	const limit = parsePositiveInt(options.limit, "--limit");
-	if (hasFilters) {
+	// Route through searchIssues whenever the CLI needs to control the GraphQL
+	// state filter: any explicit filter, the default `excludeTerminalStates`,
+	// OR an explicit `--include-closed`. The last case is load-bearing —
+	// getIssues' query hard-codes `state: { type: { neq: "completed" } }`, so
+	// falling through to it on `--include-closed --no-other-filters` would
+	// silently drop Done issues, the exact opposite of the flag's intent.
+	// (DEV-4478 cycle-1.)
+	if (hasOtherFilters || excludeTerminalStates || options.includeClosed) {
 		const searchArgs: SearchIssueArgs = {
 			teamId: options.team ? resolveTeam(options.team) : undefined,
 			assigneeId: options.assignee
@@ -283,7 +296,8 @@ async function handleListIssues(
 				: undefined,
 			project: resolveProjectFlag(options.project),
 			labelNames: options.labels ? splitList(options.labels) : undefined,
-			status: options.status ? splitList(options.status) : undefined,
+			status: explicitStatus,
+			excludeTerminalStates,
 			priority: options.priority
 				? parsePriorityFilter(options.priority)
 				: undefined,
@@ -294,6 +308,11 @@ async function handleListIssues(
 			await issuesService.searchIssues(searchArgs),
 			options.sort,
 		);
+		if (excludeTerminalStates) {
+			outputWarning(
+				"excluded terminal states (Done / Canceled) by default; pass --include-closed to include them",
+			);
+		}
 		warnIfTruncated(result.length, limit);
 		outputIssues(result, options.format, options.fields, {
 			team: options.team,
@@ -320,6 +339,12 @@ async function handleSearchIssues(
 	const { issuesService } = await createIssuesService(rootOpts);
 
 	const limit = parsePositiveInt(options.limit, "--limit");
+	const explicitStatus = options.status ? splitList(options.status) : undefined;
+	// DEV-4478: default-exclude terminal states (Done/Canceled) unless the
+	// user passes --include-closed OR explicit --status. Explicit status
+	// wins because the user already named the workflow states they want.
+	const excludeTerminalStates =
+		!options.includeClosed && explicitStatus === undefined;
 	const searchArgs: SearchIssueArgs = {
 		query,
 		teamId: options.team ? resolveTeam(options.team) : undefined,
@@ -330,7 +355,8 @@ async function handleSearchIssues(
 			? resolveMember(options.delegate as string)
 			: undefined,
 		project: resolveProjectFlag(options.project),
-		status: options.status ? splitList(options.status) : undefined,
+		status: explicitStatus,
+		excludeTerminalStates,
 		labelNames: options.labels ? splitList(options.labels) : undefined,
 		priority: options.priority
 			? parsePriorityFilter(options.priority)
@@ -341,6 +367,11 @@ async function handleSearchIssues(
 		await issuesService.searchIssues(searchArgs),
 		options.sort,
 	);
+	if (excludeTerminalStates) {
+		outputWarning(
+			"excluded terminal states (Done / Canceled) by default; pass --include-closed to include them",
+		);
+	}
 	warnIfTruncated(result.length, limit);
 	outputIssues(result, options.format, options.fields, { query });
 }
@@ -1241,6 +1272,10 @@ export function setupIssuesCommands(program: Command): void {
 			"filter by status (comma-separated, e.g. Todo,Backlog)",
 		)
 		.option(
+			"--include-closed",
+			"include issues in terminal states (Done / Canceled). Default is to exclude them; pass this flag to see everything. Ignored when --status is set (explicit choice wins).",
+		)
+		.option(
 			"--priority <priority>",
 			"filter by priority (comma-separated: urgent,high,medium,low,none or 0-4)",
 		)
@@ -1271,6 +1306,10 @@ export function setupIssuesCommands(program: Command): void {
 		.option("--project <project>", "filter by project name or ID")
 		.option("--no-project", "filter issues with no project assigned")
 		.option("--status <status>", "filter by status (comma-separated)")
+		.option(
+			"--include-closed",
+			"include issues in terminal states (Done / Canceled). Default is to exclude them; pass this flag to see everything. Ignored when --status is set (explicit choice wins).",
+		)
 		.option("--labels <labels>", "filter by labels (comma-separated names)")
 		.option("--label <labels>", "alias for --labels")
 		.option(

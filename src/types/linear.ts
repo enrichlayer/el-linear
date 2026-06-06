@@ -33,6 +33,13 @@ interface UserRef {
 interface StateRef {
 	id: string;
 	name: string;
+	/**
+	 * Linear workflow-state type: `triage` / `backlog` / `unstarted` /
+	 * `started` / `completed` / `canceled`. Optional because pre-DEV-4478
+	 * callers and some legacy GraphQL selections didn't request it; new
+	 * code (default state-filtering, e.g.) should set it.
+	 */
+	type?: string;
 }
 
 interface ProjectRef {

@@ -92,6 +92,14 @@ export interface SearchIssueArgs {
 	delegateId?: string;
 	/** Issue states to include (e.g. `["Todo", "In Progress"]`). */
 	status?: string[];
+	/**
+	 * Exclude terminal states (workflow type `completed` or `canceled`).
+	 * Default `false` for back-compat at the service layer; the CLI's
+	 * `issues list` / `issues search` flip this to `true` by default
+	 * (DEV-4478) and accept `--include-closed` to opt back in. When
+	 * `status` is also set, this is ignored — explicit user choice wins.
+	 */
+	excludeTerminalStates?: boolean;
 	/** Label names to require (intersection). */
 	labelNames?: string[];
 	/** Priority values (0-4) to include. */
@@ -778,6 +786,7 @@ export class GraphQLIssuesService {
 				delegateId: finalDelegateId,
 				project: projectFilter,
 				status: args.status,
+				excludeTerminalStates: args.excludeTerminalStates,
 				labelNames: args.labelNames,
 				priority: args.priority,
 			});
@@ -788,6 +797,7 @@ export class GraphQLIssuesService {
 			delegateId: finalDelegateId,
 			project: projectFilter,
 			status: args.status,
+			excludeTerminalStates: args.excludeTerminalStates,
 			labelNames: args.labelNames,
 			priority: args.priority,
 		});
@@ -1329,6 +1339,7 @@ export class GraphQLIssuesService {
 			delegateId?: string;
 			project?: SearchIssueProject;
 			status?: string[];
+			excludeTerminalStates?: boolean;
 			labelNames?: string[];
 			priority?: LinearPriority[];
 		},
@@ -1369,6 +1380,13 @@ export class GraphQLIssuesService {
 			filtered = filtered.filter((issue: LinearIssue) =>
 				(filters.status as string[]).includes(issue.state?.name ?? ""),
 			);
+		} else if (filters.excludeTerminalStates) {
+			// Implicit terminal-state exclusion (DEV-4478). Explicit `status`
+			// always wins — the user already named the states they want.
+			filtered = filtered.filter(
+				(issue: LinearIssue) =>
+					issue.state?.type !== "completed" && issue.state?.type !== "canceled",
+			);
 		}
 		if (filters.labelNames && filters.labelNames.length > 0) {
 			const lowerNames = (filters.labelNames as string[]).map((n) =>
@@ -1393,6 +1411,7 @@ export class GraphQLIssuesService {
 		delegateId?: string;
 		project?: SearchIssueProject;
 		status?: string[];
+		excludeTerminalStates?: boolean;
 		labelNames?: string[];
 		priority?: LinearPriority[];
 	}): Record<string, unknown> {
@@ -1420,6 +1439,10 @@ export class GraphQLIssuesService {
 		}
 		if (filters.status && filters.status.length > 0) {
 			filter.state = { name: { in: filters.status } };
+		} else if (filters.excludeTerminalStates) {
+			// Implicit terminal-state exclusion (DEV-4478). Explicit `status`
+			// always wins — the user already named the states they want.
+			filter.state = { type: { nin: ["completed", "canceled"] } };
 		}
 		if (filters.labelNames && filters.labelNames.length > 0) {
 			if (filters.labelNames.length === 1) {
@@ -1736,7 +1759,13 @@ export class GraphQLIssuesService {
 	> {
 		return {
 			state: issue.state
-				? { id: issue.state.id, name: issue.state.name }
+				? {
+						id: issue.state.id,
+						name: issue.state.name,
+						// DEV-4478: surface workflow-state `type` so callers can filter
+						// terminal states (`completed`, `canceled`) without re-querying.
+						type: issue.state.type,
+					}
 				: undefined,
 			assignee: issue.assignee
 				? {

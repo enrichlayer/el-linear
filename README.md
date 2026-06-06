@@ -447,6 +447,24 @@ el-linear <command> --help       # detailed help for one command
 All `list` subcommands support `-l, --limit <n>`. All commands accept the
 top-level filters: `--format <json|summary>`, `--raw`, `--jq <expr>`, `--fields <list>`.
 
+### Open by default — `issues list` and `issues search` skip terminal states
+
+`el-linear issues list` and `el-linear issues search` **exclude issues in
+terminal workflow states (`Done` / `Canceled`) by default** so triage and
+survey runs return the open set without piping through `grep`. The implicit
+filter is surfaced in `_warnings` on every invocation, so scripts notice it
+deterministically rather than silently. Three ways to opt back in:
+
+```bash
+el-linear issues list --include-closed              # everything, including Done/Canceled
+el-linear issues search "auth" --status "Done"      # explicit --status wins
+el-linear issues list --status "Todo,In Progress"   # any explicit status disables the implicit filter
+```
+
+`--include-closed` and explicit `--status` both bypass the implicit filter
+(explicit choice always wins). The change is per-command and only affects
+list-shaped reads — single-issue `issues read DEV-123` is unaffected.
+
 ## Output formats
 
 Every command accepts `--format <kind>` at the root:

@@ -17,6 +17,7 @@ const ISSUE_STATE_FRAGMENT = `
   state {
     id
     name
+    type
   }
 `;
 
