@@ -599,6 +599,30 @@ with `--field`. (Named `--sections` rather than the seemingly-obvious
 `--fields` because `--fields` is already taken at the program level for
 output-key filtering — `el-linear` is the namespace owner.)
 
+### Opt-in includes: `--with`
+
+`issues read --with <names>` adds extra blocks of related data to the
+JSON envelope. Comma-separated; unknown values are rejected with the
+candidate list.
+
+Currently supported:
+
+| Include | What it adds |
+|---------|--------------|
+| `relations` | A top-level `relations` array (outgoing + incoming cross-issue links), built from the same data as `issues related`. |
+
+```bash
+# Issue + its sidebar relations in one call:
+el-linear issues read DEV-123 --with relations
+
+# Across multiple issues — relations fetched per issue in parallel:
+el-linear read DEV-1 DEV-2 --with relations | jq '.data[].relations'
+```
+
+`--with` is JSON-only — it composes with `--jq` / `--fields` / `--raw`,
+and is mutually exclusive with `--field` (which prints raw section text,
+no envelope).
+
 ## Wrapping Linear references in arbitrary text
 
 `el-linear refs wrap` takes plain text on stdin (or via `--file`) and rewrites
