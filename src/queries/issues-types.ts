@@ -223,6 +223,22 @@ export interface IssueStartContextResponse {
 	} | null;
 }
 
+export interface IssueClaimContextResponse {
+	viewer: {
+		id: string;
+		name: string;
+		displayName: string;
+		email: string;
+	} | null;
+	issue: {
+		id: string;
+		identifier: string;
+		state: { id: string; name: string; type: WorkflowStateType } | null;
+		assignee: AssigneeNode | null;
+		team: { id: string; key: string; name: string } | null;
+	} | null;
+}
+
 export interface TeamStartedStatusesResponse {
 	team: {
 		states: {

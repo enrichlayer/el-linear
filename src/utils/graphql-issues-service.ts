@@ -11,6 +11,7 @@ import {
 	FILTERED_SEARCH_ISSUES_QUERY,
 	GET_ISSUE_BY_ID_QUERY,
 	GET_ISSUE_BY_IDENTIFIER_QUERY,
+	GET_ISSUE_CLAIM_CONTEXT_QUERY,
 	GET_ISSUE_START_CONTEXT_QUERY,
 	GET_ISSUE_TEAM_QUERY,
 	GET_ISSUES_QUERY,
@@ -34,6 +35,7 @@ import type {
 	GetIssuesResponse,
 	GetIssueTeamResponse,
 	IssueArchiveEntity,
+	IssueClaimContextResponse,
 	IssueNode,
 	IssueStartContextResponse,
 	IssueWithCommentsNode,
@@ -200,6 +202,19 @@ export interface StartIssueResult {
 	issue: LinearIssue;
 	previousState?: { id: string; name: string; type: string };
 	started: boolean;
+	targetState?: { id: string; name: string };
+}
+
+export interface ClaimIssueResult {
+	issue: LinearIssue;
+	claimed: boolean;
+	/** True when the issue was already started and assigned to the viewer, so the claim was a no-op. */
+	alreadyClaimed: boolean;
+	assigned: boolean;
+	started: boolean;
+	assignee: { id: string; name: string; displayName: string; email: string };
+	previousAssignee?: { id: string; name: string };
+	previousState?: { id: string; name: string; type: string };
 	targetState?: { id: string; name: string };
 }
 
@@ -374,6 +389,26 @@ export class GraphQLIssuesService {
 		return ordered.map((issue) => this.transformIssueData(issue));
 	}
 
+	private async getFirstStartedStatus(team: {
+		id: string;
+		key: string;
+	}): Promise<{ id: string; name: string }> {
+		const statuses =
+			await this.graphQLService.rawRequest<TeamStartedStatusesResponse>(
+				TEAM_STARTED_STATUSES_QUERY,
+				{ teamId: team.id },
+			);
+		const startedStatus = statuses.team?.states.nodes
+			.slice()
+			.sort((a, b) => a.position - b.position)[0];
+		if (!startedStatus) {
+			throw new Error(
+				`Team ${team.key} has no workflow status of type "started".`,
+			);
+		}
+		return { id: startedStatus.id, name: startedStatus.name };
+	}
+
 	async startIssue(issueId: string): Promise<StartIssueResult> {
 		const resolvedIssueId = await this.linearService.resolveIssueId(issueId);
 		const context =
@@ -409,19 +444,7 @@ export class GraphQLIssuesService {
 			);
 		}
 
-		const statuses =
-			await this.graphQLService.rawRequest<TeamStartedStatusesResponse>(
-				TEAM_STARTED_STATUSES_QUERY,
-				{ teamId: issue.team.id },
-			);
-		const startedStatus = statuses.team?.states.nodes
-			.slice()
-			.sort((a, b) => a.position - b.position)[0];
-		if (!startedStatus) {
-			throw new Error(
-				`Team ${issue.team.key} has no workflow status of type "started".`,
-			);
-		}
+		const startedStatus = await this.getFirstStartedStatus(issue.team);
 
 		const updated = await this.updateIssue(
 			{ id: resolvedIssueId, statusId: startedStatus.id },
@@ -432,6 +455,84 @@ export class GraphQLIssuesService {
 			previousState,
 			started: true,
 			targetState: { id: startedStatus.id, name: startedStatus.name },
+		};
+	}
+
+	async claimIssue(issueId: string): Promise<ClaimIssueResult> {
+		const resolvedIssueId = await this.linearService.resolveIssueId(issueId);
+		const context =
+			await this.graphQLService.rawRequest<IssueClaimContextResponse>(
+				GET_ISSUE_CLAIM_CONTEXT_QUERY,
+				{ id: resolvedIssueId },
+			);
+		const issue = context.issue;
+		if (!issue) {
+			throw notFoundError("Issue", issueId);
+		}
+		const viewer = context.viewer;
+		if (!viewer?.id) {
+			throw new Error("Could not resolve the authenticated Linear viewer.");
+		}
+
+		const previousState = issue.state
+			? {
+					id: issue.state.id,
+					name: issue.state.name,
+					type: issue.state.type,
+				}
+			: undefined;
+		const previousAssignee = issue.assignee
+			? { id: issue.assignee.id, name: issue.assignee.name }
+			: undefined;
+		const terminalState =
+			previousState && ["completed", "canceled"].includes(previousState.type);
+		const needsStartedState =
+			!terminalState && previousState?.type !== "started";
+		const needsAssignee = issue.assignee?.id !== viewer.id;
+
+		if (!needsStartedState && !needsAssignee) {
+			// This path is only reachable when the viewer is already the assignee
+			// (`needsAssignee` is false), so `assignee: viewer` is the current assignee.
+			return {
+				issue: await this.getIssueById(resolvedIssueId),
+				previousState,
+				previousAssignee,
+				claimed: false,
+				alreadyClaimed: true,
+				assigned: false,
+				started: false,
+				assignee: viewer,
+			};
+		}
+
+		let targetState: { id: string; name: string } | undefined;
+		if (needsStartedState) {
+			if (!issue.team?.id) {
+				throw new Error(
+					`Issue ${issue.identifier} has no team; cannot start it.`,
+				);
+			}
+			targetState = await this.getFirstStartedStatus(issue.team);
+		}
+
+		const updated = await this.updateIssue(
+			{
+				id: resolvedIssueId,
+				...(targetState ? { statusId: targetState.id } : {}),
+				...(needsAssignee ? { assigneeId: viewer.id } : {}),
+			},
+			"adding",
+		);
+		return {
+			issue: updated,
+			previousState,
+			previousAssignee,
+			...(targetState ? { targetState } : {}),
+			claimed: true,
+			alreadyClaimed: false,
+			assigned: needsAssignee,
+			started: Boolean(targetState),
+			assignee: viewer,
 		};
 	}
 
