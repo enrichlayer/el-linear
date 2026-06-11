@@ -208,6 +208,8 @@ export interface StartIssueResult {
 export interface ClaimIssueResult {
 	issue: LinearIssue;
 	claimed: boolean;
+	/** True when the issue was already started and assigned to the viewer, so the claim was a no-op. */
+	alreadyClaimed: boolean;
 	assigned: boolean;
 	started: boolean;
 	assignee: { id: string; name: string; displayName: string; email: string };
@@ -489,11 +491,14 @@ export class GraphQLIssuesService {
 		const needsAssignee = issue.assignee?.id !== viewer.id;
 
 		if (!needsStartedState && !needsAssignee) {
+			// This path is only reachable when the viewer is already the assignee
+			// (`needsAssignee` is false), so `assignee: viewer` is the current assignee.
 			return {
 				issue: await this.getIssueById(resolvedIssueId),
 				previousState,
 				previousAssignee,
 				claimed: false,
+				alreadyClaimed: true,
 				assigned: false,
 				started: false,
 				assignee: viewer,
@@ -524,6 +529,7 @@ export class GraphQLIssuesService {
 			previousAssignee,
 			...(targetState ? { targetState } : {}),
 			claimed: true,
+			alreadyClaimed: false,
 			assigned: needsAssignee,
 			started: Boolean(targetState),
 			assignee: viewer,

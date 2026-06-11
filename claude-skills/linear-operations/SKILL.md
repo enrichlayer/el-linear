@@ -205,7 +205,7 @@ When starting work on an existing issue (`el-linear issues read ENG-123`):
 - [ ] **Project set** — if missing, ask user and update: `el-linear issues update ENG-123 --project "<name>"`.
 - [ ] **Status appropriate** — if you did not use one of the branch claim paths, move the issue to "In Progress" or your team's equivalent.
 
-Don't start implementation work on an unassigned issue. The assignee is the person accountable.
+Don't start implementation work on an unassigned issue — the assignee is the person accountable. If you did not use one of the branch claim paths (or used `--no-claim`), assign the issue before proceeding.
 
 ---
 

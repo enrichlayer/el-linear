@@ -227,6 +227,7 @@ describe("GraphQLIssuesService", () => {
 			);
 			expect(result).toMatchObject({
 				claimed: true,
+				alreadyClaimed: false,
 				assigned: true,
 				started: true,
 				targetState: { id: "state-first", name: "In Progress" },
@@ -271,6 +272,7 @@ describe("GraphQLIssuesService", () => {
 			expect(updateIssue).not.toHaveBeenCalled();
 			expect(result).toMatchObject({
 				claimed: false,
+				alreadyClaimed: true,
 				assigned: false,
 				started: false,
 			});
