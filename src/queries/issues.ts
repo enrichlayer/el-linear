@@ -496,6 +496,29 @@ export const GET_ISSUE_START_CONTEXT_QUERY = `
   }
 `;
 
+/**
+ * Batch issue lifecycle/assignee context with the authenticated viewer for the
+ * branch auto-claim flow. Raw GraphQL is used because this needs `viewer` plus
+ * issue fields in one round-trip; the SDK would make separate calls.
+ */
+export const GET_ISSUE_CLAIM_CONTEXT_QUERY = `
+  query GetIssueClaimContext($id: String!) {
+    viewer {
+      id
+      name
+      displayName
+      email
+    }
+    issue(id: $id) {
+      id
+      identifier
+      state { id name type }
+      assignee { id name url }
+      team { id key name }
+    }
+  }
+`;
+
 export const TEAM_STARTED_STATUSES_QUERY = `
   query TeamStartedStatuses($teamId: String!) {
     team(id: $teamId) {

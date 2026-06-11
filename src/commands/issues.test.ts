@@ -19,6 +19,7 @@ const mockSearchIssues = vi.fn();
 const mockArchiveIssue = vi.fn();
 const mockDeleteIssue = vi.fn();
 const mockStartIssue = vi.fn();
+const mockClaimIssue = vi.fn();
 
 class MockGraphQLIssuesService {
 	getIssues = mockGetIssues;
@@ -29,6 +30,7 @@ class MockGraphQLIssuesService {
 	archiveIssue = mockArchiveIssue;
 	deleteIssue = mockDeleteIssue;
 	startIssue = mockStartIssue;
+	claimIssue = mockClaimIssue;
 }
 
 vi.mock("../utils/graphql-issues-service.js", () => ({
@@ -36,8 +38,9 @@ vi.mock("../utils/graphql-issues-service.js", () => ({
 }));
 
 const mockGraphQLService = { rawRequest: vi.fn() };
+const mockCreateGraphQLService = vi.fn().mockResolvedValue(mockGraphQLService);
 vi.mock("../utils/graphql-service.js", () => ({
-	createGraphQLService: vi.fn().mockResolvedValue(mockGraphQLService),
+	createGraphQLService: mockCreateGraphQLService,
 }));
 
 const mockLinearService = {
@@ -45,8 +48,9 @@ const mockLinearService = {
 	resolveProjectId: vi.fn(),
 	resolveTeamId: vi.fn(),
 };
+const mockCreateLinearService = vi.fn().mockResolvedValue(mockLinearService);
 vi.mock("../utils/linear-service.js", () => ({
-	createLinearService: vi.fn().mockResolvedValue(mockLinearService),
+	createLinearService: mockCreateLinearService,
 }));
 
 const mockOutputSuccess = vi.fn();
@@ -135,6 +139,8 @@ describe("issues commands", () => {
 		mockResolveMember.mockImplementation((v: string) => `member-id-${v}`);
 		mockResolveLabels.mockReturnValue([]);
 		mockResolveDefaultStatus.mockReturnValue(undefined);
+		mockCreateGraphQLService.mockResolvedValue(mockGraphQLService);
+		mockCreateLinearService.mockResolvedValue(mockLinearService);
 		// vi.clearAllMocks resets call counts but not implementations set via
 		// mockReturnValue — re-pin the default loadConfig to the bare baseline
 		// so individual tests start with a clean slate.
@@ -686,6 +692,158 @@ describe("issues commands", () => {
 					.toString()
 					.trim(),
 			).toBe("DEV-4293");
+			expect(mockClaimIssue).toHaveBeenCalledWith("DEV-4293");
+		});
+
+		it("--no-claim checks out the branch and marker without claiming the issue", async () => {
+			mockCreateIssue.mockResolvedValue({
+				id: "new-issue-id",
+				identifier: "DEV-4293",
+				branchName: "dev-4293-add-marker",
+			});
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Add marker",
+				"--team",
+				"DEV",
+				"--assignee",
+				"bob",
+				"--project",
+				"Infrastructure",
+				"--checkout",
+				"--no-claim",
+			]);
+
+			expect(mockClaimIssue).not.toHaveBeenCalled();
+			expect(
+				execFileSync(
+					"git",
+					["config", "--get", "branch.feature/DEV-4293-add-marker.linearIssue"],
+					{ stdio: "pipe" },
+				)
+					.toString()
+					.trim(),
+			).toBe("DEV-4293");
+		});
+	});
+
+	describe("issues mark-branch auto-claims the issue (DEV-4500)", () => {
+		let repo: string;
+		let cwd: string;
+
+		beforeEach(() => {
+			cwd = process.cwd();
+			repo = mkdtempSync(join(tmpdir(), "mark-branch-claim-"));
+			process.chdir(repo);
+			execFileSync("git", ["init", "-q"], { stdio: "pipe" });
+			execFileSync("git", ["config", "user.email", "t@example.com"], {
+				stdio: "pipe",
+			});
+			execFileSync("git", ["config", "user.name", "Test"], { stdio: "pipe" });
+			execFileSync("git", ["checkout", "-b", "feature/DEV-4500-claim"], {
+				stdio: "pipe",
+			});
+			execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "init"], {
+				stdio: "pipe",
+			});
+		});
+
+		afterEach(() => {
+			process.chdir(cwd);
+			rmSync(repo, { recursive: true, force: true });
+		});
+
+		it("claims the marked issue by default", async () => {
+			mockClaimIssue.mockResolvedValue({
+				claimed: true,
+				assigned: true,
+				started: true,
+				assignee: {
+					id: "user-1",
+					name: "Nico Appel",
+					displayName: "Nico",
+					email: "nico@example.com",
+				},
+				issue: { id: "issue-1", identifier: "DEV-4500" },
+			});
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, ["issues", "mark-branch", "DEV-4500"]);
+
+			expect(mockClaimIssue).toHaveBeenCalledWith("DEV-4500");
+			expect(mockOutputSuccess).toHaveBeenCalledWith(
+				expect.objectContaining({
+					linearIssue: "DEV-4500",
+					marked: true,
+					claim: expect.objectContaining({
+						claimed: true,
+						assigned: true,
+						started: true,
+					}),
+				}),
+			);
+		});
+
+		it("--no-claim only writes the git metadata marker", async () => {
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"mark-branch",
+				"DEV-4500",
+				"--no-claim",
+			]);
+
+			expect(mockClaimIssue).not.toHaveBeenCalled();
+			expect(
+				execFileSync("git", [
+					"config",
+					"--get",
+					"branch.feature/DEV-4500-claim.linearIssue",
+				])
+					.toString()
+					.trim(),
+			).toBe("DEV-4500");
+		});
+
+		it("fails open when claiming fails after the marker is written", async () => {
+			mockClaimIssue.mockRejectedValue(new Error("Linear API unavailable"));
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, ["issues", "mark-branch", "DEV-4500"]);
+
+			expect(mockOutputSuccess).toHaveBeenCalledWith(
+				expect.objectContaining({
+					linearIssue: "DEV-4500",
+					marked: true,
+				}),
+			);
+			expect(process.exit).not.toHaveBeenCalled();
+		});
+
+		it("fails open when Linear service creation fails before claiming", async () => {
+			mockCreateGraphQLService.mockRejectedValueOnce(
+				new Error("missing Linear token"),
+			);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, ["issues", "mark-branch", "DEV-4500"]);
+
+			expect(mockClaimIssue).not.toHaveBeenCalled();
+			expect(mockOutputSuccess).toHaveBeenCalledWith(
+				expect.objectContaining({
+					linearIssue: "DEV-4500",
+					marked: true,
+				}),
+			);
+			expect(process.exit).not.toHaveBeenCalled();
 		});
 	});
 

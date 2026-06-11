@@ -35,6 +35,8 @@ import { createFileService } from "../utils/file-service.js";
 import { applyFooter } from "../utils/footer.js";
 import { createGraphQLAttachmentsService } from "../utils/graphql-attachments-service.js";
 import type {
+	ClaimIssueResult,
+	GraphQLIssuesService,
 	SearchIssueArgs,
 	UpdateIssueArgs,
 } from "../utils/graphql-issues-service.js";
@@ -105,6 +107,32 @@ const COMMIT_HASH_PREFIX_REGEX = /^[a-f0-9]+ /;
 function isImageFile(filename: string): boolean {
 	const ext = filename.lastIndexOf(".");
 	return ext !== -1 && IMAGE_EXTENSIONS.has(filename.slice(ext).toLowerCase());
+}
+
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+function warnClaimFailure(issueId: string, error: unknown): void {
+	outputWarning(
+		`Branch operation succeeded for ${issueId}, but auto-claim failed: ${errorMessage(error)}`,
+	);
+}
+
+async function maybeClaimBranchIssue(
+	issueId: string,
+	options: OptionValues,
+	issuesService: GraphQLIssuesService,
+): Promise<ClaimIssueResult | undefined> {
+	if (options.claim === false) {
+		return undefined;
+	}
+	try {
+		return await issuesService.claimIssue(issueId);
+	} catch (error) {
+		warnClaimFailure(issueId, error);
+		return undefined;
+	}
 }
 
 function validateUpdateOptions(options: OptionValues): void {
@@ -723,6 +751,7 @@ async function handleCreateIssue(
 	}
 
 	let branch: string | undefined;
+	let claim: ClaimIssueResult | undefined;
 	if (options.checkout && result.branchName) {
 		const branchName = toBranchName(result.branchName);
 		// Only treat the branch as created (and surface it in the output) when
@@ -743,12 +772,18 @@ async function handleCreateIssue(
 						`Run 'el-linear issues mark-branch ${result.identifier}' from the branch to set it.`,
 				);
 			}
+			claim = await maybeClaimBranchIssue(
+				result.identifier,
+				options,
+				issuesService,
+			);
 		}
 	}
 
 	const output = {
 		...result,
 		...(branch ? { branch } : {}),
+		...(claim ? { claim } : {}),
 		...(relations.length > 0 ? { relations } : {}),
 		...(autoLinked ? { autoLinked } : {}),
 		...(attachments.length === 1
@@ -1194,8 +1229,8 @@ async function handleRetrolink(
 
 async function handleMarkBranch(
 	issueId: string | undefined,
-	_options: OptionValues,
-	_command: Command,
+	options: OptionValues,
+	command: Command,
 ): Promise<void> {
 	const branch = currentGitBranch();
 	if (!branch) {
@@ -1233,10 +1268,21 @@ async function handleMarkBranch(
 
 	const previous = getBranchLinearIssue(branch);
 	setBranchLinearIssue(branch, identifier);
+	let claim: ClaimIssueResult | undefined;
+	if (options.claim !== false) {
+		try {
+			const rootOpts = getRootOpts(command);
+			const { issuesService } = await createIssuesService(rootOpts);
+			claim = await issuesService.claimIssue(identifier);
+		} catch (error) {
+			warnClaimFailure(identifier, error);
+		}
+	}
 	outputSuccess({
 		branch,
 		linearIssue: identifier,
 		...(previous && previous !== identifier ? { previous } : {}),
+		...(claim ? { claim } : {}),
 		marked: true,
 	});
 }
@@ -1407,6 +1453,10 @@ export function setupIssuesCommands(program: Command): void {
 		.option(
 			"--checkout",
 			"create and checkout a git branch named after the issue",
+		)
+		.option(
+			"--no-claim",
+			"with --checkout, skip assigning the issue to the current Linear user and moving it to the first started state",
 		)
 		.option(
 			"--skip-validation",
@@ -1674,7 +1724,12 @@ export function setupIssuesCommands(program: Command): void {
 			"after",
 			"\nManual recovery for branches not created via 'issues create --checkout' / 'retrolink'.\n" +
 				"With no argument, infers the identifier from the branch name (e.g. dev-4293-slug -> DEV-4293).\n" +
-				"Accepts a bare identifier (DEV-123), a branch-style token, or a Linear URL.",
+				"Accepts a bare identifier (DEV-123), a branch-style token, or a Linear URL.\n" +
+				"By default, also claims the issue (assignee = current Linear user; status = first started state). Pass --no-claim to only write git metadata.",
+		)
+		.option(
+			"--no-claim",
+			"only record git metadata; skip assigning the issue to the current Linear user and moving it to the first started state",
 		)
 		.action(handleAsyncCommand(handleMarkBranch));
 }

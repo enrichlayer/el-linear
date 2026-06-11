@@ -201,9 +201,9 @@ el-linear issues link-references ENG-123 --dry-run            # preview
 
 When starting work on an existing issue (`el-linear issues read ENG-123`):
 
-- [ ] **Assignee set** — if missing, ask user and update: `el-linear issues update ENG-123 --assignee <name>`.
+- [ ] **Branch claim path used** — `el-linear issues create --checkout` and `el-linear issues mark-branch ENG-123` automatically claim the issue by assigning it to the current Linear user and moving it to the team's first started state. Use `--no-claim` only when intentionally creating/marking a branch on someone else's behalf.
 - [ ] **Project set** — if missing, ask user and update: `el-linear issues update ENG-123 --project "<name>"`.
-- [ ] **Status appropriate** — move to "In Progress" or your team's equivalent.
+- [ ] **Status appropriate** — if you did not use one of the branch claim paths, move the issue to "In Progress" or your team's equivalent.
 
 Don't start implementation work on an unassigned issue. The assignee is the person accountable.
 

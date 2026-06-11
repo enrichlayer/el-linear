@@ -169,6 +169,114 @@ describe("GraphQLIssuesService", () => {
 		});
 	});
 
+	describe("claimIssue", () => {
+		it("assigns the authenticated viewer and moves the issue to the first started state", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			vi.spyOn(linearService, "resolveIssueId").mockResolvedValue("uuid-1");
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValueOnce({
+					viewer: {
+						id: "user-1",
+						name: "Nico Appel",
+						displayName: "Nico",
+						email: "nico@example.com",
+					},
+					issue: {
+						id: "uuid-1",
+						identifier: "DEV-1",
+						state: { id: "state-backlog", name: "Backlog", type: "backlog" },
+						assignee: null,
+						team: { id: "team-1", key: "DEV", name: "Dev" },
+					},
+				})
+				.mockResolvedValueOnce({
+					team: {
+						states: {
+							nodes: [
+								{ id: "state-later", name: "Review", position: 20 },
+								{ id: "state-first", name: "In Progress", position: 10 },
+							],
+						},
+					},
+				});
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+			const updateIssue = vi.spyOn(service, "updateIssue").mockResolvedValue({
+				id: "uuid-1",
+				identifier: "DEV-1",
+				title: "Task",
+				labels: [],
+				priority: 0,
+				createdAt: "2026-01-01T00:00:00.000Z",
+				updatedAt: "2026-01-01T00:00:00.000Z",
+				url: "https://linear.app/acme/issue/DEV-1/task",
+			});
+
+			const result = await service.claimIssue("DEV-1");
+
+			expect(rawRequest).toHaveBeenCalledTimes(2);
+			expect(String(rawRequest.mock.calls[0]?.[0])).toContain("viewer");
+			expect(updateIssue).toHaveBeenCalledWith(
+				{
+					id: "uuid-1",
+					assigneeId: "user-1",
+					statusId: "state-first",
+				},
+				"adding",
+			);
+			expect(result).toMatchObject({
+				claimed: true,
+				assigned: true,
+				started: true,
+				targetState: { id: "state-first", name: "In Progress" },
+			});
+		});
+
+		it("does nothing when the issue is already started and assigned to the viewer", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			vi.spyOn(linearService, "resolveIssueId").mockResolvedValue("uuid-1");
+			vi.spyOn(graphQLService, "rawRequest").mockResolvedValueOnce({
+				viewer: {
+					id: "user-1",
+					name: "Nico Appel",
+					displayName: "Nico",
+					email: "nico@example.com",
+				},
+				issue: {
+					id: "uuid-1",
+					identifier: "DEV-1",
+					state: { id: "state-started", name: "In Progress", type: "started" },
+					assignee: { id: "user-1", name: "Nico Appel", url: "https://x" },
+					team: { id: "team-1", key: "DEV", name: "Dev" },
+				},
+			});
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+			const getIssueById = vi.spyOn(service, "getIssueById").mockResolvedValue({
+				id: "uuid-1",
+				identifier: "DEV-1",
+				title: "Task",
+				labels: [],
+				priority: 0,
+				createdAt: "2026-01-01T00:00:00.000Z",
+				updatedAt: "2026-01-01T00:00:00.000Z",
+				url: "https://linear.app/acme/issue/DEV-1/task",
+			});
+			const updateIssue = vi.spyOn(service, "updateIssue");
+
+			const result = await service.claimIssue("DEV-1");
+
+			expect(getIssueById).toHaveBeenCalledWith("uuid-1");
+			expect(updateIssue).not.toHaveBeenCalled();
+			expect(result).toMatchObject({
+				claimed: false,
+				assigned: false,
+				started: false,
+			});
+		});
+	});
+
 	describe("resolveTeamId (via internal access)", () => {
 		it("returns team ID when GraphQL exact match succeeds", async () => {
 			const service = createService();
