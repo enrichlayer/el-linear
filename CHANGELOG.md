@@ -4,6 +4,13 @@ All notable changes to `@enrichlayer/el-linear` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.22.0](https://github.com/enrichlayer/el-linear/compare/v1.21.0...v1.22.0) (2026-06-11)
+
+
+### Features
+
+* **issues:** auto-claim on branch creation (DEV-4500) ([#155](https://github.com/enrichlayer/el-linear/issues/155)) ([530ffa1](https://github.com/enrichlayer/el-linear/commit/530ffa1762d36544f713ead0a3c05ab67e64ad51))
+
 ## [1.21.0](https://github.com/enrichlayer/el-linear/compare/v1.20.0...v1.21.0) (2026-06-08)
 
 
