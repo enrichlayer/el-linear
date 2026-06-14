@@ -37,6 +37,22 @@ export interface ProjectByIdResponse {
 	project: ProjectBaseNode | null;
 }
 
+/** Full project read (`PROJECT_READ_QUERY`) — base fields + summary/JSON fields. */
+interface ProjectReadNode extends ProjectBaseNode {
+	state: string;
+	progress: number;
+	url: string;
+	startDate: string | null;
+	targetDate: string | null;
+	description: string | null;
+	content: string | null;
+	lead: { id: string; name: string; displayName: string } | null;
+}
+
+export interface ProjectReadResponse {
+	project: ProjectReadNode | null;
+}
+
 export interface GetProjectResponse {
 	projects: { nodes: ProjectBaseNode[] };
 }

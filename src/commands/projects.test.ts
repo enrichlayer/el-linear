@@ -282,4 +282,86 @@ describe("projects commands", () => {
 			});
 		});
 	});
+
+	describe("projects read", () => {
+		it("resolves the id, runs the full read query, and flattens teams.nodes", async () => {
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				project: {
+					id: "project-id-Launch",
+					name: "Launch",
+					state: "started",
+					progress: 0.5,
+					url: "https://linear.app/acme/project/launch-abc",
+					startDate: null,
+					targetDate: "2026-07-01",
+					description: "Short desc",
+					content: "# Full content",
+					lead: { id: "u1", name: "Alice", displayName: "alice" },
+					teams: { nodes: [{ id: "t1", key: "ENG", name: "Engineering" }] },
+				},
+			});
+
+			const program = createTestProgram();
+			setupProjectsCommands(program);
+			await runCommand(program, ["projects", "read", "Launch"]);
+
+			expect(mockResolveProjectId).toHaveBeenCalledWith("Launch");
+			expect(mockGraphQLService.rawRequest).toHaveBeenCalledWith(
+				expect.stringContaining("ProjectRead"),
+				{ id: "project-id-Launch" },
+			);
+			// teams is flattened to a plain array (what the summary formatter +
+			// JSON shape expect), and description/content/url are present.
+			expect(mockOutputSuccess).toHaveBeenCalledWith({
+				id: "project-id-Launch",
+				name: "Launch",
+				state: "started",
+				progress: 0.5,
+				url: "https://linear.app/acme/project/launch-abc",
+				startDate: null,
+				targetDate: "2026-07-01",
+				description: "Short desc",
+				content: "# Full content",
+				lead: { id: "u1", name: "Alice", displayName: "alice" },
+				teams: [{ id: "t1", key: "ENG", name: "Engineering" }],
+			});
+		});
+
+		it("forwards a URL/slug identifier through resolveProjectId", async () => {
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				project: {
+					id: "project-id-x",
+					name: "X",
+					state: "planned",
+					progress: 0,
+					url: "u",
+					startDate: null,
+					targetDate: null,
+					description: null,
+					content: null,
+					lead: null,
+					teams: { nodes: [] },
+				},
+			});
+			const url = "https://linear.app/acme/project/launch-abc123def456";
+
+			const program = createTestProgram();
+			setupProjectsCommands(program);
+			await runCommand(program, ["projects", "read", url]);
+
+			expect(mockResolveProjectId).toHaveBeenCalledWith(url);
+		});
+
+		it("throws a clear error when the project is not found", async () => {
+			mockGraphQLService.rawRequest.mockResolvedValue({ project: null });
+
+			const program = createTestProgram();
+			setupProjectsCommands(program);
+			await runCommand(program, ["projects", "read", "Ghost"]);
+
+			// handleAsyncCommand routes the throw to outputError; the success
+			// path must not fire.
+			expect(mockOutputSuccess).not.toHaveBeenCalled();
+		});
+	});
 });
