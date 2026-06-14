@@ -917,3 +917,34 @@ export function dispatch(kind: ResourceKind, payload: unknown): string {
 			return formatGenericSummary(payload);
 	}
 }
+
+/**
+ * One-line confirmation render for the `--quiet` write path.
+ *
+ * Writes (`issues create|update`, `comments create|update`) otherwise emit
+ * the full JSON envelope; agents then `grep` it for the identifier / state /
+ * url. `--quiet` routes the same payload here so the caller gets exactly one
+ * machine-stable line and nothing else.
+ *
+ * - issue   → `IDENTIFIER  STATE  URL` (two-space separated, matching the
+ *             summary header style). Empty fields collapse to `-`.
+ * - comment → `comment <id>` (the create/update mutation doesn't fetch a url
+ *             or the parent identifier, so the id — what you need to edit or
+ *             reference the comment — is the stable handle).
+ * - anything else → compact single-line JSON, so the contract ("one line,
+ *             always parseable") holds even for payloads with no dedicated
+ *             shape.
+ */
+export function formatLine(payload: unknown): string {
+	const kind = inferKindFromPayload(payload);
+	const obj = asObj(payload);
+	if (kind === "issue" && obj) {
+		// s()/getName() already render missing values as the em-dash placeholder
+		// used throughout the summary formatter, keeping --quiet consistent.
+		return `${s(obj.identifier)}  ${getName(obj.state)}  ${s(obj.url)}`;
+	}
+	if (kind === "comment" && obj) {
+		return `comment ${s(obj.id)}`;
+	}
+	return JSON.stringify(payload);
+}

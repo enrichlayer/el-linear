@@ -50,10 +50,20 @@ el-linear projects list --limit 50 2>&1 | head -100
 # ❌ Don't reach for jq just to print title + state
 el-linear issues read DEV-123 --jq '.title + " " + .state.name' 2>&1
 
+# ❌ Don't pipe a read through python just to get the whole description body
+el-linear issues read DEV-123 --format json 2>&1 | python3 -c "import json,sys; print(json.load(sys.stdin)['description'])"
+
+# ❌ Don't grep a write's JSON for the new state / url
+el-linear issues update DEV-123 --status Done 2>&1 | grep -iE 'state|url'
+
 # ✅ Just use --format summary
 el-linear issues search "..." --limit 10 --format summary 2>&1
 el-linear projects list --limit 50 --format summary 2>&1
 el-linear issues read DEV-123 --format summary 2>&1
+
+# ✅ Whole description as raw text → --body. Terse write confirmation → --quiet
+el-linear issues read DEV-123 --body 2>&1
+el-linear issues update DEV-123 --status Done --quiet 2>&1
 ```
 
 The summary formatter exists exactly because every consumer (humans and LLMs) was reinventing the same `python -c` / `jq` extraction in shell. Pick the canonical path; the per-resource format is a stable contract.
@@ -71,6 +81,34 @@ el-linear issues read DEV-123 2>&1 | python3 -c "import json,sys; print(json.loa
 ```
 
 `--field` is single-issue only — for batch extraction, fall back to `--jq` on the full JSON.
+
+### The whole description as raw text: `--body`
+
+When you want the **entire** description (not one section) as plain markdown — to read it, diff it, or pipe it to a file — use `issues read --body`. It prints the raw description with real newlines and no JSON envelope, single-issue only, and exits non-zero when the issue has no description. This is the canonical replacement for `... --format json | python3 -c "...['description']"` and the `sed 's/\\n/\n/g'` newline-unescaping hack.
+
+```bash
+# ✅ Full description, raw markdown, scriptable
+el-linear issues read DEV-123 --body 2>&1
+
+# ❌ Don't do this
+el-linear issues read DEV-123 --format json 2>&1 | python3 -c "import json,sys; print(json.load(sys.stdin)['description'])"
+```
+
+`--body` is mutually exclusive with `--field` / `--sections` / `--with` (those extract named parts or extend the JSON envelope; `--body` is the whole thing as text).
+
+### Terse write confirmations: `-q, --quiet`
+
+`issues create|update` and `comments create|update` accept `-q, --quiet`, which prints a single machine-stable confirmation line instead of the full JSON envelope — no need to `grep` the result for the identifier / state / url:
+
+```bash
+el-linear issues update DEV-123 --status "In Review" --quiet 2>&1
+# DEV-123  In Review  https://linear.app/acme/issue/DEV-123/...
+
+el-linear comments create DEV-123 --body "..." --quiet 2>&1
+# comment <id>
+```
+
+`--quiet` overrides `--format` (it's the whole point) and is independent of `--fields`/`--jq`.
 
 ### When you must reach outside el-linear: prefer `jq` over `python3 -c`
 

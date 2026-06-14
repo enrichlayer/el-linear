@@ -12,6 +12,7 @@ import {
 	formatIssueList,
 	formatIssueSummary,
 	formatLabelList,
+	formatLine,
 	formatMilestoneList,
 	formatMilestoneSummary,
 	formatProjectList,
@@ -807,5 +808,58 @@ describe("dispatch", () => {
 		const out = dispatch("generic", { foo: "bar" });
 		expect(out).toContain("foo:");
 		expect(out).toContain("bar");
+	});
+});
+
+describe("formatLine (--quiet write confirmation, DEV-4650)", () => {
+	it("renders an issue as IDENTIFIER  STATE  URL on one line", () => {
+		const out = formatLine({
+			identifier: "DEV-1",
+			title: "Some issue",
+			state: { name: "In Progress" },
+			url: "https://linear.app/acme/issue/DEV-1/some-issue",
+		});
+		expect(out).toBe(
+			"DEV-1  In Progress  https://linear.app/acme/issue/DEV-1/some-issue",
+		);
+		expect(out).not.toContain("\n");
+	});
+
+	it("collapses missing issue fields to the em-dash placeholder", () => {
+		const out = formatLine({
+			identifier: "DEV-2",
+			title: "x",
+			url: "https://linear.app/acme/issue/DEV-2/x",
+			// no state
+		});
+		expect(out).toBe("DEV-2  —  https://linear.app/acme/issue/DEV-2/x");
+	});
+
+	it("renders a comment as 'comment <id>'", () => {
+		const out = formatLine({
+			id: "c-123",
+			body: "hi",
+			user: { id: "u-1", name: "Alice" },
+			createdAt: "2026-01-01T00:00:00Z",
+		});
+		expect(out).toBe("comment c-123");
+	});
+
+	it("passes through extra envelope keys without breaking issue detection", () => {
+		const out = formatLine({
+			identifier: "DEV-3",
+			title: "y",
+			state: { name: "Done" },
+			url: "https://linear.app/acme/issue/DEV-3/y",
+			_warnings: ["something"],
+			autoLinked: { linked: [] },
+		});
+		expect(out).toBe("DEV-3  Done  https://linear.app/acme/issue/DEV-3/y");
+	});
+
+	it("falls back to compact single-line JSON for unrecognized payloads", () => {
+		const out = formatLine({ foo: "bar", n: 1 });
+		expect(out).toBe('{"foo":"bar","n":1}');
+		expect(out).not.toContain("\n");
 	});
 });

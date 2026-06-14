@@ -40,6 +40,13 @@ export function setupReadShortcut(program: Command): void {
 		.alias("show")
 		.description("Shortcut for `issues read`. Get issue details by identifier.")
 		.option(
+			"--body",
+			"Print the issue's full description as raw markdown text — no JSON " +
+				"envelope, single-issue only. Exits non-zero if the issue has no " +
+				"description. The whole-body sibling of --field; mutually exclusive " +
+				"with --field / --sections / --with.",
+		)
+		.option(
 			"--field <name>",
 			'Extract a single named section from the issue description (e.g. "Done when"). ' +
 				"Matches H2/H3 headers and bold pseudo-headers case-insensitively. " +
@@ -59,7 +66,7 @@ export function setupReadShortcut(program: Command): void {
 		)
 		.addHelpText(
 			"after",
-			'\nExamples:\n  el-linear read ADM-652\n  el-linear get DEV-123 DEV-456\n  el-linear ADM-652          (auto-detected)\n  el-linear read DEV-123 --field "Done when"   (just that section)\n  el-linear read DEV-123 --sections "Done when,Out of scope"\n  el-linear read DEV-123 --with relations       (issue + cross-issue links)',
+			'\nExamples:\n  el-linear read ADM-652\n  el-linear get DEV-123 DEV-456\n  el-linear ADM-652          (auto-detected)\n  el-linear read DEV-123 --body                 (full description, raw text)\n  el-linear read DEV-123 --field "Done when"   (just that section)\n  el-linear read DEV-123 --sections "Done when,Out of scope"\n  el-linear read DEV-123 --with relations       (issue + cross-issue links)',
 		)
 		.action(handleAsyncCommand(readIssues));
 
@@ -117,6 +124,7 @@ export async function readIssues(
 	const fileService = await createFileService(rootOpts);
 
 	const fieldName = typeof options.field === "string" ? options.field : null;
+	const bodyOnly = options.body === true;
 	const sectionsRaw =
 		typeof options.sections === "string" ? options.sections : null;
 	// DEV-4476: --with opt-in includes (currently `relations`). Throws on
@@ -133,13 +141,23 @@ export async function readIssues(
 		);
 	}
 
-	// Both --field and --sections are single-issue only — section extraction
-	// can't sensibly fan out to N different bodies, the caller almost always
-	// wants the named sections of one issue.
-	if ((fieldName || sectionsRaw) && issueIds.length > 1) {
+	// --body prints the WHOLE description as raw text (no envelope) — it's the
+	// "all sections" sibling of --field. Pairing it with section extraction or
+	// --with would produce two conflicting output shapes, so reject up front.
+	if (bodyOnly && (fieldName || sectionsRaw || includes.relations)) {
 		throw new Error(
-			"--field / --sections are single-issue only; pass exactly one issueId. " +
-				"For multiple issues, drop the section flags and use --jq or --format summary.",
+			"--body is mutually exclusive with --field / --sections / --with. " +
+				"Use --body for the entire description, --field/--sections for named parts.",
+		);
+	}
+
+	// --field / --sections / --body are single-issue only — raw text extraction
+	// can't sensibly fan out to N different bodies; the caller almost always
+	// wants the named sections (or full body) of one issue.
+	if ((fieldName || sectionsRaw || bodyOnly) && issueIds.length > 1) {
+		throw new Error(
+			"--field / --sections / --body are single-issue only; pass exactly one issueId. " +
+				"For multiple issues, drop those flags and use --jq or --format summary.",
 		);
 	}
 
@@ -170,6 +188,19 @@ export async function readIssues(
 	if (issueIds.length === 1) {
 		const issue = await issuesService.getIssueById(issueIds[0]);
 		const resolved = await downloadLinearUploads(issue, fileService);
+		if (bodyOnly) {
+			const description = resolved.description ?? "";
+			if (description.trim() === "") {
+				// Mirror --field's "not found" contract: nothing on stdout,
+				// exit non-zero with a stderr hint so scripts can branch.
+				process.stderr.write(
+					`el-linear: ${resolved.identifier} has no description\n`,
+				);
+				process.exit(1);
+			}
+			process.stdout.write(`${description}\n`);
+			return;
+		}
 		if (fieldName) {
 			const section = extractField(resolved.description ?? "", fieldName);
 			if (section === null) {

@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import {
 	dispatch as dispatchSummary,
+	formatLine,
 	inferKindFromPayload,
 	type ResourceKind,
 } from "./formatters/summary.js";
@@ -9,6 +10,7 @@ import { sanitizeForLog } from "./sanitize-for-log.js";
 
 const warningBuffer: string[] = [];
 let rawMode = false;
+let quietMode = false;
 let jqFilter: string | null = null;
 let fieldsFilter: string[] | null = null;
 
@@ -17,6 +19,15 @@ let outputFormat: OutputFormat = "json";
 
 export function setRawMode(enabled: boolean): void {
 	rawMode = enabled;
+}
+
+/**
+ * `--quiet` (write commands only): collapse the success payload to a single
+ * confirmation line via `formatLine`, bypassing both the JSON envelope and
+ * the summary block. Set in main.ts's preAction when the flag is present.
+ */
+export function setQuietMode(enabled: boolean): void {
+	quietMode = enabled;
 }
 
 export function setJqFilter(filter: string | null): void {
@@ -166,6 +177,15 @@ export function outputSuccess(data: unknown): void {
 	// formatter falls back to the generic key-value dump.
 	const inferredKind =
 		outputFormat === "summary" ? inferKindFromPayload(output) : "generic";
+	// --quiet: one machine-stable confirmation line, nothing else. Highest
+	// precedence on the write path and independent of --raw / --fields / --jq
+	// (those reshape the payload the flag exists to avoid) — so we emit from
+	// the full pre-filter object, otherwise `--fields identifier` would strip
+	// the state/url formatLine needs and break shape inference.
+	if (quietMode) {
+		logger.info(formatLine(output));
+		return;
+	}
 	// --raw: unwrap { data: [...] } to just the array
 	if (
 		rawMode &&

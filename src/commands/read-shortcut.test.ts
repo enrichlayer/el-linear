@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestProgram, runCommand } from "../__tests__/test-helpers.js";
 
 const mockGetIssueById = vi.fn();
@@ -440,5 +440,89 @@ describe("read-shortcut --sections (multi-section extraction)", () => {
 		await expect(
 			runCommand(program, ["read", "DEV-999", "--sections", ", , ,"]),
 		).rejects.toThrow(/empty after trimming/);
+	});
+});
+
+describe("read-shortcut --body (full description, raw text — DEV-4650)", () => {
+	const issueWithBody = {
+		id: "uuid-x",
+		identifier: "DEV-999",
+		title: "Test",
+		description: "## Heading\n\nBody line one.\nBody line two.",
+	};
+
+	let stdoutSpy: ReturnType<typeof vi.spyOn>;
+	let stderrSpy: ReturnType<typeof vi.spyOn>;
+	let exitSpy: ReturnType<typeof vi.spyOn>;
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		stdoutSpy = vi
+			.spyOn(process.stdout, "write")
+			.mockImplementation(() => true);
+		stderrSpy = vi
+			.spyOn(process.stderr, "write")
+			.mockImplementation(() => true);
+		// process.exit must not kill the runner — throw a sentinel the test catches.
+		exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+			throw new Error(`__exit:${code}`);
+		}) as never);
+	});
+
+	afterEach(() => {
+		stdoutSpy.mockRestore();
+		stderrSpy.mockRestore();
+		exitSpy.mockRestore();
+	});
+
+	it("prints the full description as raw text (no JSON envelope)", async () => {
+		mockGetIssueById.mockResolvedValue(issueWithBody);
+
+		const program = createTestProgram();
+		setupReadShortcut(program);
+		await runCommand(program, ["read", "DEV-999", "--body"]);
+
+		expect(stdoutSpy).toHaveBeenCalledWith(`${issueWithBody.description}\n`);
+		// Raw text path — never routes through the JSON envelope.
+		expect(mockOutputSuccess).not.toHaveBeenCalled();
+	});
+
+	it("exits non-zero with a stderr hint when the issue has no description", async () => {
+		mockGetIssueById.mockResolvedValue({
+			id: "uuid-y",
+			identifier: "DEV-888",
+			title: "Empty",
+			description: "",
+		});
+
+		const program = createTestProgram();
+		setupReadShortcut(program);
+		await expect(
+			runCommand(program, ["read", "DEV-888", "--body"]),
+		).rejects.toThrow(/__exit:1/);
+		expect(stderrSpy).toHaveBeenCalledWith(
+			expect.stringContaining("DEV-888 has no description"),
+		);
+		expect(stdoutSpy).not.toHaveBeenCalled();
+	});
+
+	it("rejects --body paired with --field as mutually exclusive", async () => {
+		mockGetIssueById.mockResolvedValue(issueWithBody);
+
+		const program = createTestProgram();
+		setupReadShortcut(program);
+		await expect(
+			runCommand(program, ["read", "DEV-999", "--body", "--field", "Heading"]),
+		).rejects.toThrow(/mutually exclusive/);
+	});
+
+	it("rejects --body with multiple issue IDs", async () => {
+		mockGetIssueById.mockResolvedValue(issueWithBody);
+
+		const program = createTestProgram();
+		setupReadShortcut(program);
+		await expect(
+			runCommand(program, ["read", "DEV-999", "DEV-998", "--body"]),
+		).rejects.toThrow(/single-issue only/);
 	});
 });

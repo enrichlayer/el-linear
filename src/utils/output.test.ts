@@ -16,6 +16,7 @@ import {
 	outputWarning,
 	resetWarnings,
 	setFieldsFilter,
+	setQuietMode,
 	setRawMode,
 	warnIfTruncated,
 } from "./output.js";
@@ -51,6 +52,63 @@ describe("outputSuccess", () => {
 	it("handles null", () => {
 		outputSuccess(null);
 		expect(stdoutSpy).toHaveBeenCalledWith("null\n");
+	});
+});
+
+describe("outputSuccess --quiet mode (DEV-4650)", () => {
+	let stdoutSpy: ReturnType<typeof vi.spyOn>;
+
+	beforeEach(() => {
+		resetWarnings();
+		stdoutSpy = vi
+			.spyOn(process.stdout, "write")
+			.mockImplementation(() => true);
+		setQuietMode(true);
+	});
+
+	afterEach(() => {
+		setQuietMode(false);
+		stdoutSpy.mockRestore();
+	});
+
+	// Composition test: the real outputSuccess path (not a mocked formatter)
+	// must collapse an updated-issue payload to exactly one confirmation line.
+	it("emits a single IDENTIFIER  STATE  URL line for an issue write", () => {
+		outputSuccess({
+			identifier: "DEV-1",
+			title: "Some issue",
+			state: { name: "Done" },
+			url: "https://linear.app/acme/issue/DEV-1/some-issue",
+		});
+		expect(stdoutSpy).toHaveBeenCalledTimes(1);
+		expect(stdoutSpy).toHaveBeenCalledWith(
+			"DEV-1  Done  https://linear.app/acme/issue/DEV-1/some-issue\n",
+		);
+	});
+
+	it("emits a single 'comment <id>' line for a comment write", () => {
+		outputSuccess({
+			id: "c-abc",
+			body: "hi",
+			user: { id: "u-1", name: "Alice" },
+			createdAt: "2026-01-01T00:00:00Z",
+		});
+		expect(stdoutSpy).toHaveBeenCalledWith("comment c-abc\n");
+	});
+
+	it("overrides --fields filtering with the one-line form", () => {
+		// --fields is captured before quiet emit; the line still wins.
+		setFieldsFilter(["identifier"]);
+		outputSuccess({
+			identifier: "DEV-2",
+			title: "x",
+			state: { name: "Todo" },
+			url: "https://linear.app/acme/issue/DEV-2/x",
+		});
+		setFieldsFilter(null);
+		expect(stdoutSpy).toHaveBeenCalledWith(
+			"DEV-2  Todo  https://linear.app/acme/issue/DEV-2/x\n",
+		);
 	});
 });
 

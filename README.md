@@ -553,6 +553,38 @@ el-linear read ADM-652 --field "Out of scope"
 Single-issue only — pair it with `--jq` on full JSON for batch
 extraction across many issues.
 
+### Print the whole description as raw text: `--body`
+
+`issues read --body` prints the issue's **entire** description as raw
+markdown — real newlines, no JSON envelope — instead of one named
+section. Single-issue only; exits 1 with a stderr hint when the issue has
+no description. This is the canonical replacement for
+`... --format json | python3 -c "...['description']"`.
+
+```bash
+el-linear issues read DEV-123 --body
+# ## Why we need this
+# ...full description body...
+```
+
+Mutually exclusive with `--field` / `--sections` / `--with`.
+
+### One-line write confirmations: `-q, --quiet`
+
+`issues create|update` and `comments create|update` accept `-q, --quiet`,
+printing a single confirmation line instead of the full JSON envelope so
+you don't have to `grep` the result:
+
+```bash
+el-linear issues update DEV-123 --status "In Review" --quiet
+# DEV-123  In Review  https://linear.app/acme/issue/DEV-123/...
+
+el-linear comments create DEV-123 --body "..." --quiet
+# comment 6f1c…
+```
+
+`--quiet` overrides `--format` and is independent of `--fields` / `--jq`.
+
 ### Render an issue's tree: `issues tree`
 
 `issues tree <ID>` walks the parent → children graph for an issue in a
