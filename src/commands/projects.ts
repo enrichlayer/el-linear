@@ -8,6 +8,7 @@ import {
 	GET_PROJECT_QUERY,
 	GET_PROJECT_TEAM_ISSUES_QUERY,
 	PROJECT_BY_ID_QUERY,
+	PROJECT_READ_QUERY,
 	SEARCH_PROJECTS_BY_NAME_QUERY,
 	UPDATE_PROJECT_MUTATION,
 } from "../queries/projects.js";
@@ -18,6 +19,7 @@ import type {
 	GetProjectResponse,
 	GetProjectTeamIssuesResponse,
 	ProjectByIdResponse,
+	ProjectReadResponse,
 	SearchProjectsByNameResponse,
 	UpdateProjectResponse,
 } from "../queries/projects-types.js";
@@ -612,6 +614,38 @@ async function handleDeleteProject(
 	});
 }
 
+/**
+ * Read a single project (DEV-4610). Resolves the identifier through the same
+ * `resolveProjectId` path the `--project` flags use (UUID / slug / URL / name),
+ * fetches the full project, and emits it. `teams.nodes` is flattened to a plain
+ * array so the `--format summary` project renderer (and the JSON shape) match
+ * `projects list` — the formatter expects a flat team list, not a `{ nodes }`
+ * connection. Replaces the raw-`graphql` workaround for grabbing a project's
+ * url / content / lead.
+ */
+async function handleReadProject(
+	projectNameOrId: string,
+	_options: OptionValues,
+	command: Command,
+): Promise<void> {
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
+	const projectId = await linearService.resolveProjectId(projectNameOrId);
+	const result = await graphQLService.rawRequest<ProjectReadResponse>(
+		PROJECT_READ_QUERY,
+		{ id: projectId },
+	);
+	if (!result.project) {
+		throw new Error(`Project "${projectNameOrId}" not found`);
+	}
+	const { teams, ...rest } = result.project;
+	outputSuccess({
+		...rest,
+		teams: teams.nodes.map((t) => ({ id: t.id, key: t.key, name: t.name })),
+	});
+}
+
 export function setupProjectsCommands(program: Command): void {
 	const projects = program
 		.command("projects")
@@ -643,6 +677,13 @@ export function setupProjectsCommands(program: Command): void {
 		.command("delete <project>")
 		.description("Delete (trash) a project (resolves names)")
 		.action(handleAsyncCommand(handleDeleteProject));
+
+	projects
+		.command("read <project>")
+		.description(
+			"Read one project's full details (resolves name/slug/URL/ID). `--format summary` shows state, lead, teams, target, progress, url; JSON includes description/content.",
+		)
+		.action(handleAsyncCommand(handleReadProject));
 
 	projects
 		.command("list")
