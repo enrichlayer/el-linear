@@ -1471,6 +1471,10 @@ export function setupIssuesCommands(program: Command): void {
 			"text appended to the description (overrides config.messageFooter)",
 		)
 		.option("--no-footer", "skip the configured messageFooter for this issue")
+		.option(
+			"-q, --quiet",
+			"print one confirmation line (IDENTIFIER  STATE  URL) instead of the full JSON",
+		)
 		.action(
 			handleAsyncCommand(
 				(
@@ -1509,6 +1513,13 @@ export function setupIssuesCommands(program: Command): void {
 		.alias("show")
 		.description("Get issue details. Accepts multiple IDs for batch retrieval.")
 		.option(
+			"--body",
+			"Print the issue's full description as raw markdown text — no JSON " +
+				"envelope, single-issue only. Exits non-zero if the issue has no " +
+				"description. The whole-body sibling of --field; mutually exclusive " +
+				"with --field / --sections / --with.",
+		)
+		.option(
 			"--field <name>",
 			'Extract a single named section from the issue description (e.g. "Done when"). ' +
 				"Matches H2/H3 headers and bold pseudo-headers case-insensitively. " +
@@ -1528,7 +1539,7 @@ export function setupIssuesCommands(program: Command): void {
 		)
 		.addHelpText(
 			"after",
-			'\nBoth UUID and identifiers like ABC-123 are supported.\nMultiple IDs: el-linear issue get DEV-123 DEV-456 DEV-789\nExtract a section: el-linear issue read DEV-123 --field "Done when"\nMulti-section: el-linear issue read DEV-123 --sections "Done when,Out of scope"\nWith relations: el-linear issue read DEV-123 --with relations',
+			'\nBoth UUID and identifiers like ABC-123 are supported.\nMultiple IDs: el-linear issue get DEV-123 DEV-456 DEV-789\nFull description: el-linear issue read DEV-123 --body\nExtract a section: el-linear issue read DEV-123 --field "Done when"\nMulti-section: el-linear issue read DEV-123 --sections "Done when,Out of scope"\nWith relations: el-linear issue read DEV-123 --with relations',
 		)
 		.action(handleAsyncCommand(readIssues));
 
@@ -1589,6 +1600,10 @@ export function setupIssuesCommands(program: Command): void {
 		.option("--blocks <issues>", "issues this blocks (comma-separated)")
 		.option("--blocked-by <issues>", "issues blocking this (comma-separated)")
 		.option("--duplicate-of <issue>", "mark as duplicate of another issue")
+		.option(
+			"-q, --quiet",
+			"print one confirmation line (IDENTIFIER  STATE  URL) instead of the full JSON",
+		)
 		.action(handleAsyncCommand(handleUpdateIssue));
 
 	issues

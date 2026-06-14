@@ -35,6 +35,7 @@ import {
 	setFieldsFilter,
 	setJqFilter,
 	setOutputFormat,
+	setQuietMode,
 	setRawMode,
 } from "./utils/output.js";
 import { outputUsageInfo } from "./utils/usage.js";
@@ -112,6 +113,12 @@ program.hook("preAction", (_thisCommand: Command, actionCommand: Command) => {
 	}
 	if (rootOpts.fields) {
 		setFieldsFilter(splitList(rootOpts.fields));
+	}
+	// --quiet is registered only on the write commands (issues/comments
+	// create|update); it surfaces here via optsWithGlobals. One confirmation
+	// line instead of the full envelope — see setQuietMode.
+	if (rootOpts.quiet) {
+		setQuietMode(true);
 	}
 	// Subcommand --format wins over the global flag (commander resolves
 	// options closest to the action), so `optsWithGlobals` returns the

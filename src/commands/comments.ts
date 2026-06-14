@@ -413,6 +413,10 @@ export function setupCommentsCommands(program: Command): void {
 			"text appended to the comment body (overrides config.messageFooter)",
 		)
 		.option("--no-footer", "skip the configured messageFooter for this comment")
+		.option(
+			"-q, --quiet",
+			"print one confirmation line (comment <id>) instead of the full JSON",
+		)
 		.action(handleAsyncCommand(handleCreateComment));
 
 	comments
@@ -427,6 +431,10 @@ export function setupCommentsCommands(program: Command): void {
 		.option(
 			"--no-auto-link",
 			"skip wrapping issue refs as markdown links and creating sidebar relations",
+		)
+		.option(
+			"-q, --quiet",
+			"print one confirmation line (comment <id>) instead of the full JSON",
 		)
 		.action(handleAsyncCommand(handleUpdateComment));
 
