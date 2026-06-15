@@ -56,6 +56,44 @@ describe("parseBranchName", () => {
 		expect(parseBranchName("dev/FE-3").issueId).toBe("FE-3");
 	});
 
+	it("parses Codex-authored branches (codex/<TEAM>-<N>-slug) — DEV-4660", () => {
+		// Codex creates branches like `codex/ALL-973-slug` rather than
+		// `feature/ALL-973-slug`. Pre-fix this returned issueId: null,
+		// breaking every skill that calls `el-linear issue-id` (commit-guard,
+		// glab-commit-push-mr, stray-file-triage, git-branch-from-linear).
+		// Mirrors tools-repo DEV-4417 (cli/el-git/src/commands/context.ts).
+		expect(parseBranchName("codex/ALL-973-wire-extractor")).toEqual({
+			branch: "codex/ALL-973-wire-extractor",
+			issueId: "ALL-973",
+			team: "ALL",
+			number: 973,
+			slug: "wire-extractor",
+		});
+	});
+
+	it("parses Codex branches across team prefixes (DEV-4660)", () => {
+		expect(parseBranchName("codex/DEV-4660-add-codex-prefix").issueId).toBe(
+			"DEV-4660",
+		);
+		expect(parseBranchName("codex/CS-42-bug-fix").issueId).toBe("CS-42");
+		expect(parseBranchName("codex/FE-718-mobile-carousel").issueId).toBe(
+			"FE-718",
+		);
+	});
+
+	it("rejects a bare codex/ branch with no Linear ID (DEV-4660)", () => {
+		// A `codex/` prefix without a traceable `<TEAM>-<N>` must still be
+		// rejected — the whole point of the guard is to ensure every branch
+		// carries an issue reference.
+		expect(parseBranchName("codex/some-random-slug")).toEqual({
+			branch: "codex/some-random-slug",
+			issueId: null,
+			team: null,
+			number: null,
+			slug: null,
+		});
+	});
+
 	it("rejects team keys longer than 4 chars (regex limit)", () => {
 		expect(parseBranchName("feature/INFRA-1").issueId).toBeNull();
 	});
