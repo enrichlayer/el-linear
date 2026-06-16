@@ -78,20 +78,85 @@ function emitSummary(payload: unknown, kind: ResourceKind): void {
 }
 
 /**
+ * Standard windowing / pagination / truncation metadata for any command
+ * that does not return its complete result set in one response.
+ *
+ * This is the canonical `WindowedMeta` type referenced by the
+ * output-transparency audit (DEV-3810 → DEV-4668). It promotes the
+ * `el-user usage` reference convention into the shared envelope so every
+ * consuming CLI uses the same field names instead of inventing ad-hoc
+ * `_window` / `_total` / `truncated` keys. The motivating principle:
+ * **every piece of data between a database and a decision-maker (human or
+ * LLM) should make its scope, limits, and assumptions visible in the
+ * output** — a consumer should never have to read source to interpret
+ * data correctly.
+ *
+ * All fields are optional: a command populates only the ones that apply.
+ * Because `ListMeta` / `ListExtraMeta` still carry an open
+ * `Record<string, unknown>` index, a CLI may also add its own
+ * domain-specific counters (`_total_hits`, `_indices_queried`,
+ * `_source_users_total`, …) alongside these — but where a generic field
+ * fits, prefer it so cross-CLI tooling and skills can read one shape.
+ *
+ * When to populate each field:
+ * - `_window` — the time/scope window applied, e.g. `"30d"`, `"12 months"`,
+ *   `"since 2026-06-01"`.
+ * - `_limit_applied` — the cap actually in effect (the value the caller
+ *   passed, or the command's default when they passed nothing).
+ * - `_query` — the search / filter expression applied to produce `data`.
+ * - `_total` — total matching rows *before* windowing / limiting /
+ *   filtering. Lets a consumer report "showing N of `_total`".
+ * - `_fetched` — how many rows are in *this* response (distinct from
+ *   `_total`). For list envelopes this equals `meta.count`.
+ * - `truncated` — `true` when `_fetched` hit `_limit_applied` and more
+ *   rows exist beyond this page. Skills MUST consume this rather than
+ *   counting returned rows to decide whether output is complete.
+ * - `availability` — per-response (or per-source) completeness signal.
+ *   Emit `{status: "degraded", detail}` when a sub-source failed (e.g. a
+ *   Slack timeout in an aggregator) rather than collapsing to an empty
+ *   result indistinguishable from "no hits".
+ */
+export interface WindowedMeta {
+	/** Time/scope window applied, e.g. `"30d"`, `"since 2026-06-01"`. */
+	_window?: string;
+	/** The cap actually in effect (caller's value, or the default). */
+	_limit_applied?: number;
+	/** The search / filter expression applied to produce `data`. */
+	_query?: string;
+	/** Total matching rows before windowing / limiting / filtering. */
+	_total?: number;
+	/** Rows in this response (equals `meta.count` for list envelopes). */
+	_fetched?: number;
+	/** `true` when `_fetched` hit `_limit_applied` — more rows exist. */
+	truncated?: boolean;
+	/** Per-response completeness signal; mirrors the `el-user` convention. */
+	availability?: {
+		status: "complete" | "partial" | "degraded";
+		/** Human-readable reason, e.g. `"result reached row cap 100"`. */
+		detail?: string;
+	};
+}
+
+/**
  * Resource-specific extra metadata that may be added to a list response
  * alongside the canonical `count` (e.g. `query` on search, `team` on
  * filtered list). Excludes `count` at the type level — callers can't
  * accidentally pass a string `count` and have it silently overridden;
  * the only way to set `count` is via `data.length` inside `outputList`.
  *
+ * Intersected with {@link WindowedMeta} so the standard windowing fields
+ * (`_total`, `truncated`, `_window`, …) are typed when present, while the
+ * open `Record<string, unknown>` index still admits CLI-specific keys.
+ *
  * Implementation note: `count?: never` together with `Record<string, unknown>`
  * lets TypeScript accept any other key while disallowing the literal
  * `count` key. The `never`-typed property is impossible to assign, which
  * is what we want for the "no count here" contract.
  */
-export type ListExtraMeta = Record<string, unknown> & {
-	count?: never;
-};
+export type ListExtraMeta = Record<string, unknown> &
+	WindowedMeta & {
+		count?: never;
+	};
 
 /**
  * Metadata envelope for list responses. Always includes `count`; resources
@@ -101,6 +166,10 @@ export type ListExtraMeta = Record<string, unknown> & {
  * read it both for emptiness checks (`.meta.count == 0`) and for the
  * actual magnitude (e.g. logging "found N issues"). A boolean isEmpty
  * would lose the magnitude signal, so `count: number` stays.
+ *
+ * The open `Record<string, unknown>` index admits the {@link WindowedMeta}
+ * fields a windowed list echoes (`_total`, `truncated`, `_window`, …);
+ * those are typed at the write site via {@link ListExtraMeta}.
  */
 export interface ListMeta extends Record<string, unknown> {
 	count: number;

@@ -95,5 +95,6 @@ export {
 	setJqFilter,
 	setOutputFormat,
 	setRawMode,
+	type WindowedMeta,
 	warnIfTruncated,
 } from "./utils/output.js";
