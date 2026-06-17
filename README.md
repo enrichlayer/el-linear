@@ -533,6 +533,50 @@ global `summary` value works on every read/list command.
 `--raw` together with `--format summary` to render a list envelope as a
 bare item-list rather than an envelope.
 
+### Windowed metadata (`WindowedMeta`)
+
+When a command returns less than its complete result set — because it
+windowed by time, paginated, filtered, or hit a `--limit` — it should make
+that visible in the envelope's `meta` rather than leaving the consumer to
+guess. The shared output package (`@enrichlayer/el-linear/output`) exports a
+canonical `WindowedMeta` type for exactly these fields, so every CLI built on
+it uses one set of names instead of ad-hoc `_window` / `_total` / `truncated`
+keys:
+
+| Field            | Populate when…                                                        |
+| ---------------- | --------------------------------------------------------------------- |
+| `_window`        | a time/scope window was applied — `"30d"`, `"since 2026-06-01"`.      |
+| `_limit_applied` | a cap is in effect — the caller's value, or the default when omitted. |
+| `_query`         | a search / filter expression produced `data`.                         |
+| `_total`         | the total matching rows *before* windowing / limiting / filtering.    |
+| `_fetched`       | rows in *this* response (equals `meta.count` for list envelopes).     |
+| `truncated`      | `_fetched` hit `_limit_applied` and more rows exist beyond this page. |
+| `availability`   | `{status: "complete" \| "partial" \| "degraded", detail?}` — emit `degraded` when a sub-source failed, never an empty result that reads as "no hits". |
+
+All fields are optional; a command populates only the ones that apply. The
+`meta` object still admits CLI-specific counters (`_total_hits`,
+`_source_users_total`, …) alongside these, but prefer the generic field where
+one fits so cross-CLI tooling and skills can read a single shape. Skill output
+templates that show counts MUST consume `_total` / `truncated` from `meta`
+rather than counting returned rows.
+
+This convention comes from the output-transparency audit's **"Standard
+Convention"** section (`docs/output-transparency-audit-report.md` in the
+`vertical-int/tools` repo, DEV-3810); `WindowedMeta` is the shared type that
+audit recommends promoting into the envelope (DEV-4668).
+
+```ts
+import type { WindowedMeta } from "@enrichlayer/el-linear/output";
+
+// A list command echoing what it windowed and whether it clipped:
+outputList(rows, {
+  _window: "30d",
+  _limit_applied: 100,
+  _total: 247,
+  truncated: rows.length === 100,
+} satisfies WindowedMeta);
+```
+
 ### Extract a single description section: `--field`
 
 `issues read --field <name>` extracts one named section from an issue's

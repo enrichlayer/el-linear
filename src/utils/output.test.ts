@@ -18,6 +18,7 @@ import {
 	setFieldsFilter,
 	setQuietMode,
 	setRawMode,
+	type WindowedMeta,
 	warnIfTruncated,
 } from "./output.js";
 
@@ -764,5 +765,89 @@ describe("outputList / outputSingle (DEV-4068 T6)", () => {
 		outputSingle({ id: 1 });
 		outputSingle("a string");
 		outputSingle(42);
+	});
+});
+
+describe("WindowedMeta (DEV-4668)", () => {
+	let stdoutSpy: ReturnType<typeof vi.spyOn>;
+
+	beforeEach(() => {
+		resetWarnings();
+		stdoutSpy = vi
+			.spyOn(process.stdout, "write")
+			.mockImplementation(() => true);
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	function lastEmittedJson(): unknown {
+		const lastCall = stdoutSpy.mock.calls.at(-1);
+		if (!lastCall) throw new Error("no stdout writes recorded");
+		return JSON.parse(String(lastCall[0]).trim());
+	}
+
+	it("outputList accepts WindowedMeta fields as extraMeta and emits them", () => {
+		outputList([{ id: 1 }, { id: 2 }], {
+			_window: "30d",
+			_limit_applied: 100,
+			_query: "fix bug",
+			_total: 247,
+			_fetched: 2,
+			truncated: false,
+			availability: { status: "complete" },
+		} satisfies WindowedMeta);
+		expect(lastEmittedJson()).toEqual({
+			data: [{ id: 1 }, { id: 2 }],
+			meta: {
+				count: 2,
+				_window: "30d",
+				_limit_applied: 100,
+				_query: "fix bug",
+				_total: 247,
+				_fetched: 2,
+				truncated: false,
+				availability: { status: "complete" },
+			},
+		});
+	});
+
+	it("WindowedMeta fields are all optional — a partial subset is valid", () => {
+		// Compile-time + runtime: a command that only knows `_total` and
+		// `truncated` populates just those, leaving the rest absent.
+		outputList([{ id: 1 }], {
+			_total: 9,
+			truncated: true,
+		} satisfies WindowedMeta);
+		expect(lastEmittedJson()).toEqual({
+			data: [{ id: 1 }],
+			meta: { count: 1, _total: 9, truncated: true },
+		});
+	});
+
+	it("availability.status is constrained to the documented union", () => {
+		expectTypeOf<WindowedMeta["availability"]>().toEqualTypeOf<
+			| { status: "complete" | "partial" | "degraded"; detail?: string }
+			| undefined
+		>();
+		// @ts-expect-error -- "unknown" is not a member of the status union
+		const bad: WindowedMeta = { availability: { status: "unknown" } };
+		void bad;
+	});
+
+	it("ListExtraMeta still admits CLI-specific keys alongside WindowedMeta", () => {
+		// The open Record<string, unknown> index means a CLI may add its own
+		// domain counters (e.g. el-elasticsearch `_total_hits`) next to the
+		// generic fields without a type error.
+		outputList([{ id: 1 }], {
+			_total: 3,
+			_total_hits: 3,
+			_indices_queried: 2,
+		});
+		expect(lastEmittedJson()).toEqual({
+			data: [{ id: 1 }],
+			meta: { count: 1, _total: 3, _total_hits: 3, _indices_queried: 2 },
+		});
 	});
 });
