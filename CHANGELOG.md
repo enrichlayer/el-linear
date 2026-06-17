@@ -4,6 +4,13 @@ All notable changes to `@enrichlayer/el-linear` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.24.0](https://github.com/enrichlayer/el-linear/compare/v1.23.0...v1.24.0) (2026-06-17)
+
+
+### Features
+
+* **output:** add WindowedMeta type to the shared output envelope (DEV-4668) ([#163](https://github.com/enrichlayer/el-linear/issues/163)) ([ed9e448](https://github.com/enrichlayer/el-linear/commit/ed9e4484fc256b1db1b918d93d696b65ff528095))
+
 ## [1.23.0](https://github.com/enrichlayer/el-linear/compare/v1.22.0...v1.23.0) (2026-06-14)
 
 
