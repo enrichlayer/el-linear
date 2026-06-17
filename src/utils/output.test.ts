@@ -617,11 +617,12 @@ describe("--format summary", () => {
 		expect(written.endsWith("\n")).toBe(true);
 	});
 
-	// --fields strips signature fields (e.g. `title` for an issue).
-	// Pre-fix, `inferKindFromPayload` ran on the post-filter payload and
-	// fell through to "generic" — the issue formatter never fired. The
-	// fix captures the kind from the pre-filter payload (ALL-933 composition).
-	it("composes with --fields: still renders as issue summary when title is stripped", async () => {
+	// --fields on summary is a projection request (DEV-4750), not the
+	// pre-DEV-4750 JSON-shape strip. The shape inference still runs on the
+	// pre-filter payload so kind detection survives (ALL-933 composition);
+	// what changed is that the formatter now consumes the requested fields
+	// directly. Header line still carries the identifier + title regardless.
+	it("composes with --fields: still renders as issue summary when title is filtered out", async () => {
 		const { outputSuccess, setFieldsFilter } = await import("./output.js");
 		setFieldsFilter(["identifier", "url"]);
 		outputSuccess({
@@ -637,9 +638,11 @@ describe("--format summary", () => {
 		// `identifier:` as a key/value line.
 		expect(written).toContain("DEV-1");
 		expect(written).not.toMatch(/^identifier:/m);
+		// URL is in the requested set; render it.
+		expect(written).toContain("URL:");
 	});
 
-	it("composes with --fields: list envelope still renders as issue table", async () => {
+	it("composes with --fields: list envelope renders as issue table with projected columns", async () => {
 		const { outputSuccess, setFieldsFilter } = await import("./output.js");
 		setFieldsFilter(["identifier"]);
 		outputSuccess({
@@ -661,7 +664,82 @@ describe("--format summary", () => {
 		});
 		const written = stdoutSpy.mock.calls.map((c) => c[0] as string).join("");
 		// Issue-list table header — generic fallback would dump key/value pairs.
-		expect(written).toMatch(/ID\s+TITLE\s+STATE\s+ASSIGNEE/);
+		// Post-DEV-4750: --fields identifier means *only* the ID column renders.
+		expect(written).toMatch(/^ID\s*$/m);
+		expect(written).toContain("DEV-1");
+		expect(written).toContain("DEV-2");
+	});
+
+	// DEV-4750: --fields on summary extends the column set with projectable
+	// nested fields. `--fields ...,project` adds a PROJECT column whose
+	// value is `project.name` — proves the JSON-shape strip is no longer
+	// applied (which would have flattened `project: {name: ...}` to `{}`).
+	it("composes with --fields: projects nested project.name into the issue table", async () => {
+		const { outputSuccess, setFieldsFilter } = await import("./output.js");
+		setFieldsFilter(["identifier", "title", "state", "assignee", "project"]);
+		outputSuccess({
+			data: [
+				{
+					identifier: "DEV-1",
+					title: "First",
+					state: { name: "Todo" },
+					assignee: { name: "Alice" },
+					project: { name: "Auth Refactor" },
+				},
+			],
+			meta: { count: 1 },
+		});
+		const written = stdoutSpy.mock.calls.map((c) => c[0] as string).join("");
+		expect(written).toMatch(/ID\s+TITLE\s+STATE\s+ASSIGNEE\s+PROJECT/);
+		expect(written).toContain("Auth Refactor");
+	});
+
+	// DEV-4750: --fields on summary projects nested teams[].key into the
+	// projects table — the original gap that motivated the change.
+	it("composes with --fields: projects nested teams into the projects table", async () => {
+		const { outputSuccess, setFieldsFilter } = await import("./output.js");
+		setFieldsFilter(["name", "state", "progress", "lead", "teams"]);
+		outputSuccess({
+			data: [
+				{
+					name: "Auth Refactor",
+					state: "started",
+					progress: 0.65,
+					lead: { name: "Alice" },
+					teams: [
+						{ key: "DEV", name: "Dev" },
+						{ key: "FE", name: "Frontend" },
+					],
+				},
+			],
+			meta: { count: 1 },
+		});
+		const written = stdoutSpy.mock.calls.map((c) => c[0] as string).join("");
+		expect(written).toMatch(/NAME\s+STATE\s+PROGRESS\s+LEAD\s+TEAMS/);
+		expect(written).toContain("DEV, FE");
+	});
+
+	// DEV-4750: an unprojectable --fields name surfaces as an inline
+	// `_warnings:` line after the summary block so scripts can detect it
+	// deterministically without re-running with --format json.
+	it("emits a _warnings line when an unknown field is requested on summary", async () => {
+		const { outputSuccess, setFieldsFilter } = await import("./output.js");
+		setFieldsFilter(["identifier", "title", "doesnotexist"]);
+		outputSuccess({
+			data: [
+				{
+					identifier: "DEV-1",
+					title: "x",
+					state: { name: "Todo" },
+					assignee: null,
+				},
+			],
+			meta: { count: 1 },
+		});
+		const written = stdoutSpy.mock.calls.map((c) => c[0] as string).join("");
+		expect(written).toContain("_warnings:");
+		expect(written).toContain("fields_unprojectable");
+		expect(written).toContain("doesnotexist");
 	});
 });
 

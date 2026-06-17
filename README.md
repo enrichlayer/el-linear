@@ -528,10 +528,47 @@ continue to accept their per-command formats too: `table`, `md`,
 `markdown`, `csv` — those go to the per-command rendering path. The
 global `summary` value works on every read/list command.
 
-`--format summary` does not compose with `--jq` (jq is JSON-only) or
-`--fields` (fields filter the JSON shape, not the rendered text). Use
+`--format summary` does not compose with `--jq` (jq is JSON-only). Use
 `--raw` together with `--format summary` to render a list envelope as a
 bare item-list rather than an envelope.
+
+#### `--fields` on `--format summary` — project additional columns
+
+`--fields` on a summary render is a **projection request**, not a
+JSON-shape filter (DEV-4750). For list outputs it sets the column set;
+for single-resource outputs it filters the labelled field block beneath
+the headline. Order is preserved: `--fields project,identifier,title`
+renders `PROJECT  ID  TITLE`.
+
+Currently wired through:
+
+| Resource | Defaults | Extras you can request |
+|----------|----------|------------------------|
+| `issues list` | `id, title, state, assignee` | `project, cycle, milestone, labels, url, priority, estimate, createdAt, updatedAt, team` |
+| `projects list` | `name, state, progress, lead` | `teams, target, url, updatedAt` |
+| `issues read` (single) | `state, assignee, project, cycle, milestone, labels, url` | `priority, estimate, created, updated` |
+| `projects read` (single) | `state, lead, teams, target, progress, url` | (filter only — no extras) |
+
+`identifier`, `id`, `title` and `name` are headline-only on single-resource summaries and are filtered out of the labelled block (they remain on the title line above). `status` is accepted as a synonym for `state`, `owner` for `assignee`, `targetDate` for `target`.
+
+```bash
+# issues list with project column (the gap that motivated DEV-4750):
+el-linear issues list --status "In Progress" --format summary \
+  --fields identifier,title,status,assignee,project
+# ID        TITLE                          STATE        ASSIGNEE    PROJECT
+# -----------------------------------------------------------------------------
+# DEV-1     Migrate auth middleware        In Progress  Alice       Auth Refactor
+# ...
+
+# projects list with teams column:
+el-linear projects list --format summary --fields name,state,progress,lead,teams
+# NAME                STATE    PROGRESS  LEAD     TEAMS
+# ---------------------------------------------------------
+# Auth Refactor       started  65%       Alice    DEV, FE
+# ...
+```
+
+Unrecognized field names are reported as a `_warnings:` line appended after the summary block (`fields_unprojectable: --format summary on issues list does not project foo, bar; ...`) — same signal scripts get on the JSON path. Resources whose summary formatter doesn't yet wire `--fields` (cycles, milestones, comments, teams, labels, users, documents, templates, attachments, releases, search results) emit the same warning and render their default summary.
 
 ### Windowed metadata (`WindowedMeta`)
 
