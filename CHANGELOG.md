@@ -4,6 +4,15 @@ All notable changes to `@enrichlayer/el-linear` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.25.0](https://github.com/enrichlayer/el-linear/compare/v1.24.0...v1.25.0) (2026-06-18)
+
+
+### Features
+
+* **issue-id:** accept bug/ and spike/ branch prefixes (DEV-4777) ([#167](https://github.com/enrichlayer/el-linear/issues/167)) ([00c500f](https://github.com/enrichlayer/el-linear/commit/00c500f721b0b6f28b59f8b828187ad7769caed5))
+* **issue-id:** accept codex/ branch prefix (DEV-4660) ([#160](https://github.com/enrichlayer/el-linear/issues/160)) ([800418c](https://github.com/enrichlayer/el-linear/commit/800418ca51737274a211627abd6bce22a043e501))
+* **summary:** --format summary honors --fields projection (DEV-4750) ([#166](https://github.com/enrichlayer/el-linear/issues/166)) ([3b46ac9](https://github.com/enrichlayer/el-linear/commit/3b46ac97ffc91ebb50c585279f74305e313d5a9a))
+
 ## [1.24.0](https://github.com/enrichlayer/el-linear/compare/v1.23.0...v1.24.0) (2026-06-17)
 
 
