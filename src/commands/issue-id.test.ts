@@ -94,6 +94,35 @@ describe("parseBranchName", () => {
 		});
 	});
 
+	it("parses bug/<TEAM>-<N>-slug branches (DEV-4777)", () => {
+		// `bug` is a sanctioned Linear type label; a `bug/DEV-4773-slug`
+		// branch must surface its issue ID for commit guards and MR description
+		// generation the same way `feature/` and `codex/` do.
+		// Mirrors tools-repo DEV-4774 (el-git context + check-readiness +
+		// check-linear-branch.sh).
+		expect(parseBranchName("bug/DEV-4773-slug")).toEqual({
+			branch: "bug/DEV-4773-slug",
+			issueId: "DEV-4773",
+			team: "DEV",
+			number: 4773,
+			slug: "slug",
+		});
+		expect(parseBranchName("bug/CS-42-stale-cache").issueId).toBe("CS-42");
+	});
+
+	it("parses spike/<TEAM>-<N>-slug branches (DEV-4777)", () => {
+		// `spike` is a sanctioned Linear type label for time-boxed
+		// investigation branches; same first-class treatment as `bug`.
+		expect(parseBranchName("spike/DEV-100-evaluate-options")).toEqual({
+			branch: "spike/DEV-100-evaluate-options",
+			issueId: "DEV-100",
+			team: "DEV",
+			number: 100,
+			slug: "evaluate-options",
+		});
+		expect(parseBranchName("spike/ALL-7-perf").issueId).toBe("ALL-7");
+	});
+
 	it("rejects team keys longer than 4 chars (regex limit)", () => {
 		expect(parseBranchName("feature/INFRA-1").issueId).toBeNull();
 	});
