@@ -354,11 +354,19 @@ function renderHeader(fields: HeaderField[]): string {
  *
  * `identifier` (the JSON key) → `id` (the column header). `status` and
  * `owner` are natural-language aliases for `state` and `assignee`.
+ *
+ * `prioritylabel` / `projectmilestone` are the raw JSON-field spellings a
+ * script author might reach for; they map to the `priority` / `milestone`
+ * column keys so the list formatter accepts the same names the
+ * single-resource formatter does (`ISSUE_SUMMARY_SYNONYMS`) — keeping the
+ * two surfaces in sync.
  */
 const ISSUE_LIST_SYNONYMS: Record<string, string> = {
 	identifier: "id",
 	status: "state",
 	owner: "assignee",
+	prioritylabel: "priority",
+	projectmilestone: "milestone",
 };
 
 /**

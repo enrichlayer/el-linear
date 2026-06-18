@@ -925,6 +925,30 @@ describe("--format summary --fields projection (DEV-4750)", () => {
 			expect(out).not.toContain("ASSIGNEE");
 		});
 
+		it("accepts JSON-field synonyms (prioritylabel → priority, projectmilestone → milestone)", () => {
+			// Parity with the single-resource formatter's ISSUE_SUMMARY_SYNONYMS:
+			// the raw JSON-field spellings resolve to the same columns the
+			// canonical `priority` / `milestone` names do.
+			const rows = [
+				{
+					identifier: "DEV-9",
+					title: "Synonym parity",
+					priorityLabel: "High",
+					projectMilestone: { name: "M1" },
+				},
+			];
+			const out = formatIssueList(rows, [
+				"identifier",
+				"prioritylabel",
+				"projectmilestone",
+			]);
+			expect(out).toMatch(/ID\s+PRIORITY\s+MILESTONE/);
+			expect(out).toContain("High");
+			expect(out).toContain("M1");
+			// No unprojectable warning — both names resolved.
+			expect(drainSummaryFieldWarnings()).toHaveLength(0);
+		});
+
 		it("preserves user-requested column order", () => {
 			const out = formatIssueList(issues, ["project", "identifier", "title"]);
 			// PROJECT column should come first.
