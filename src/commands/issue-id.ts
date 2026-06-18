@@ -25,17 +25,20 @@ import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
 // elsewhere in the workspace. Any addition here is the single point of
 // truth that all skills rely on.
 //
-// Accepted prefixes (DEV-4660 mirrors tools-repo DEV-4417):
+// Accepted prefixes (DEV-4777 adds bug/spike; DEV-4660 added codex; both
+// mirror tools-repo DEV-4417):
 //   feature | fix | chore | refactor | dev   — SOP-canonical + Linear-CLI direct
+//   bug | spike                              — sanctioned Linear type labels
 //   codex                                    — Codex-authored branches (codex/<TEAM>-<N>-slug)
-// New authoring surfaces (Codex, future agent prefixes) get first-class issue
-// detection so commit guards, MR descriptions, and session handoff don't go
-// dark on a branch a human wouldn't even notice was prefixed differently.
+// New authoring surfaces (Codex, future agent prefixes) and sanctioned Linear
+// type labels (bug, spike) get first-class issue detection so commit guards,
+// MR descriptions, and session handoff don't go dark on a branch a human
+// wouldn't even notice was prefixed differently.
 //
 // Mirror of cli/el-git/src/commands/context.ts:BRANCH_RE in the
 // vertical-int/tools repo. If you change one, change the other.
 const BRANCH_RE =
-	/^(?:feature|fix|chore|refactor|dev|codex)[-/]([A-Z]{2,4})-(\d+)(?:[-/](.*))?$/i;
+	/^(?:feature|fix|chore|refactor|bug|spike|dev|codex)[-/]([A-Z]{2,4})-(\d+)(?:[-/](.*))?$/i;
 
 interface ParsedBranch {
 	branch: string;
