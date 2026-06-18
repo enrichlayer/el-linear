@@ -4,6 +4,13 @@ All notable changes to `@enrichlayer/el-linear` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.26.0](https://github.com/enrichlayer/el-linear/compare/v1.25.0...v1.26.0) (2026-06-18)
+
+
+### Features
+
+* **search:** emit relation_candidates confirmation prompt (DEV-4494) ([#168](https://github.com/enrichlayer/el-linear/issues/168)) ([69e5415](https://github.com/enrichlayer/el-linear/commit/69e54158dae2bd452e8eea7d1a02140d779d28cd))
+
 ## [1.25.0](https://github.com/enrichlayer/el-linear/compare/v1.24.0...v1.25.0) (2026-06-18)
 
 
