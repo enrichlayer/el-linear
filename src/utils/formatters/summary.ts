@@ -134,6 +134,142 @@ interface ColumnDef<T> {
 	extract: (row: T) => string;
 }
 
+/**
+ * Per-resource projection lookup used by `--fields` on `--format summary`
+ * (DEV-4750). `selectColumns` matches each user-requested name against the
+ * `defaults` set first (by case-insensitive header **or** synonym map),
+ * then against the `extras` map for additional projectable columns.
+ *
+ * Unknown names fall through into `unprojectable[]` so the caller can warn
+ * deterministically (e.g. `--fields project,foo` on a resource where `foo`
+ * has no column definition).
+ */
+interface ColumnProjection<T> {
+	/** Default column set rendered when `--fields` is not provided. */
+	defaults: ColumnDef<T>[];
+	/** Optional projectable columns, keyed by lowercased canonical name. */
+	extras?: Record<string, ColumnDef<T>>;
+	/**
+	 * Map of user-requested names → canonical names. Lets a request for
+	 * `id` resolve to `ID`, `status` to `STATE`, `name` to `NAME`, etc.
+	 * Keys and values are lowercased.
+	 */
+	synonyms?: Record<string, string>;
+}
+
+/**
+ * Select the ordered column set for a `--fields` request. Returns
+ * `{ columns, unprojectable }` so the caller can render and warn.
+ *
+ * Resolution order per requested name (case-insensitive):
+ *
+ * 1. Synonym lookup (`status` → `state`, `id` → `identifier`).
+ * 2. Match against a `defaults` column header.
+ * 3. Match against an `extras` entry.
+ * 4. Otherwise → `unprojectable`.
+ *
+ * The returned columns preserve the order the user requested. This is the
+ * contract: `--fields project,identifier,title` renders `PROJECT  ID  TITLE`.
+ */
+function selectColumns<T>(
+	projection: ColumnProjection<T>,
+	requested: string[],
+): { columns: ColumnDef<T>[]; unprojectable: string[] } {
+	const columns: ColumnDef<T>[] = [];
+	const unprojectable: string[] = [];
+	const synonyms = projection.synonyms ?? {};
+	const extras = projection.extras ?? {};
+	// Build a lowercased default-header lookup once.
+	const defaultByHeader = new Map<string, ColumnDef<T>>();
+	for (const col of projection.defaults) {
+		defaultByHeader.set(col.header.toLowerCase(), col);
+	}
+	for (const raw of requested) {
+		const name = raw.trim().toLowerCase();
+		if (!name) continue;
+		const canonical = synonyms[name] ?? name;
+		const fromDefaults = defaultByHeader.get(canonical);
+		if (fromDefaults) {
+			columns.push(fromDefaults);
+			continue;
+		}
+		const fromExtras = extras[canonical];
+		if (fromExtras) {
+			columns.push(fromExtras);
+			continue;
+		}
+		unprojectable.push(raw);
+	}
+	return { columns, unprojectable };
+}
+
+/**
+ * Filter the single-resource HeaderField list by user-requested field
+ * names (DEV-4750). Matches each requested name against the field's
+ * lowercased label and an optional synonym map. Unknown names are
+ * reported in `unprojectable[]`.
+ *
+ * Order of the returned fields preserves the user's request order. The
+ * implicit headline (identifier line for issues, name for projects) is
+ * the caller's responsibility — `--fields` only filters the labelled
+ * key/value block beneath it.
+ */
+function selectHeaderFields(
+	defaults: HeaderField[],
+	requested: string[],
+	synonyms: Record<string, string> = {},
+): { fields: HeaderField[]; unprojectable: string[] } {
+	const byLabel = new Map<string, HeaderField>();
+	for (const f of defaults) {
+		byLabel.set(f.label.toLowerCase(), f);
+	}
+	const fields: HeaderField[] = [];
+	const unprojectable: string[] = [];
+	for (const raw of requested) {
+		const name = raw.trim().toLowerCase();
+		if (!name) continue;
+		const canonical = synonyms[name] ?? name;
+		const match = byLabel.get(canonical);
+		if (match) {
+			fields.push(match);
+		} else {
+			unprojectable.push(raw);
+		}
+	}
+	return { fields, unprojectable };
+}
+
+/**
+ * Module-level sink for unprojectable `--fields` names surfaced from the
+ * summary formatters. The output dispatcher (`outputSuccess` in
+ * `utils/output.ts`) drains this between renders and forwards them to
+ * `outputWarning` so they ride out on the next JSON envelope's
+ * `_warnings`. Kept here rather than in output.ts so the formatter stays
+ * the single source of truth on what is and isn't projectable.
+ *
+ * Internal — consumers should call `drainSummaryFieldWarnings()`.
+ */
+const summaryFieldWarnings: string[] = [];
+
+function recordUnprojectable(resource: string, names: string[]): void {
+	if (names.length === 0) return;
+	summaryFieldWarnings.push(
+		`fields_unprojectable: --format summary on ${resource} does not project ${names.join(", ")}; ` +
+			`use --format json --fields ${names.join(",")} or omit the field(s).`,
+	);
+}
+
+/**
+ * Drain the formatter-level `_warnings` buffer. Returns the collected
+ * warnings and resets the queue. Called by `outputSuccess` after every
+ * summary render to surface unprojectable-field hints to scripts.
+ */
+export function drainSummaryFieldWarnings(): string[] {
+	const out = [...summaryFieldWarnings];
+	summaryFieldWarnings.length = 0;
+	return out;
+}
+
 interface RenderTableOptions {
 	/** Returned verbatim when `rows` is empty (e.g. "(no issues)"). */
 	emptyText: string;
@@ -209,22 +345,104 @@ function renderHeader(fields: HeaderField[]): string {
 
 // ── issues ─────────────────────────────────────────────────────
 
-export function formatIssueSummary(issue: Record<string, unknown>): string {
-	const identifier = s(issue.identifier);
-	const title = s(issue.title);
-	const headerLine = `${identifier}  ${title}`;
+/**
+ * Map a user-requested field name → the canonical lookup key used by
+ * `selectColumns` for the issues *list* formatter. Canonical keys are
+ * the lowercased column header (`id`, `title`, `state`, `assignee`)
+ * for defaults; extras are looked up by their key in
+ * `ISSUE_LIST_EXTRAS`.
+ *
+ * `identifier` (the JSON key) → `id` (the column header). `status` and
+ * `owner` are natural-language aliases for `state` and `assignee`.
+ *
+ * `prioritylabel` / `projectmilestone` are the raw JSON-field spellings a
+ * script author might reach for; they map to the `priority` / `milestone`
+ * column keys so the list formatter accepts the same names the
+ * single-resource formatter does (`ISSUE_SUMMARY_SYNONYMS`) — keeping the
+ * two surfaces in sync.
+ */
+const ISSUE_LIST_SYNONYMS: Record<string, string> = {
+	identifier: "id",
+	status: "state",
+	owner: "assignee",
+	prioritylabel: "priority",
+	projectmilestone: "milestone",
+};
 
-	const fields: HeaderField[] = [
+/**
+ * Map a user-requested field name → the canonical lowercased label used
+ * by the single-resource issue formatter. Single-resource labels are
+ * full words (`Created`, `Updated`), so `createdat` / `updatedat`
+ * (JSON-field spellings) need mapping. `status` / `owner` carry over.
+ */
+const ISSUE_SUMMARY_SYNONYMS: Record<string, string> = {
+	status: "state",
+	owner: "assignee",
+	createdat: "created",
+	updatedat: "updated",
+	prioritylabel: "priority",
+	projectmilestone: "milestone",
+};
+
+function buildIssueHeaderFields(issue: Record<string, unknown>): HeaderField[] {
+	return [
 		{ label: "State", value: getName(issue.state) },
 		{ label: "Assignee", value: getName(issue.assignee) },
 		{ label: "Project", value: getName(issue.project) },
 		{ label: "Cycle", value: getName(issue.cycle) },
 		{ label: "Milestone", value: getName(issue.projectMilestone) },
 		{ label: "Labels", value: joinLabels(issue.labels) },
+		{ label: "Priority", value: s(issue.priorityLabel ?? issue.priority) },
+		{ label: "Estimate", value: s(issue.estimate) },
+		{ label: "Created", value: s(issue.createdAt) },
+		{ label: "Updated", value: s(issue.updatedAt) },
 		{ label: "URL", value: s(issue.url) },
 	];
+}
 
-	const header = renderHeader(fields);
+export function formatIssueSummary(
+	issue: Record<string, unknown>,
+	fields?: string[],
+): string {
+	const identifier = s(issue.identifier);
+	const title = s(issue.title);
+	const headerLine = `${identifier}  ${title}`;
+
+	const allFields = buildIssueHeaderFields(issue);
+	let headerFields: HeaderField[];
+	if (fields && fields.length > 0) {
+		// `identifier` / `title` make up the implicit headline above —
+		// strip them from the user's request so a `--fields title,state`
+		// doesn't try to render "Title:" inside the labelled block.
+		const filtered = fields.filter((f) => {
+			const name = f.trim().toLowerCase();
+			return name !== "identifier" && name !== "id" && name !== "title";
+		});
+		const selected = selectHeaderFields(
+			allFields,
+			filtered,
+			ISSUE_SUMMARY_SYNONYMS,
+		);
+		recordUnprojectable("issue", selected.unprojectable);
+		headerFields = selected.fields;
+	} else {
+		// Default issue summary historically omits priority / estimate / dates —
+		// keep that surface stable unless the caller asks for those columns.
+		const defaultLabels = new Set([
+			"state",
+			"assignee",
+			"project",
+			"cycle",
+			"milestone",
+			"labels",
+			"url",
+		]);
+		headerFields = allFields.filter((f) =>
+			defaultLabels.has(f.label.toLowerCase()),
+		);
+	}
+
+	const header = renderHeader(headerFields);
 	const body = clipDescription(issue.description as string | undefined);
 
 	const parts = [headerLine, header];
@@ -232,51 +450,142 @@ export function formatIssueSummary(issue: Record<string, unknown>): string {
 	return parts.filter((p) => p !== "").join("\n");
 }
 
-export function formatIssueList(issues: unknown[]): string {
-	return renderTable(
-		issues.map((raw) => asObj(raw) ?? {}),
-		[
-			{ header: "ID", minWidth: 2, extract: (i) => s(i.identifier) },
+const ISSUE_LIST_DEFAULTS: ColumnDef<Record<string, unknown>>[] = [
+	{ header: "ID", minWidth: 2, extract: (i) => s(i.identifier) },
+	{
+		header: "TITLE",
+		minWidth: 5,
+		maxWidth: TITLE_TRUNC,
+		extract: (i) => s(i.title),
+	},
+	{ header: "STATE", minWidth: 5, extract: (i) => getName(i.state) },
+	{
+		header: "ASSIGNEE",
+		minWidth: 8,
+		extract: (i) => getName(i.assignee),
+	},
+];
+
+const ISSUE_LIST_EXTRAS: Record<string, ColumnDef<Record<string, unknown>>> = {
+	project: {
+		header: "PROJECT",
+		minWidth: 7,
+		maxWidth: 40,
+		extract: (i) => getName(i.project),
+	},
+	cycle: {
+		header: "CYCLE",
+		minWidth: 5,
+		maxWidth: 20,
+		extract: (i) => getName(i.cycle),
+	},
+	milestone: {
+		header: "MILESTONE",
+		minWidth: 9,
+		maxWidth: 30,
+		extract: (i) => getName(i.projectMilestone),
+	},
+	labels: {
+		header: "LABELS",
+		minWidth: 6,
+		maxWidth: 40,
+		extract: (i) => joinLabels(i.labels),
+	},
+	url: {
+		header: "URL",
+		minWidth: 3,
+		maxWidth: 60,
+		extract: (i) => s(i.url),
+	},
+	priority: {
+		header: "PRIORITY",
+		minWidth: 8,
+		extract: (i) => s(i.priorityLabel ?? i.priority),
+	},
+	estimate: {
+		header: "ESTIMATE",
+		minWidth: 8,
+		extract: (i) => s(i.estimate),
+	},
+	createdat: {
+		header: "CREATED",
+		minWidth: 7,
+		extract: (i) => s(i.createdAt).slice(0, 10),
+	},
+	updatedat: {
+		header: "UPDATED",
+		minWidth: 7,
+		extract: (i) => s(i.updatedAt).slice(0, 10),
+	},
+	team: {
+		header: "TEAM",
+		minWidth: 4,
+		extract: (i) => {
+			// issues carry team as either {key, name} or a bare key string.
+			const team = i.team;
+			const o = asObj(team);
+			if (o) return s(o.key ?? o.name);
+			return s(team);
+		},
+	},
+};
+
+export function formatIssueList(issues: unknown[], fields?: string[]): string {
+	const rows = issues.map((raw) => asObj(raw) ?? {});
+	let columns = ISSUE_LIST_DEFAULTS;
+	if (fields && fields.length > 0) {
+		const selected = selectColumns(
 			{
-				header: "TITLE",
-				minWidth: 5,
-				maxWidth: TITLE_TRUNC,
-				extract: (i) => s(i.title),
+				defaults: ISSUE_LIST_DEFAULTS,
+				extras: ISSUE_LIST_EXTRAS,
+				synonyms: ISSUE_LIST_SYNONYMS,
 			},
-			{ header: "STATE", minWidth: 5, extract: (i) => getName(i.state) },
-			{
-				header: "ASSIGNEE",
-				minWidth: 8,
-				extract: (i) => getName(i.assignee),
-			},
-		],
-		{ emptyText: "(no issues)", itemNoun: "issue" },
-	);
+			fields,
+		);
+		recordUnprojectable("issues list", selected.unprojectable);
+		// If every requested name was unprojectable, fall back to defaults
+		// so the user still sees something useful with the warning attached.
+		columns =
+			selected.columns.length > 0 ? selected.columns : ISSUE_LIST_DEFAULTS;
+	}
+	return renderTable(rows, columns, {
+		emptyText: "(no issues)",
+		itemNoun: "issue",
+	});
 }
 
 // ── projects ───────────────────────────────────────────────────
 
-export function formatProjectSummary(project: Record<string, unknown>): string {
+const PROJECT_SYNONYMS: Record<string, string> = {
+	targetdate: "target",
+};
+
+function joinTeamKeys(value: unknown): string {
+	if (!Array.isArray(value) || value.length === 0) return "";
+	return value
+		.map((team) => {
+			const o = asObj(team);
+			return o ? s(o.key ?? o.name) : s(team);
+		})
+		.filter((x) => x && x !== "—")
+		.join(", ");
+}
+
+export function formatProjectSummary(
+	project: Record<string, unknown>,
+	fields?: string[],
+): string {
 	const name = s(project.name);
 	const headerLine = name;
 
-	const teams = (() => {
-		const t = project.teams;
-		if (!Array.isArray(t) || t.length === 0) return "";
-		return t
-			.map((team) => {
-				const o = asObj(team);
-				return o ? s(o.key ?? o.name) : s(team);
-			})
-			.join(", ");
-	})();
+	const teams = joinTeamKeys(project.teams);
 
 	const progress =
 		typeof project.progress === "number"
 			? `${Math.round((project.progress as number) * 100)}%`
 			: "";
 
-	const fields: HeaderField[] = [
+	const allFields: HeaderField[] = [
 		{ label: "State", value: s(project.state) },
 		{ label: "Lead", value: getName(project.lead) },
 		{ label: "Teams", value: teams },
@@ -284,7 +593,21 @@ export function formatProjectSummary(project: Record<string, unknown>): string {
 		{ label: "Progress", value: progress },
 		{ label: "URL", value: s(project.url) },
 	];
-	const header = renderHeader(fields);
+
+	let headerFields: HeaderField[];
+	if (fields && fields.length > 0) {
+		// `name` is the implicit headline above; drop it from the request
+		// so a user passing `--fields name,teams` doesn't render "Name:" in
+		// the labelled block beneath.
+		const filtered = fields.filter((f) => f.trim().toLowerCase() !== "name");
+		const selected = selectHeaderFields(allFields, filtered, PROJECT_SYNONYMS);
+		recordUnprojectable("project", selected.unprojectable);
+		headerFields = selected.fields;
+	} else {
+		headerFields = allFields;
+	}
+
+	const header = renderHeader(headerFields);
 	const body = clipDescription(project.description as string | undefined);
 
 	const parts = [headerLine, header];
@@ -296,22 +619,69 @@ function pct(value: unknown): string {
 	return typeof value === "number" ? `${Math.round(value * 100)}%` : "—";
 }
 
-export function formatProjectList(projects: unknown[]): string {
-	return renderTable(
-		projects.map((raw) => asObj(raw) ?? {}),
-		[
+const PROJECT_LIST_DEFAULTS: ColumnDef<Record<string, unknown>>[] = [
+	{
+		header: "NAME",
+		minWidth: 4,
+		maxWidth: TITLE_TRUNC,
+		extract: (p) => s(p.name),
+	},
+	{ header: "STATE", minWidth: 5, extract: (p) => s(p.state) },
+	{ header: "PROGRESS", minWidth: 8, extract: (p) => pct(p.progress) },
+	{ header: "LEAD", minWidth: 4, extract: (p) => getName(p.lead) },
+];
+
+const PROJECT_LIST_EXTRAS: Record<
+	string,
+	ColumnDef<Record<string, unknown>>
+> = {
+	teams: {
+		header: "TEAMS",
+		minWidth: 5,
+		maxWidth: 30,
+		extract: (p) => joinTeamKeys(p.teams),
+	},
+	target: {
+		header: "TARGET",
+		minWidth: 6,
+		extract: (p) => s(p.targetDate),
+	},
+	url: {
+		header: "URL",
+		minWidth: 3,
+		maxWidth: 60,
+		extract: (p) => s(p.url),
+	},
+	updatedat: {
+		header: "UPDATED",
+		minWidth: 7,
+		extract: (p) => s(p.updatedAt).slice(0, 10),
+	},
+};
+
+export function formatProjectList(
+	projects: unknown[],
+	fields?: string[],
+): string {
+	const rows = projects.map((raw) => asObj(raw) ?? {});
+	let columns = PROJECT_LIST_DEFAULTS;
+	if (fields && fields.length > 0) {
+		const selected = selectColumns(
 			{
-				header: "NAME",
-				minWidth: 4,
-				maxWidth: TITLE_TRUNC,
-				extract: (p) => s(p.name),
+				defaults: PROJECT_LIST_DEFAULTS,
+				extras: PROJECT_LIST_EXTRAS,
+				synonyms: PROJECT_SYNONYMS,
 			},
-			{ header: "STATE", minWidth: 5, extract: (p) => s(p.state) },
-			{ header: "PROGRESS", minWidth: 8, extract: (p) => pct(p.progress) },
-			{ header: "LEAD", minWidth: 4, extract: (p) => getName(p.lead) },
-		],
-		{ emptyText: "(no projects)", itemNoun: "project" },
-	);
+			fields,
+		);
+		recordUnprojectable("projects list", selected.unprojectable);
+		columns =
+			selected.columns.length > 0 ? selected.columns : PROJECT_LIST_DEFAULTS;
+	}
+	return renderTable(rows, columns, {
+		emptyText: "(no projects)",
+		itemNoun: "project",
+	});
 }
 
 // ── comments ───────────────────────────────────────────────────
@@ -854,11 +1224,35 @@ function inferListKind(items: unknown[]): ResourceKind {
 }
 
 /**
- * Central dispatch: given a resource kind and payload, return the
- * formatted string. The payload for list kinds may be either the raw
- * array or a `{ data: [...] }` envelope — both are handled.
+ * Resources where `--fields` projection is wired through to the formatter
+ * (DEV-4750). For any other kind, passing `--fields` records a
+ * deterministic unprojectable warning and renders the default summary.
  */
-export function dispatch(kind: ResourceKind, payload: unknown): string {
+const FIELDS_PROJECTED: ReadonlySet<ResourceKind> = new Set([
+	"issue",
+	"issue-list",
+	"project",
+	"project-list",
+]);
+
+/**
+ * Central dispatch: given a resource kind, payload, and optional `--fields`
+ * projection list, return the formatted string. The payload for list kinds
+ * may be either the raw array or a `{ data: [...] }` envelope — both are
+ * handled.
+ *
+ * `fields` is forwarded to formatters that wire `--fields` projection
+ * (issues, projects). For other kinds it's an opt-out path: we emit a
+ * `fields_unprojectable` warning and render defaults. The eventual
+ * direction is to wire projection through every list formatter; until
+ * then the warning gives consumers a deterministic signal instead of
+ * silently ignoring their flag.
+ */
+export function dispatch(
+	kind: ResourceKind,
+	payload: unknown,
+	fields?: string[],
+): string {
 	const obj = asObj(payload);
 	const list = (() => {
 		if (Array.isArray(payload)) return payload;
@@ -866,15 +1260,26 @@ export function dispatch(kind: ResourceKind, payload: unknown): string {
 		return null;
 	})();
 
+	const hasFields = Boolean(fields && fields.length > 0);
+	if (hasFields && !FIELDS_PROJECTED.has(kind)) {
+		recordUnprojectable(
+			kind === "generic" ? "this resource" : kind,
+			fields as string[],
+		);
+	}
+
 	switch (kind) {
 		case "issue":
-			return formatIssueSummary((obj ?? {}) as Record<string, unknown>);
+			return formatIssueSummary((obj ?? {}) as Record<string, unknown>, fields);
 		case "issue-list":
-			return formatIssueList(list ?? []);
+			return formatIssueList(list ?? [], fields);
 		case "project":
-			return formatProjectSummary((obj ?? {}) as Record<string, unknown>);
+			return formatProjectSummary(
+				(obj ?? {}) as Record<string, unknown>,
+				fields,
+			);
 		case "project-list":
-			return formatProjectList(list ?? []);
+			return formatProjectList(list ?? [], fields);
 		case "comment":
 			return formatCommentSummary((obj ?? {}) as Record<string, unknown>);
 		case "comment-list":

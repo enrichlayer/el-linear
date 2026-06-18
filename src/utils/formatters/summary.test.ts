@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
 	dispatch,
+	drainSummaryFieldWarnings,
 	formatAttachmentList,
 	formatCommentList,
 	formatCommentSummary,
@@ -861,5 +862,324 @@ describe("formatLine (--quiet write confirmation, DEV-4650)", () => {
 		const out = formatLine({ foo: "bar", n: 1 });
 		expect(out).toBe('{"foo":"bar","n":1}');
 		expect(out).not.toContain("\n");
+	});
+});
+
+// DEV-4750: --format summary honors --fields by extending / replacing the
+// default column set on list formatters and the labelled field block on
+// single-resource formatters. Unprojectable names are surfaced via
+// drainSummaryFieldWarnings so the caller can attach them to the
+// envelope's `_warnings` (JSON) or print them inline (summary).
+describe("--format summary --fields projection (DEV-4750)", () => {
+	beforeEach(() => {
+		// Reset the module-level warning sink between tests so the previous
+		// test's unprojectable list doesn't leak.
+		drainSummaryFieldWarnings();
+	});
+
+	describe("issues list", () => {
+		const issues = [
+			{
+				identifier: "DEV-1",
+				title: "First",
+				state: { name: "Todo" },
+				assignee: { name: "Alice" },
+				project: { name: "Auth Refactor" },
+				cycle: { name: "Cycle 5" },
+				labels: [{ name: "feature" }, { name: "backend" }],
+				url: "https://linear.app/acme/issue/DEV-1",
+				createdAt: "2026-01-15T10:00:00Z",
+			},
+			{
+				identifier: "DEV-2",
+				title: "Second",
+				state: { name: "Done" },
+				assignee: null,
+				project: null,
+				labels: [],
+				url: "https://linear.app/acme/issue/DEV-2",
+			},
+		];
+
+		it("renders defaults when fields is undefined", () => {
+			const out = formatIssueList(issues);
+			expect(out).toMatch(/ID\s+TITLE\s+STATE\s+ASSIGNEE/);
+			expect(out).not.toContain("PROJECT");
+		});
+
+		it("extends defaults with project column when requested", () => {
+			const out = formatIssueList(issues, [
+				"identifier",
+				"title",
+				"state",
+				"assignee",
+				"project",
+			]);
+			expect(out).toMatch(/ID\s+TITLE\s+STATE\s+ASSIGNEE\s+PROJECT/);
+			expect(out).toContain("Auth Refactor");
+		});
+
+		it("accepts synonyms (id → identifier, status → state)", () => {
+			const out = formatIssueList(issues, ["id", "title", "status"]);
+			expect(out).toMatch(/ID\s+TITLE\s+STATE/);
+			expect(out).not.toContain("ASSIGNEE");
+		});
+
+		it("accepts JSON-field synonyms (prioritylabel → priority, projectmilestone → milestone)", () => {
+			// Parity with the single-resource formatter's ISSUE_SUMMARY_SYNONYMS:
+			// the raw JSON-field spellings resolve to the same columns the
+			// canonical `priority` / `milestone` names do.
+			const rows = [
+				{
+					identifier: "DEV-9",
+					title: "Synonym parity",
+					priorityLabel: "High",
+					projectMilestone: { name: "M1" },
+				},
+			];
+			const out = formatIssueList(rows, [
+				"identifier",
+				"prioritylabel",
+				"projectmilestone",
+			]);
+			expect(out).toMatch(/ID\s+PRIORITY\s+MILESTONE/);
+			expect(out).toContain("High");
+			expect(out).toContain("M1");
+			// No unprojectable warning — both names resolved.
+			expect(drainSummaryFieldWarnings()).toHaveLength(0);
+		});
+
+		it("preserves user-requested column order", () => {
+			const out = formatIssueList(issues, ["project", "identifier", "title"]);
+			// PROJECT column should come first.
+			const headerLine = out.split("\n")[0];
+			expect(headerLine.indexOf("PROJECT")).toBeLessThan(
+				headerLine.indexOf("ID"),
+			);
+			expect(headerLine.indexOf("ID")).toBeLessThan(
+				headerLine.indexOf("TITLE"),
+			);
+		});
+
+		it("renders only the requested columns (replacement semantics)", () => {
+			const out = formatIssueList(issues, ["identifier", "project"]);
+			expect(out).toMatch(/ID\s+PROJECT/);
+			expect(out).not.toContain("TITLE");
+			expect(out).not.toContain("STATE");
+			expect(out).not.toContain("ASSIGNEE");
+		});
+
+		it("records unprojectable names without dropping the rest", () => {
+			const out = formatIssueList(issues, [
+				"identifier",
+				"title",
+				"nonexistent_thing",
+			]);
+			expect(out).toMatch(/ID\s+TITLE/);
+			const warnings = drainSummaryFieldWarnings();
+			expect(warnings.length).toBeGreaterThan(0);
+			expect(warnings[0]).toContain("fields_unprojectable");
+			expect(warnings[0]).toContain("nonexistent_thing");
+		});
+
+		it("falls back to defaults when every requested name is unprojectable", () => {
+			const out = formatIssueList(issues, ["foo", "bar"]);
+			// We still render something useful + emit a warning.
+			expect(out).toMatch(/ID\s+TITLE\s+STATE\s+ASSIGNEE/);
+			const warnings = drainSummaryFieldWarnings();
+			expect(warnings[0]).toContain("foo");
+			expect(warnings[0]).toContain("bar");
+		});
+
+		it("projects nested labels as a comma-joined column", () => {
+			const out = formatIssueList(issues, ["identifier", "title", "labels"]);
+			expect(out).toContain("LABELS");
+			expect(out).toContain("feature, backend");
+		});
+	});
+
+	describe("projects list", () => {
+		const projects = [
+			{
+				name: "Auth Refactor",
+				state: "started",
+				progress: 0.65,
+				lead: { name: "Alice" },
+				teams: [
+					{ id: "t1", key: "DEV", name: "Dev" },
+					{ id: "t2", key: "FE", name: "Frontend" },
+				],
+				targetDate: "2026-03-01",
+				url: "https://linear.app/acme/project/auth-refactor",
+			},
+			{
+				name: "Pricing v2",
+				state: "backlog",
+				progress: 0,
+				lead: null,
+				teams: [],
+			},
+		];
+
+		it("renders defaults when fields is undefined", () => {
+			const out = formatProjectList(projects);
+			expect(out).toMatch(/NAME\s+STATE\s+PROGRESS\s+LEAD/);
+			expect(out).not.toContain("TEAMS");
+		});
+
+		it("extends defaults with teams column when requested", () => {
+			const out = formatProjectList(projects, [
+				"name",
+				"state",
+				"progress",
+				"lead",
+				"teams",
+			]);
+			expect(out).toMatch(/NAME\s+STATE\s+PROGRESS\s+LEAD\s+TEAMS/);
+			expect(out).toContain("DEV, FE");
+		});
+
+		it("renders teams as `—` when project has none", () => {
+			const out = formatProjectList(projects, ["name", "teams"]);
+			expect(out).toContain("Auth Refactor");
+			expect(out).toContain("Pricing v2");
+			// The DEV, FE row sits in the data; Pricing v2's empty teams
+			// renders as the em-dash via the standard truncate path.
+			expect(out).toContain("DEV, FE");
+		});
+
+		it("accepts targetDate / target synonyms", () => {
+			const targetOut = formatProjectList(projects, ["name", "target"]);
+			expect(targetOut).toContain("2026-03-01");
+			const synonymOut = formatProjectList(projects, ["name", "targetdate"]);
+			expect(synonymOut).toContain("2026-03-01");
+		});
+	});
+
+	describe("issue summary (single resource)", () => {
+		const issue = {
+			identifier: "DEV-1",
+			title: "Fix login bug",
+			state: { name: "In Progress" },
+			assignee: { name: "Alice" },
+			project: { name: "Auth Refactor" },
+			labels: [{ name: "bug" }],
+			url: "https://linear.app/acme/issue/DEV-1",
+			priorityLabel: "High",
+		};
+
+		it("renders the default labelled block when fields is undefined", () => {
+			const out = formatIssueSummary(issue);
+			expect(out).toContain("State:");
+			expect(out).toContain("Assignee:");
+			expect(out).toContain("Project:");
+			// Default omits Priority unless requested.
+			expect(out).not.toContain("Priority:");
+		});
+
+		it("filters the labelled block to the requested fields", () => {
+			const out = formatIssueSummary(issue, ["state", "project"]);
+			expect(out).toContain("State:");
+			expect(out).toContain("Project:");
+			expect(out).not.toContain("Assignee:");
+			expect(out).not.toContain("Labels:");
+			expect(out).not.toContain("URL:");
+		});
+
+		it("surfaces extended fields (priority) when explicitly requested", () => {
+			const out = formatIssueSummary(issue, ["state", "priority"]);
+			expect(out).toContain("Priority:");
+			expect(out).toContain("High");
+		});
+
+		it("always keeps the headline (identifier + title) regardless of fields", () => {
+			const out = formatIssueSummary(issue, ["state"]);
+			expect(out).toContain("DEV-1");
+			expect(out).toContain("Fix login bug");
+		});
+
+		it("records unprojectable names on the summary path", () => {
+			formatIssueSummary(issue, ["state", "doesnotexist"]);
+			const warnings = drainSummaryFieldWarnings();
+			expect(warnings[0]).toContain("doesnotexist");
+		});
+	});
+
+	describe("project summary (single resource)", () => {
+		const project = {
+			name: "Auth Refactor",
+			state: "started",
+			lead: { name: "Alice" },
+			progress: 0.65,
+			teams: [{ key: "DEV", name: "Dev" }],
+			targetDate: "2026-03-01",
+			url: "https://linear.app/acme/project/auth-refactor",
+		};
+
+		it("filters the labelled block to the requested fields", () => {
+			const out = formatProjectSummary(project, ["state", "teams"]);
+			expect(out).toContain("Auth Refactor"); // headline preserved
+			expect(out).toContain("State:");
+			expect(out).toContain("Teams:");
+			expect(out).not.toContain("Lead:");
+			expect(out).not.toContain("Progress:");
+		});
+	});
+
+	describe("dispatch composition", () => {
+		it("forwards fields to issue-list formatter", () => {
+			const out = dispatch(
+				"issue-list",
+				{
+					data: [
+						{
+							identifier: "DEV-1",
+							title: "x",
+							state: { name: "Todo" },
+							assignee: { name: "A" },
+							project: { name: "P" },
+						},
+					],
+				},
+				["identifier", "title", "project"],
+			);
+			expect(out).toMatch(/ID\s+TITLE\s+PROJECT/);
+		});
+
+		it("forwards fields to project-list formatter", () => {
+			const out = dispatch(
+				"project-list",
+				{
+					data: [
+						{
+							name: "P1",
+							state: "started",
+							progress: 0.5,
+							lead: { name: "A" },
+							teams: [{ key: "DEV" }],
+						},
+					],
+				},
+				["name", "teams"],
+			);
+			expect(out).toMatch(/NAME\s+TEAMS/);
+			expect(out).toContain("DEV");
+		});
+
+		it("records unprojectable warning for kinds without projection wiring", () => {
+			// `cycle-list` doesn't wire --fields yet; passing fields records
+			// a fields_unprojectable warning and renders the defaults.
+			const out = dispatch(
+				"cycle-list",
+				{
+					data: [{ number: 1, name: "Cycle 1", isActive: true, progress: 0.5 }],
+				},
+				["custom_column"],
+			);
+			expect(out).toMatch(/#/);
+			const warnings = drainSummaryFieldWarnings();
+			expect(warnings[0]).toContain("fields_unprojectable");
+			expect(warnings[0]).toContain("custom_column");
+		});
 	});
 });

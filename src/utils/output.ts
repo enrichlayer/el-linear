@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import {
 	dispatch as dispatchSummary,
+	drainSummaryFieldWarnings,
 	formatLine,
 	inferKindFromPayload,
 	type ResourceKind,
@@ -72,9 +73,18 @@ function filterFields(obj: unknown, fields: string[]): unknown {
  * the heuristic would fall through to "generic", silently breaking
  * the issue-list table. Caching the pre-filter shape keeps the
  * formatter accurate regardless of how the user pared the JSON.
+ *
+ * `fields` (when set) is forwarded to the formatter as a projection
+ * request (DEV-4750). For summary the JSON-shape `filterFields` is a
+ * no-op — the formatter needs the full object to extract nested values
+ * like `project.name` or `teams[].key`.
  */
-function emitSummary(payload: unknown, kind: ResourceKind): void {
-	logger.info(dispatchSummary(kind, payload));
+function emitSummary(
+	payload: unknown,
+	kind: ResourceKind,
+	fields: string[] | null,
+): void {
+	logger.info(dispatchSummary(kind, payload, fields ?? undefined));
 }
 
 /**
@@ -228,18 +238,7 @@ export function outputSingle<T>(
 }
 
 export function outputSuccess(data: unknown): void {
-	const warnings = drainWarnings();
-	let output: unknown;
-	if (
-		warnings.length > 0 &&
-		data !== null &&
-		typeof data === "object" &&
-		!Array.isArray(data)
-	) {
-		output = { ...(data as Record<string, unknown>), _warnings: warnings };
-	} else {
-		output = data;
-	}
+	let output: unknown = data;
 	// Capture the kind from the original envelope shape BEFORE --raw /
 	// --fields stripping. Otherwise filtering away signature fields (e.g.
 	// `title` on an issue) breaks shape inference and the summary
@@ -250,9 +249,13 @@ export function outputSuccess(data: unknown): void {
 	// precedence on the write path and independent of --raw / --fields / --jq
 	// (those reshape the payload the flag exists to avoid) — so we emit from
 	// the full pre-filter object, otherwise `--fields identifier` would strip
-	// the state/url formatLine needs and break shape inference.
+	// the state/url formatLine needs and break shape inference. Drain any
+	// buffered warnings to preserve pre-DEV-4750 behavior (they were
+	// silently dropped on the quiet path; the contract is "one line only").
 	if (quietMode) {
 		logger.info(formatLine(output));
+		drainWarnings();
+		drainSummaryFieldWarnings();
 		return;
 	}
 	// --raw: unwrap { data: [...] } to just the array
@@ -267,8 +270,12 @@ export function outputSuccess(data: unknown): void {
 			output = obj.data;
 		}
 	}
-	// --fields: filter object keys (applies to array items or flat objects)
-	if (fieldsFilter) {
+	// --fields on summary format is a *projection request* — the formatter
+	// consumes it directly to extend/replace its column set (DEV-4750). The
+	// JSON-shape `filterFields` step would otherwise strip nested values
+	// (project.name, teams[].key) the formatter needs to render. Skip the
+	// JSON filter when summary is active and let the formatter do the work.
+	if (fieldsFilter && outputFormat !== "summary") {
 		if (Array.isArray(output)) {
 			output = filterFields(output, fieldsFilter);
 		} else if (output !== null && typeof output === "object") {
@@ -281,12 +288,37 @@ export function outputSuccess(data: unknown): void {
 		}
 	}
 
-	// summary format takes the post-raw / post-fields value and renders it
-	// as a human-readable block. We bypass the jq path because jq is a
-	// JSON-shape filter — it doesn't compose with text output.
+	// summary format takes the post-raw value and renders it as a
+	// human-readable block. We bypass the jq path because jq is a
+	// JSON-shape filter — it doesn't compose with text output. The
+	// formatter records any unprojectable `--fields` names; we drain
+	// them after dispatch and append them as `_warnings: …` lines so
+	// the signal is visible without breaking the text contract.
 	if (outputFormat === "summary") {
-		emitSummary(output, inferredKind);
+		emitSummary(output, inferredKind, fieldsFilter);
+		const summaryWarnings = [
+			...drainWarnings(),
+			...drainSummaryFieldWarnings(),
+		];
+		if (summaryWarnings.length > 0) {
+			for (const w of summaryWarnings) {
+				logger.info(`_warnings: ${w}`);
+			}
+		}
 		return;
+	}
+
+	// JSON path: drain buffered warnings (including any
+	// fields_unprojectable surfaced from a prior dispatch) and embed
+	// them as `_warnings` on the envelope.
+	const warnings = [...drainWarnings(), ...drainSummaryFieldWarnings()];
+	if (
+		warnings.length > 0 &&
+		output !== null &&
+		typeof output === "object" &&
+		!Array.isArray(output)
+	) {
+		output = { ...(output as Record<string, unknown>), _warnings: warnings };
 	}
 
 	if (jqFilter) {
