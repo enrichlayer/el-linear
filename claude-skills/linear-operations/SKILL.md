@@ -181,6 +181,45 @@ el-linear issues search "keywords from proposed title" --include-closed 2>&1
    el-linear issues create "Title" --team ENG --related-to "ENG-456,ENG-789" ... 2>&1
    ```
 
+### Surfacing relation candidates — explicit user reply required ([DEV-4494](https://linear.app/verticalint/issue/DEV-4494/))
+
+When `el-linear issues search` (or the cross-resource `search`) returns rows
+carrying issue identifiers, the JSON envelope embeds a `_warnings` line
+starting with `relation_candidates:` that enumerates the candidate IDs and
+asks the user to reply with which ones to link. Treat it as a hard step,
+not a hint:
+
+1. **Surface the IDs to the user verbatim.** Show the `relation_candidates:`
+   line (or paraphrase it preserving every ID + the example reply). Do **not**
+   skip ahead to `issues relate`.
+2. **Wait for an explicit reply naming the IDs to link** (e.g. `link DEV-2134
+   and ALL-672`) or a clear skip (`no links`).
+3. **Only the user-named IDs** go into the next `el-linear issues relate
+   <source> --related-to "<ids>"` call. Never pass IDs the user did not name,
+   even if your earlier search obviously surfaced them.
+
+Why this matters: Claude Code's auto-mode permission classifier blocks
+`issues relate --related-to "<ids>"` when the IDs were *agent-inferred*
+(came from your own search) rather than *user-specified* (typed by the human),
+because each listed peer is a write target. Routing the IDs through an
+explicit human reply converts them from agent-inferred → user-specified;
+the existing search step (above) stays intact; auto-mode's guard is not
+weakened. The fix is the loop shape, not the guard.
+
+Anti-patterns:
+
+- **Calling `issues relate` directly off your own search output** — even if
+  the IDs are real and the candidates look obvious, this is the exact path
+  the auto-mode guard refuses.
+- **Splitting one relate call into N single-ID calls** to "look smaller" —
+  same provenance problem, same block, just multiplied.
+- **Asking the user a yes/no question** ("Should I link these?") instead of
+  having them name the IDs — yes answers stay agent-inferred, the reply
+  must carry the IDs to convert them to user-specified.
+
+If `--include-closed` search returns no matches, no `relation_candidates:`
+warning is emitted (nothing to confirm) and the flow proceeds normally.
+
 ### Viewing existing relations
 
 ```bash

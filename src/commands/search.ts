@@ -9,7 +9,12 @@ import type {
 } from "../queries/search-types.js";
 import type { GraphQLService } from "../utils/graphql-service.js";
 import { createGraphQLService } from "../utils/graphql-service.js";
-import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
+import {
+	handleAsyncCommand,
+	outputSuccess,
+	outputWarning,
+} from "../utils/output.js";
+import { buildRelationCandidatePrompt } from "../utils/relation-candidate-prompt.js";
 import { getRootOpts } from "../utils/root-opts.js";
 import { parsePositiveInt } from "../utils/validators.js";
 
@@ -251,9 +256,19 @@ export function setupSearchCommands(program: Command): void {
 						data = [...data, ...searchTemplates(templates, query)];
 					}
 
+					const finalData = data.slice(0, limit);
+					// DEV-4494: when results carry issue identifiers, nudge the
+					// caller to surface them to the user verbatim and have the
+					// user name which IDs to link via `issues relate`. Keeps
+					// agent-inferred IDs out of relate calls without weakening
+					// auto-mode's guard.
+					const relationPrompt = buildRelationCandidatePrompt(finalData);
+					if (relationPrompt) {
+						outputWarning(relationPrompt);
+					}
 					outputSuccess({
-						data: data.slice(0, limit),
-						meta: { count: Math.min(data.length, limit), query },
+						data: finalData,
+						meta: { count: finalData.length, query },
 					});
 				},
 			),
