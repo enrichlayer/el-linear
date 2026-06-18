@@ -186,17 +186,15 @@ el-linear issues search "keywords from proposed title" --include-closed 2>&1
 When `el-linear issues search` (or the cross-resource `search`) returns rows
 carrying issue identifiers, the JSON envelope embeds a `_warnings` line
 starting with `relation_candidates:` that enumerates the candidate IDs and
-asks the user to reply with which ones to link. Treat it as a hard step,
-not a hint:
+asks the user to reply with which ones to link, and states the skip phrase.
 
-1. **Surface the IDs to the user verbatim.** Show the `relation_candidates:`
-   line (or paraphrase it preserving every ID + the example reply). Do **not**
-   skip ahead to `issues relate`.
-2. **Wait for an explicit reply naming the IDs to link** (e.g. `link DEV-2134
-   and ALL-672`) or a clear skip (`no links`).
-3. **Only the user-named IDs** go into the next `el-linear issues relate
-   <source> --related-to "<ids>"` call. Never pass IDs the user did not name,
-   even if your earlier search obviously surfaced them.
+That warning is the authoritative instruction — surface it to the user
+verbatim and follow it literally: **do not call `el-linear issues relate`
+until the user replies naming the IDs to link.** Only user-named IDs go into
+the `issues relate <source> --related-to "<ids>"` call — never pass an ID the
+user did not name, even one your own search obviously surfaced. The CLI emits
+the full procedure (every candidate ID, the example reply, the skip phrase) in
+that one line, so follow it rather than re-deriving or paraphrasing it away.
 
 Why this matters: Claude Code's auto-mode permission classifier blocks
 `issues relate --related-to "<ids>"` when the IDs were *agent-inferred*
