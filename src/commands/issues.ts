@@ -56,6 +56,7 @@ import {
 	outputWarning,
 	warnIfTruncated,
 } from "../utils/output.js";
+import { buildRelationCandidatePrompt } from "../utils/relation-candidate-prompt.js";
 import { getRootOpts } from "../utils/root-opts.js";
 import {
 	formatCsv,
@@ -401,6 +402,15 @@ async function handleSearchIssues(
 		);
 	}
 	warnIfTruncated(result.length, limit);
+	// DEV-4494: surface the explicit "reply with the IDs to link" prompt
+	// whenever an issue search returns candidate identifiers. The
+	// `linear-operations` skill consumes this `_warnings` line and shows it
+	// to the user so any subsequent `issues relate` call is user-specified
+	// rather than agent-inferred (which auto-mode blocks).
+	const relationPrompt = buildRelationCandidatePrompt(result);
+	if (relationPrompt) {
+		outputWarning(relationPrompt);
+	}
 	outputIssues(result, options.format, options.fields, { query });
 }
 

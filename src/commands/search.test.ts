@@ -13,6 +13,7 @@ const mockGraphQLService = {
 const mockCreateGraphQLService = vi.fn().mockReturnValue(mockGraphQLService);
 
 const mockOutputSuccess = vi.fn();
+const mockOutputWarning = vi.fn();
 const mockResolveTeam = vi.fn().mockImplementation((v: string) => v);
 
 vi.mock("../utils/graphql-service.js", () => ({
@@ -23,6 +24,7 @@ vi.mock("../utils/output.js", async () => ({
 	handleAsyncCommand: (await import("../__tests__/test-helpers.js"))
 		.passthroughHandleAsyncCommand,
 	outputSuccess: mockOutputSuccess,
+	outputWarning: mockOutputWarning,
 }));
 
 vi.mock("../config/resolver.js", () => ({
@@ -117,6 +119,51 @@ describe("search", () => {
 		await expect(
 			runCommand(program, ["search", "test", "--type", "bogus"]),
 		).rejects.toThrow('Invalid type "bogus"');
+	});
+
+	it("emits relation_candidates warning when issue rows are returned (DEV-4494)", async () => {
+		mockRawRequest.mockResolvedValue({
+			semanticSearch: {
+				results: [
+					{
+						type: "issue",
+						issue: { id: "i1", identifier: "DEV-2134", title: "a" },
+					},
+					{
+						type: "issue",
+						issue: { id: "i2", identifier: "FIN-77", title: "b" },
+					},
+				],
+			},
+		});
+		await runCommand(program, ["search", "auth"]);
+		expect(mockOutputWarning).toHaveBeenCalledWith(
+			expect.stringMatching(/^relation_candidates:/),
+		);
+		const warning = mockOutputWarning.mock.calls[0][0] as string;
+		expect(warning).toContain("DEV-2134");
+		expect(warning).toContain("FIN-77");
+		expect(warning).toContain("reply with the IDs you want linked");
+	});
+
+	it("no relation_candidates warning when results carry no identifiers (DEV-4494)", async () => {
+		mockRawRequest.mockResolvedValue({
+			semanticSearch: {
+				results: [
+					{
+						type: "project",
+						project: { id: "p1", name: "Auth", state: "started" },
+					},
+					{
+						type: "document",
+						document: { id: "d1", title: "RFC" },
+					},
+				],
+			},
+		});
+		await runCommand(program, ["search", "auth"]);
+		// No identifiers in the result set → nothing to confirm
+		expect(mockOutputWarning).not.toHaveBeenCalled();
 	});
 
 	it("drops rows with unknown type before reaching the transformer (DEV-4068 T1)", async () => {

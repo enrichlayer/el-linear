@@ -54,9 +54,14 @@ vi.mock("../utils/linear-service.js", () => ({
 }));
 
 const mockOutputSuccess = vi.fn();
+const mockOutputWarning = vi.fn();
 vi.mock("../utils/output.js", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../utils/output.js")>();
-	return { ...actual, outputSuccess: mockOutputSuccess };
+	return {
+		...actual,
+		outputSuccess: mockOutputSuccess,
+		outputWarning: mockOutputWarning,
+	};
 });
 
 const mockResolveTeam = vi
@@ -331,6 +336,53 @@ describe("issues commands", () => {
 
 			expect(mockGetIssueById).toHaveBeenCalledWith("DEV-123");
 			expect(mockOutputSuccess).toHaveBeenCalledWith(issueData);
+		});
+	});
+
+	describe("issues search — relation_candidates warning (DEV-4494)", () => {
+		// Composition lock for the primary dup-check path: handleSearchIssues
+		// → buildRelationCandidatePrompt → outputWarning. search.test.ts covers
+		// the cross-resource `search` command; this covers the `issues search`
+		// wiring the linear-operations skill actually calls. (cycle-1 nit 1.)
+		it("emits the relation_candidates warning when the search returns issue rows", async () => {
+			mockSearchIssues.mockResolvedValue([
+				{ id: "i1", identifier: "DEV-2134", title: "a" },
+				{ id: "i2", identifier: "FIN-77", title: "b" },
+			]);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, ["issues", "search", "auth"]);
+
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringMatching(/^relation_candidates:/),
+			);
+			const relationCall = mockOutputWarning.mock.calls.find(
+				(c) =>
+					typeof c[0] === "string" && c[0].startsWith("relation_candidates:"),
+			);
+			expect(relationCall?.[0]).toContain("DEV-2134");
+			expect(relationCall?.[0]).toContain("FIN-77");
+			expect(relationCall?.[0]).toContain("reply with the IDs you want linked");
+		});
+
+		it("emits no relation_candidates warning when the search returns nothing", async () => {
+			mockSearchIssues.mockResolvedValue([]);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			// --include-closed suppresses the unrelated terminal-states warning so
+			// the assertion isolates the relation-candidate path.
+			await runCommand(program, [
+				"issues",
+				"search",
+				"nope",
+				"--include-closed",
+			]);
+
+			expect(mockOutputWarning).not.toHaveBeenCalledWith(
+				expect.stringMatching(/^relation_candidates:/),
+			);
 		});
 	});
 

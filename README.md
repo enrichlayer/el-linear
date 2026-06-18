@@ -766,6 +766,39 @@ existing markdown or Slack links, angle-bracket autolinks, and bare URLs, so
 it's safe to pipe documents that already contain a mix of formatted links
 and bare identifiers.
 
+## Relation-candidate confirmation prompt
+
+When `el-linear search` or `el-linear issues search` returns results that
+carry issue identifiers (the "I just ran a duplicate/related check" shape),
+the JSON envelope embeds a structured `_warnings` line:
+
+```json
+{
+  "data": [{ "identifier": "DEV-2134", "title": "…" }, /* … */],
+  "meta": { "count": 3, "query": "auth flicker" },
+  "_warnings": [
+    "relation_candidates: Found 3 candidate related issues (DEV-2134, FIN-77, ALL-672). To link them as related: reply with the IDs you want linked (e.g. \"link DEV-2134 and FIN-77\"). To skip linking: reply \"no links\". (Agent-inferred IDs are blocked by auto-mode; user-named IDs pass — DEV-4494.)"
+  ]
+}
+```
+
+Why it exists: Claude Code's auto-mode permission classifier blocks
+`el-linear issues relate <source> --related-to "<ids>"` calls when the IDs
+were inferred by the agent from its own search rather than typed by the
+user — because each listed peer is a write target. The prompt nudges the
+caller (typically an agent driving the `linear-operations` skill) to surface
+the candidates verbatim and have the user name which IDs to link; any
+subsequent `issues relate` call then carries user-specified IDs and the
+guard passes naturally. **The fix is not to weaken the guard** — see
+[DEV-4494](https://linear.app/verticalint/issue/DEV-4494/) for the original
+incident (PYT-213 triage, 2026-06-04).
+
+The `relation_candidates:` prefix is a stable token so a skill or harness
+can grep for it without parsing free-form prose, matching the existing
+`results_truncated:` convention. Non-issue rows (projects, documents,
+initiatives) are ignored; the warning is suppressed when no result carries
+an identifier.
+
 ## Use with Claude Code
 
 el-linear ships a Claude Code skill at `claude-skills/linear-operations/SKILL.md`.
