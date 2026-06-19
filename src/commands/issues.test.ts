@@ -674,6 +674,152 @@ describe("issues commands", () => {
 		});
 	});
 
+	// DEV-4823: create-time duplicate-detection gate. These assert the real
+	// composition (search → score → block), not just the pure scorer
+	// (covered in duplicate-detection.test.ts) — per the "test compositions"
+	// rule, the gate's value is that the matched candidate actually prevents
+	// the create POST.
+	describe("issues create — duplicate-detection gate (DEV-4823)", () => {
+		// Field validation must be ON for the gate to run, so every create call
+		// here supplies valid fields and we vary only the dup-related inputs.
+		const validArgs = [
+			"--team",
+			"DEV",
+			"--labels",
+			"feature",
+			"--description",
+			"A sufficiently long description that passes the length check.",
+			"--assignee",
+			"bob",
+			"--project",
+			"Infrastructure",
+		];
+		const enabledConfig = {
+			...baseConfig,
+			validation: { enabled: true },
+		};
+		const dupeCandidate = {
+			id: "dup-id",
+			identifier: "DEV-4818",
+			title:
+				"Migrate scripts/ generators and tests from .mjs to TypeScript (run via tsx)",
+			state: { id: "s", name: "Todo" },
+			assignee: { id: "u", name: "Yury" },
+		};
+
+		it("blocks creation when a high-similarity issue exists", async () => {
+			mockLoadConfig.mockReturnValue(enabledConfig);
+			mockSearchIssues.mockResolvedValue([dupeCandidate]);
+			mockCreateIssue.mockResolvedValue({ id: "x" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Migrate remaining scripts/*.mjs to TypeScript (52 files)",
+				...validArgs,
+			]);
+
+			// Searched the salient keywords, including closed issues.
+			expect(mockSearchIssues).toHaveBeenCalledWith(
+				expect.objectContaining({ excludeTerminalStates: false }),
+			);
+			// Blocked: the candidate prevented the POST.
+			expect(mockCreateIssue).not.toHaveBeenCalled();
+			expect(process.exit).toHaveBeenCalledWith(1);
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("DEV-4818"),
+			);
+		});
+
+		it("--allow-duplicate bypasses the gate and creates", async () => {
+			mockLoadConfig.mockReturnValue(enabledConfig);
+			mockSearchIssues.mockResolvedValue([dupeCandidate]);
+			mockCreateIssue.mockResolvedValue({ id: "x", identifier: "DEV-999" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Migrate remaining scripts/*.mjs to TypeScript (52 files)",
+				...validArgs,
+				"--allow-duplicate",
+			]);
+
+			// Gate skipped entirely — no search, issue created.
+			expect(mockSearchIssues).not.toHaveBeenCalled();
+			expect(mockCreateIssue).toHaveBeenCalled();
+		});
+
+		it("validation.duplicateDetection:false disables only the gate", async () => {
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				validation: { enabled: true, duplicateDetection: false },
+			});
+			mockSearchIssues.mockResolvedValue([dupeCandidate]);
+			mockCreateIssue.mockResolvedValue({ id: "x", identifier: "DEV-999" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Migrate remaining scripts/*.mjs to TypeScript (52 files)",
+				...validArgs,
+			]);
+
+			expect(mockSearchIssues).not.toHaveBeenCalled();
+			expect(mockCreateIssue).toHaveBeenCalled();
+		});
+
+		it("does not block on a merely same-domain candidate", async () => {
+			mockLoadConfig.mockReturnValue(enabledConfig);
+			mockSearchIssues.mockResolvedValue([
+				{
+					id: "sd",
+					identifier: "DEV-1159",
+					title: "Migrate support guide from Notion",
+					state: { id: "s", name: "Done" },
+				},
+			]);
+			mockCreateIssue.mockResolvedValue({ id: "x", identifier: "DEV-999" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Migrate remaining scripts/*.mjs to TypeScript (52 files)",
+				...validArgs,
+			]);
+
+			expect(mockSearchIssues).toHaveBeenCalled();
+			expect(mockCreateIssue).toHaveBeenCalled();
+		});
+
+		it("proceeds (best-effort) when the dup search itself fails", async () => {
+			mockLoadConfig.mockReturnValue(enabledConfig);
+			mockSearchIssues.mockRejectedValue(new Error("network down"));
+			mockCreateIssue.mockResolvedValue({ id: "x", identifier: "DEV-999" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Migrate remaining scripts/*.mjs to TypeScript (52 files)",
+				...validArgs,
+			]);
+
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringContaining("Duplicate-detection search failed"),
+			);
+			expect(mockCreateIssue).toHaveBeenCalled();
+		});
+	});
+
 	// DEV-4293: `create --checkout` must record branch.<branch>.linearIssue.
 	// Runs against a real temp git repo (the checkout + git config writes are
 	// real); chdir is restored in afterEach so it can't leak into other tests.
