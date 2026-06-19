@@ -69,6 +69,18 @@ describe("tokenizeTitle", () => {
 		expect(t).toContain("telemetry");
 		expect(t.has("el")).toBe(false);
 	});
+
+	// DEV-4830: an all-boilerplate title tokenizes to the empty set, so the gate
+	// fails open (no candidates) — same posture as the non-Latin-script case.
+	// Pinned so a future stopword-set edit can't silently turn it into a fire.
+	it("tokenizes an all-boilerplate title to the empty set (fails open)", () => {
+		expect(tokenizeTitle("Update el-git command flag").size).toBe(0);
+		expect(
+			scoreDuplicateCandidates("Update el-git command flag", [
+				issue("X", "Update el-git command flag"),
+			]),
+		).toEqual([]);
+	});
 });
 
 describe("jaccardSimilarity", () => {
