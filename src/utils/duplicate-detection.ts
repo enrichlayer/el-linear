@@ -73,6 +73,42 @@ const STOPWORDS = new Set([
 	"without",
 ]);
 
+/**
+ * Tool-name and CLI-scaffolding boilerplate — DEV-4830. These tokens appear in
+ * a large fraction of this workspace's titles ("Add --X flag to el-linear
+ * issues create", "… el-git pipeline watch", …) regardless of topic, so they
+ * inflate Jaccard between genuinely-distinct issues that merely touch the same
+ * command surface. A retrospective precision sweep over 288 DEV titles showed
+ * the "Add --X flag to el-linear issues create" family scoring 0.45–0.60 (all
+ * false positives) purely on shared boilerplate; dropping these tokens pushes
+ * that family to 0.17–0.25 while every genuine duplicate stayed ≥ 0.35 (the
+ * motivating DEV-4816↔DEV-4818 pair holds at 0.40). Total fires 29 → 19.
+ *
+ * Note the el-tool prefixes split on `-` first, so `el-linear` arrives here as
+ * `el` + `linear`; both fragments are listed. Topical words that happen to be
+ * tool *suffixes* (`research`, `telemetry`, `audit`, …) are deliberately NOT
+ * listed — they carry real signal in non-tool issues.
+ */
+const BOILERPLATE_STOPWORDS = new Set([
+	"el",
+	"cli",
+	"command",
+	"commands",
+	"subcommand",
+	"flag",
+	"flags",
+	"option",
+	"options",
+	"arg",
+	"args",
+	"linear",
+	"git",
+	"issue",
+	"issues",
+	"create",
+	"update",
+]);
+
 /** A scored duplicate candidate, ready to print in the block. */
 export interface DuplicateCandidate {
 	identifier: string;
@@ -87,9 +123,10 @@ export interface DuplicateCandidate {
  * Tokenize a title into a set of salient lowercase keywords.
  *
  * Splits on any run of non-alphanumeric characters (so `scripts/*.mjs` →
- * `scripts`, `mjs`), lowercases, then drops stopwords, pure numbers
- * (`52 files` → `files`), and single-character tokens. Returns a Set so
- * downstream set algebra is direct.
+ * `scripts`, `mjs`), lowercases, then drops English stopwords, tool-name /
+ * CLI-scaffolding boilerplate (DEV-4830), pure numbers (`52 files` → `files`),
+ * and single-character tokens. Returns a Set so downstream set algebra is
+ * direct.
  *
  * Scope: ASCII `[a-z0-9]` only — a title written entirely in a non-Latin
  * script (Cyrillic, CJK, …) tokenizes to the empty set, so the gate fails
@@ -100,7 +137,13 @@ export function tokenizeTitle(title: string): Set<string> {
 	const tokens = title
 		.toLowerCase()
 		.split(/[^a-z0-9]+/)
-		.filter((t) => t.length >= 2 && !STOPWORDS.has(t) && !/^\d+$/.test(t));
+		.filter(
+			(t) =>
+				t.length >= 2 &&
+				!STOPWORDS.has(t) &&
+				!BOILERPLATE_STOPWORDS.has(t) &&
+				!/^\d+$/.test(t),
+		);
 	return new Set(tokens);
 }
 
