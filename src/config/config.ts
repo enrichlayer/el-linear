@@ -103,6 +103,18 @@ export interface ElLinearConfig {
 		 * built-in overrides (DEV-4084).
 		 */
 		teamTypeLabels?: Record<string, string[]>;
+		/**
+		 * Toggle the create-time duplicate-detection gate (DEV-4823). Defaults
+		 * to `true` when validation is enabled. Set `false` to keep field
+		 * validation (labels/description/…) while turning off the dup search.
+		 */
+		duplicateDetection?: boolean;
+		/**
+		 * Jaccard title-similarity threshold (0–1) above which a pre-existing
+		 * issue is treated as a duplicate and blocks creation. Defaults to
+		 * `DEFAULT_DUPLICATE_THRESHOLD` (0.35). Lower = more aggressive.
+		 */
+		duplicateThreshold?: number;
 	};
 	/**
 	 * Optional override for the Linear workspace URL key (the part after

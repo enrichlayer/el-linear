@@ -31,6 +31,12 @@ import type {
 	LinearIssue,
 	LinearPriority,
 } from "../types/linear.js";
+import {
+	DEFAULT_DUPLICATE_THRESHOLD,
+	formatDuplicateBlock,
+	scoreDuplicateCandidates,
+	tokenizeTitle,
+} from "../utils/duplicate-detection.js";
 import { createFileService } from "../utils/file-service.js";
 import { applyFooter } from "../utils/footer.js";
 import { createGraphQLAttachmentsService } from "../utils/graphql-attachments-service.js";
@@ -646,6 +652,75 @@ function buildDescriptionWithAttachments(
 	return description;
 }
 
+/**
+ * DEV-4823: create-time duplicate-detection gate. Searches the title's
+ * salient keywords (including closed issues), scores candidates by Jaccard
+ * title-overlap, and throws — listing the matches — when one is at/above the
+ * configured similarity threshold.
+ *
+ * Bypassed by `--allow-duplicate`, `--skip-validation`, and
+ * `config.validation.duplicateDetection: false` / `validation.enabled: false`.
+ * The search itself is best-effort: a network/API failure warns and proceeds
+ * rather than blocking legitimate issue creation on infra trouble.
+ */
+async function enforceNoDuplicateIssue(
+	title: string,
+	options: OptionValues,
+	issuesService: GraphQLIssuesService,
+): Promise<void> {
+	if (options.allowDuplicate || options.skipValidation) {
+		return;
+	}
+	const validation = loadConfig().validation;
+	// Master switch (validation.enabled) defaults on; the dup-specific toggle
+	// defaults on too, so the gate is active out of the box.
+	if (
+		validation?.enabled === false ||
+		validation?.duplicateDetection === false
+	) {
+		return;
+	}
+
+	const keywords = [...tokenizeTitle(title)];
+	if (keywords.length === 0) {
+		// Nothing distinctive to search on — can't meaningfully detect a dupe.
+		return;
+	}
+	const threshold =
+		typeof validation?.duplicateThreshold === "number"
+			? validation.duplicateThreshold
+			: DEFAULT_DUPLICATE_THRESHOLD;
+
+	let candidates: Awaited<ReturnType<typeof issuesService.searchIssues>>;
+	try {
+		candidates = await issuesService.searchIssues({
+			query: keywords.join(" "),
+			// Include Done/Canceled — a closed-out duplicate is still a duplicate
+			// (the motivating DEV-4816 was already Canceled).
+			excludeTerminalStates: false,
+			limit: 25,
+		});
+	} catch (err) {
+		outputWarning(
+			`Duplicate-detection search failed (${
+				err instanceof Error ? err.message : String(err)
+			}); proceeding without the dup check. Pass --allow-duplicate to silence.`,
+		);
+		return;
+	}
+
+	if (!Array.isArray(candidates) || candidates.length === 0) {
+		return;
+	}
+
+	const matches = scoreDuplicateCandidates(title, candidates, threshold);
+	if (matches.length === 0) {
+		return;
+	}
+
+	throw new Error(`Issue creation blocked: ${formatDuplicateBlock(matches)}`);
+}
+
 async function handleCreateIssue(
 	title: string | undefined,
 	options: OptionValues,
@@ -682,6 +757,15 @@ async function handleCreateIssue(
 
 	const { graphQLService, linearService, issuesService } =
 		await createIssuesService(rootOpts);
+
+	// DEV-4823: deterministic duplicate-detection gate. Runs before the create
+	// POST, searches the title's salient keywords (including closed issues),
+	// and throws — listing candidates — when a high-similarity issue already
+	// exists. Bypassed by --allow-duplicate and --skip-validation (it's a
+	// validation-class check). Reuses the issuesService just created.
+	if (title) {
+		await enforceNoDuplicateIssue(title, options, issuesService);
+	}
 
 	// Wrap valid issue identifiers as markdown links before creating, so the description
 	// saved on Linear has clickable refs from the start. Self-reference can't apply here
@@ -1470,7 +1554,11 @@ export function setupIssuesCommands(program: Command): void {
 		)
 		.option(
 			"--skip-validation",
-			"skip all validation (labels, description, assignee, project)",
+			"skip all validation (labels, description, assignee, project, duplicate detection)",
+		)
+		.option(
+			"--allow-duplicate",
+			"skip the duplicate-detection gate and create even if a similar issue already exists",
 		)
 		.option(
 			"--no-auto-link",

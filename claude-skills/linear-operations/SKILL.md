@@ -160,11 +160,24 @@ and outreach tracked in one place.
 
 **Search before creating. No exceptions.**
 
+> **Now enforced at the CLI ([DEV-4823](https://linear.app/verticalint/issue/DEV-4823/)).** `el-linear issues create` runs a deterministic
+> duplicate-detection gate *before* the create POST: it tokenizes the title,
+> searches the salient keywords (including closed issues), scores candidates
+> by Jaccard title-overlap, and **blocks (exit non-zero) — listing the
+> matches (id · title · state · assignee)** — when one crosses the similarity
+> threshold (default `0.35`, set `validation.duplicateThreshold` to tune). This
+> is the deterministic backstop for the manual check below — don't skip the
+> manual review just because the gate exists (it catches title-keyword dupes,
+> not semantic ones with different wording). Escape hatches: `--allow-duplicate`
+> (and `--skip-validation`, which also bypasses field validation). Disable
+> entirely with `validation.duplicateDetection: false`.
+
 ```bash
 # --include-closed is required so previously-completed duplicates surface.
 # `issues search` defaults to open states (DEV-4478); the duplicate check
 # intentionally widens to Done/Canceled because a closed-out duplicate is
-# still a duplicate.
+# still a duplicate. (`issues create` runs this same widened search itself
+# as the DEV-4823 gate — this manual step is for the semantic/judgment pass.)
 el-linear issues search "keywords from proposed title" --include-closed 2>&1
 ```
 
