@@ -698,7 +698,12 @@ async function enforceNoDuplicateIssue(
 			// Include Done/Canceled — a closed-out duplicate is still a duplicate
 			// (the motivating DEV-4816 was already Canceled).
 			excludeTerminalStates: false,
-			limit: 25,
+			// Linear ranks the full-text matches; cap the window at 50 so a real
+			// dupe on a high-traffic keyword set is unlikely to rank out of view,
+			// while keeping the single search cheap. The gate is a best-effort
+			// backstop to the manual dup check, not the sole guard — recall need
+			// not be exhaustive.
+			limit: 50,
 		});
 	} catch (err) {
 		outputWarning(
@@ -763,6 +768,11 @@ async function handleCreateIssue(
 	// and throws — listing candidates — when a high-similarity issue already
 	// exists. Bypassed by --allow-duplicate and --skip-validation (it's a
 	// validation-class check). Reuses the issuesService just created.
+	//
+	// Gap: with --from-template and no title override, `title` is undefined
+	// (Linear copies the template's title server-side), so the gate can't run
+	// — the template-resolved title isn't known client-side. Template-
+	// instantiated issues are rarer; the manual dup check still applies there.
 	if (title) {
 		await enforceNoDuplicateIssue(title, options, issuesService);
 	}

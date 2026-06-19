@@ -90,6 +90,11 @@ export interface DuplicateCandidate {
  * `scripts`, `mjs`), lowercases, then drops stopwords, pure numbers
  * (`52 files` → `files`), and single-character tokens. Returns a Set so
  * downstream set algebra is direct.
+ *
+ * Scope: ASCII `[a-z0-9]` only — a title written entirely in a non-Latin
+ * script (Cyrillic, CJK, …) tokenizes to the empty set, so the gate fails
+ * open (no candidates, never a false positive) and the manual dup check
+ * carries it. Acceptable given the workspace's title language.
  */
 export function tokenizeTitle(title: string): Set<string> {
 	const tokens = title

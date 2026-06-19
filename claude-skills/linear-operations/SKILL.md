@@ -168,9 +168,12 @@ and outreach tracked in one place.
 > threshold (default `0.35`, set `validation.duplicateThreshold` to tune). This
 > is the deterministic backstop for the manual check below — don't skip the
 > manual review just because the gate exists (it catches title-keyword dupes,
-> not semantic ones with different wording). Escape hatches: `--allow-duplicate`
-> (and `--skip-validation`, which also bypasses field validation). Disable
-> entirely with `validation.duplicateDetection: false`.
+> not semantic ones with different wording). To proceed past a flagged dupe,
+> use `--allow-duplicate` (the narrow, correct flag for this gate);
+> `--skip-validation` also bypasses it but skips all field validation too, so
+> prefer `--allow-duplicate`. Disable just the gate with
+> `validation.duplicateDetection: false` (field validation still runs);
+> `validation.enabled: false` turns off all validation.
 
 ```bash
 # --include-closed is required so previously-completed duplicates surface.
