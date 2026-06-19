@@ -4,6 +4,13 @@ All notable changes to `@enrichlayer/el-linear` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.27.0](https://github.com/enrichlayer/el-linear/compare/v1.26.0...v1.27.0) (2026-06-19)
+
+
+### Features
+
+* **issues:** add duplicate-detection gate to issues create (DEV-4823) ([#171](https://github.com/enrichlayer/el-linear/issues/171)) ([bb830f5](https://github.com/enrichlayer/el-linear/commit/bb830f5d71fef7496838741426030229bcc7bf0f))
+
 ## [1.26.0](https://github.com/enrichlayer/el-linear/compare/v1.25.0...v1.26.0) (2026-06-18)
 
 
