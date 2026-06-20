@@ -83,6 +83,26 @@ describe("formatTree", () => {
 		);
 	});
 
+	it("annotates the duplicate-typed state as terminal (DEV-4879)", () => {
+		const tree = node("DEV-1", "Root", {
+			children: [
+				node("DEV-2", "Dup one", {
+					state: { name: "Duplicate", type: "duplicate" },
+				}),
+				node("DEV-3", "In flight", {
+					state: { name: "In Progress", type: "started" },
+				}),
+			],
+		});
+		expect(formatTree(tree)).toBe(
+			[
+				"DEV-1 Root",
+				"├── DEV-2 Dup one [Duplicate]",
+				"└── DEV-3 In flight",
+			].join("\n"),
+		);
+	});
+
 	it("appends @assignee when present", () => {
 		const tree = node("DEV-1", "Root", { assignee: "Alice" });
 		expect(formatTree(tree)).toBe("DEV-1 Root (@Alice)");

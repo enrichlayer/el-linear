@@ -12,6 +12,7 @@
  */
 
 import type { IssueTreeNode } from "../queries/issue-tree.js";
+import { TERMINAL_STATE_TYPES } from "../types/linear.js";
 
 const BRANCH_TEE = "├── ";
 const BRANCH_END = "└── ";
@@ -52,7 +53,7 @@ function formatStateSuffix(state: { name: string; type: string }): string {
 	// Only annotate terminal-typed states; the renderer is otherwise
 	// state-name-agnostic so workspace-custom workflow states (e.g. "In
 	// Review") don't get a noisy suffix.
-	if (state.type === "completed" || state.type === "canceled") {
+	if (TERMINAL_STATE_TYPES.includes(state.type)) {
 		return ` [${state.name}]`;
 	}
 	return "";

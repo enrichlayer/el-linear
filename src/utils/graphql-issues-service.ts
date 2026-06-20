@@ -47,6 +47,7 @@ import type {
 import { CREATE_LABEL_MUTATION } from "../queries/labels.js";
 import type { CreateLabelResponse } from "../queries/labels-types.js";
 import type { LinearIssue, LinearPriority } from "../types/linear.js";
+import { TERMINAL_STATE_TYPES } from "../types/linear.js";
 import { toISOStringOrNow } from "./date-format.js";
 import { extractEmbeds } from "./embed-parser.js";
 import { multipleMatchesError, notFoundError } from "./error-messages.js";
@@ -97,7 +98,8 @@ export interface SearchIssueArgs {
 	/** Issue states to include (e.g. `["Todo", "In Progress"]`). */
 	status?: string[];
 	/**
-	 * Exclude terminal states (workflow type `completed` or `canceled`).
+	 * Exclude terminal states (workflow type `completed`, `canceled`, or
+	 * `duplicate` — see `TERMINAL_STATE_TYPES`).
 	 * Default `false` for back-compat at the service layer; the CLI's
 	 * `issues list` / `issues search` flip this to `true` by default
 	 * (DEV-4478) and accept `--include-closed` to opt back in. When
@@ -1585,7 +1587,7 @@ export class GraphQLIssuesService {
 			// always wins — the user already named the states they want.
 			filtered = filtered.filter(
 				(issue: LinearIssue) =>
-					issue.state?.type !== "completed" && issue.state?.type !== "canceled",
+					!TERMINAL_STATE_TYPES.includes(issue.state?.type ?? ""),
 			);
 		}
 		if (filters.labelNames && filters.labelNames.length > 0) {
@@ -1642,7 +1644,7 @@ export class GraphQLIssuesService {
 		} else if (filters.excludeTerminalStates) {
 			// Implicit terminal-state exclusion (DEV-4478). Explicit `status`
 			// always wins — the user already named the states they want.
-			filter.state = { type: { nin: ["completed", "canceled"] } };
+			filter.state = { type: { nin: [...TERMINAL_STATE_TYPES] } };
 		}
 		if (filters.labelNames && filters.labelNames.length > 0) {
 			if (filters.labelNames.length === 1) {

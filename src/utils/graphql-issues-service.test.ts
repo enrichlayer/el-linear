@@ -1055,6 +1055,61 @@ describe("GraphQLIssuesService", () => {
 		});
 	});
 
+	describe("searchIssues terminal-state exclusion (DEV-4879)", () => {
+		it("excludes completed, canceled AND duplicate states by default", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValue({ issues: { nodes: [] } });
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			await service.searchIssues({
+				teamId: undefined,
+				excludeTerminalStates: true,
+				limit: 5,
+			});
+
+			const filteredCall = rawRequest.mock.calls.find(([q]) =>
+				String(q).includes("IssueFilter"),
+			);
+			expect(filteredCall).toBeDefined();
+			const filter = (filteredCall?.[1] as { filter: Record<string, unknown> })
+				.filter;
+			// Regression: the hardcoded ["completed","canceled"] list omitted the
+			// workspace's `duplicate`-typed state, so resolved duplicates leaked
+			// into the default open-issues view.
+			expect(filter.state).toEqual({
+				type: { nin: ["completed", "canceled", "duplicate"] },
+			});
+		});
+
+		it("does not apply the terminal-state filter when excludeTerminalStates is false (--include-closed)", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValue({ issues: { nodes: [] } });
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			// A UUID assignee forces the IssueFilter query path so we can assert
+			// the *absence* of a terminal-state filter (no lookup, passes through).
+			await service.searchIssues({
+				assigneeId: "11111111-1111-4111-8111-111111111111",
+				excludeTerminalStates: false,
+				limit: 5,
+			});
+
+			const filteredCall = rawRequest.mock.calls.find(([q]) =>
+				String(q).includes("IssueFilter"),
+			);
+			expect(filteredCall).toBeDefined();
+			const filter = (filteredCall?.[1] as { filter: Record<string, unknown> })
+				.filter;
+			expect(filter.state).toBeUndefined();
+		});
+	});
+
 	describe("getIssuesByRefs (DEV-4477)", () => {
 		// Minimal node — only the fields the test logic checks. `transformIssueData`
 		// fills in defaults from missing fields, so we don't have to enumerate all.
