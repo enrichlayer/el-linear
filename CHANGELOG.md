@@ -4,6 +4,19 @@ All notable changes to `@enrichlayer/el-linear` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.28.0](https://github.com/enrichlayer/el-linear/compare/v1.27.0...v1.28.0) (2026-06-20)
+
+
+### Features
+
+* **issues:** emit dup-gate blocked/overridden telemetry events (DEV-4834) ([#174](https://github.com/enrichlayer/el-linear/issues/174)) ([18afcd3](https://github.com/enrichlayer/el-linear/commit/18afcd3d03eb9a0999125b555ff588b4516df32a))
+
+
+### Bug Fixes
+
+* **dup-detection:** stopword tool-name boilerplate to cut false positives (DEV-4830) ([#173](https://github.com/enrichlayer/el-linear/issues/173)) ([3b195b6](https://github.com/enrichlayer/el-linear/commit/3b195b6594bea38ccff3ca4bc24ac816c428a411))
+* **issues:** make gate telemetry opt-in for open-source installs (DEV-4839) ([#176](https://github.com/enrichlayer/el-linear/issues/176)) ([760b313](https://github.com/enrichlayer/el-linear/commit/760b313b737118681097e438962da2e3196a1de0))
+
 ## [1.27.0](https://github.com/enrichlayer/el-linear/compare/v1.26.0...v1.27.0) (2026-06-19)
 
 
