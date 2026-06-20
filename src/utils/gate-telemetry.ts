@@ -27,8 +27,10 @@ function defaultTelemetryDir(): string {
 	return join(homedir(), ".cache", "el-telemetry");
 }
 
-/** Resolve the ledger path that {@link emitGateEvent} *would* use (ignoring the
- * opt-in decision). Mirrors el-telemetry's `GATE_EVENTS_PATH`. */
+/** Resolve where the ledger lives — for a *reader* locating the file (mirrors
+ * el-telemetry's `GATE_EVENTS_PATH`). This is NOT the emit decision: it ignores
+ * the opt-in policy, so never write through it — `emitGateEvent` goes through
+ * {@link decideGateLedger}, which may veto writing entirely. */
 export function gateEventsPath(): string {
 	const dir = process.env.EL_TELEMETRY_DIR || defaultTelemetryDir();
 	return join(dir, "gate-events.jsonl");

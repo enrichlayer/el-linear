@@ -183,7 +183,13 @@ intended flow for the CLI.
   // the default `typeLabels` set.
   "validation": {
     "enabled": true,
-    "typeLabels": ["bug", "feature", "chore", "refactor", "spike"]
+    "typeLabels": ["bug", "feature", "chore", "refactor", "spike"],
+    // Duplicate-detection gate on `issues create` (default: on when validation
+    // is enabled). Blocks creation when a similar existing issue is found.
+    "duplicateDetection": true,
+    // Jaccard title-similarity threshold (0–1) above which an existing issue
+    // counts as a duplicate. Default 0.35. Lower = more aggressive.
+    "duplicateThreshold": 0.35
   }
 }
 ```
