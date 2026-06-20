@@ -123,13 +123,22 @@ export async function resolveAssignee(
 		}
 		return result.viewer.id;
 	}
-	// Opt-in registry resolution (DEV-4871): EL-only, env-gated on
-	// EL_IDENTITY_URL, never throws. Falls back to the bundled config
-	// (resolveMember) when unconfigured, on a miss, or on any failure — so a
-	// non-EL install and an unreachable registry both behave exactly as before.
-	// Scope note: only `--assignee` routes through the registry. `--delegate`
-	// (plain resolveMember) and the batch fast-path resolveAssigneeId stay
-	// config-only by design here — registry parity for those is a follow-up.
+	return resolveMemberWithRegistry(input);
+}
+
+/**
+ * Resolve a member identifier (alias / handle / name) to a UUID, consulting the
+ * opt-in identity registry first when configured, then the bundled config
+ * (`resolveMember`). The shared async resolution path behind `--assignee` and
+ * `--delegate` (DEV-4871 / DEV-4872).
+ *
+ * EL-only and env-gated on `EL_IDENTITY_URL`; fail-open — when unconfigured, on
+ * a miss, or on any failure it falls back to config, so a non-EL install and an
+ * unreachable registry both behave exactly as before. Never throws.
+ */
+export async function resolveMemberWithRegistry(
+	input: string,
+): Promise<string> {
 	if (isRegistryConfigured()) {
 		const viaRegistry = await resolveViaRegistry(input);
 		if (viaRegistry) {

@@ -1,3 +1,7 @@
+import {
+	isRegistryConfigured,
+	resolveViaRegistry,
+} from "../config/registry-resolve.js";
 import { resolveUserDisplayName } from "../config/resolver.js";
 import {
 	ARCHIVE_ISSUE_MUTATION,
@@ -1670,6 +1674,15 @@ export class GraphQLIssuesService {
 		if (!assigneeId || isUuid(assigneeId)) {
 			return assigneeId;
 		}
+		// Opt-in registry resolution (DEV-4872): try the identity registry first,
+		// falling back to the Linear-API user lookup below on a miss. EL-only,
+		// env-gated, fail-open — a non-EL install never reaches the network here.
+		if (isRegistryConfigured()) {
+			const viaRegistry = await resolveViaRegistry(assigneeId);
+			if (viaRegistry) {
+				return viaRegistry;
+			}
+		}
 		// A plain name (no `@`) resolves via the user lookup — same as
 		// `resolveDelegateId`. Without this, a non-config full name like
 		// "Yury Tsukerman" fell through unchanged and was sent to the
@@ -1693,6 +1706,14 @@ export class GraphQLIssuesService {
 	): Promise<string | undefined> {
 		if (!delegateId || isUuid(delegateId)) {
 			return delegateId;
+		}
+		// Opt-in registry resolution (DEV-4872): registry-first, Linear-API
+		// fallback. EL-only, env-gated, fail-open.
+		if (isRegistryConfigured()) {
+			const viaRegistry = await resolveViaRegistry(delegateId);
+			if (viaRegistry) {
+				return viaRegistry;
+			}
 		}
 		if (!delegateId.includes("@")) {
 			return this.linearService.resolveUserId(delegateId);

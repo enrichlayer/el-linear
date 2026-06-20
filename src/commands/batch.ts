@@ -2,7 +2,7 @@ import type { Command, OptionValues } from "commander";
 import {
 	resolveAssignee,
 	resolveLabels,
-	resolveMember,
+	resolveMemberWithRegistry,
 	resolveTeam,
 } from "../config/resolver.js";
 import type { LinearIssue } from "../types/linear.js";
@@ -72,7 +72,7 @@ async function resolveTargetIssues(
 				? await resolveAssignee(filters.assignee, rootOpts)
 				: undefined,
 			delegateId: filters.delegate
-				? resolveMember(filters.delegate)
+				? await resolveMemberWithRegistry(filters.delegate)
 				: undefined,
 			project: filters.project
 				? { kind: "id", id: filters.project }
