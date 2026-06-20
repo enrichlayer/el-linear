@@ -39,6 +39,7 @@ import {
 } from "../utils/duplicate-detection.js";
 import { createFileService } from "../utils/file-service.js";
 import { applyFooter } from "../utils/footer.js";
+import { emitGateEvent } from "../utils/gate-telemetry.js";
 import { createGraphQLAttachmentsService } from "../utils/graphql-attachments-service.js";
 import type {
 	ClaimIssueResult,
@@ -658,17 +659,22 @@ function buildDescriptionWithAttachments(
  * title-overlap, and throws — listing the matches — when one is at/above the
  * configured similarity threshold.
  *
- * Bypassed by `--allow-duplicate`, `--skip-validation`, and
+ * Bypassed by `--skip-validation` and
  * `config.validation.duplicateDetection: false` / `validation.enabled: false`.
- * The search itself is best-effort: a network/API failure warns and proceeds
- * rather than blocking legitimate issue creation on infra trouble.
+ * `--allow-duplicate` does NOT skip the search — the gate still runs and, on a
+ * would-fire, records an `overridden` telemetry event (DEV-4834) before
+ * proceeding, so `el-telemetry gates` can measure the override-rate. (A blocked
+ * fire records `blocked`.) `--skip-validation` is a blanket bypass and emits
+ * nothing — it's not a gate-specific override, so counting it would dilute the
+ * signal. The search itself is best-effort: a network/API failure warns and
+ * proceeds rather than blocking legitimate issue creation on infra trouble.
  */
 async function enforceNoDuplicateIssue(
 	title: string,
 	options: OptionValues,
 	issuesService: GraphQLIssuesService,
 ): Promise<void> {
-	if (options.allowDuplicate || options.skipValidation) {
+	if (options.skipValidation) {
 		return;
 	}
 	const validation = loadConfig().validation;
@@ -723,6 +729,27 @@ async function enforceNoDuplicateIssue(
 		return;
 	}
 
+	// The gate would fire. Record the decision so `el-telemetry gates` can
+	// compute override-rate (DEV-4834): `overridden` when the user passed
+	// --allow-duplicate and we proceed anyway, `blocked` when we stop creation.
+	const gateEvent = {
+		gate: "issues-create-dup",
+		topScore: matches[0].score,
+		candidateCount: matches.length,
+	} as const;
+
+	if (options.allowDuplicate) {
+		await emitGateEvent("el-linear", "issues create", {
+			...gateEvent,
+			outcome: "overridden",
+		});
+		return;
+	}
+
+	await emitGateEvent("el-linear", "issues create", {
+		...gateEvent,
+		outcome: "blocked",
+	});
 	throw new Error(`Issue creation blocked: ${formatDuplicateBlock(matches)}`);
 }
 

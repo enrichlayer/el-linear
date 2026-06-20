@@ -64,6 +64,13 @@ vi.mock("../utils/output.js", async (importOriginal) => {
 	};
 });
 
+// Mock the gate-telemetry emit so the dup-gate tests don't write to the real
+// ~/.cache/el-telemetry ledger and can assert the recorded outcome (DEV-4834).
+const mockEmitGateEvent = vi.fn();
+vi.mock("../utils/gate-telemetry.js", () => ({
+	emitGateEvent: mockEmitGateEvent,
+}));
+
 const mockResolveTeam = vi
 	.fn()
 	.mockImplementation((v: string) => `team-id-${v}`);
@@ -731,9 +738,19 @@ describe("issues commands", () => {
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
 				expect.stringContaining("DEV-4818"),
 			);
+			// DEV-4834: the blocked decision is recorded for override-rate telemetry.
+			expect(mockEmitGateEvent).toHaveBeenCalledWith(
+				"el-linear",
+				"issues create",
+				expect.objectContaining({
+					gate: "issues-create-dup",
+					outcome: "blocked",
+					candidateCount: 1,
+				}),
+			);
 		});
 
-		it("--allow-duplicate bypasses the gate and creates", async () => {
+		it("--allow-duplicate runs the gate, records an override, and creates", async () => {
 			mockLoadConfig.mockReturnValue(enabledConfig);
 			mockSearchIssues.mockResolvedValue([dupeCandidate]);
 			mockCreateIssue.mockResolvedValue({ id: "x", identifier: "DEV-999" });
@@ -748,8 +765,44 @@ describe("issues commands", () => {
 				"--allow-duplicate",
 			]);
 
-			// Gate skipped entirely — no search, issue created.
-			expect(mockSearchIssues).not.toHaveBeenCalled();
+			// DEV-4834: --allow-duplicate still searches (to detect the would-fire),
+			// records `overridden`, then proceeds to create.
+			expect(mockSearchIssues).toHaveBeenCalled();
+			expect(mockEmitGateEvent).toHaveBeenCalledWith(
+				"el-linear",
+				"issues create",
+				expect.objectContaining({
+					gate: "issues-create-dup",
+					outcome: "overridden",
+				}),
+			);
+			expect(mockCreateIssue).toHaveBeenCalled();
+		});
+
+		it("--allow-duplicate with no real match records nothing and creates", async () => {
+			mockLoadConfig.mockReturnValue(enabledConfig);
+			mockSearchIssues.mockResolvedValue([
+				{
+					id: "sd",
+					identifier: "DEV-1159",
+					title: "Migrate support guide from Notion",
+					state: { id: "s", name: "Done" },
+				},
+			]);
+			mockCreateIssue.mockResolvedValue({ id: "x", identifier: "DEV-999" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Migrate remaining scripts/*.mjs to TypeScript (52 files)",
+				...validArgs,
+				"--allow-duplicate",
+			]);
+
+			// No would-fire → no override event (override-rate counts real fires only).
+			expect(mockEmitGateEvent).not.toHaveBeenCalled();
 			expect(mockCreateIssue).toHaveBeenCalled();
 		});
 
