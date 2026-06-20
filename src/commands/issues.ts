@@ -587,6 +587,9 @@ async function resolveCreateInputs(
 
 	let subscriberIds: string[] | undefined;
 	if (options.subscriber) {
+		// --subscriber intentionally stays on the sync config-only resolveMember
+		// for now; registry parity (→ resolveMemberWithRegistry) is tracked in
+		// DEV-4880. Keep this the last config-only person-resolution entry point.
 		subscriberIds = splitList(options.subscriber).map((s: string) =>
 			resolveMember(s),
 		);
