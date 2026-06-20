@@ -247,6 +247,16 @@ A full reference with every key documented lives in [config.example.json](./conf
 UUIDs come from the Linear UI (URL bars, settings pages) or via el-linear
 itself: `el-linear teams list --raw | jq '.[] | {key, id}'`, etc.
 
+### Gate telemetry (optional)
+
+`issues create` has a duplicate-detection gate. el-linear can record each
+fire/override decision to a local JSONL file so you can measure the gate's
+**override-rate** and tell whether it's too aggressive. It is **off by default**
+and writes nothing unless you opt in (e.g. `export EL_TELEMETRY_DIR=<path>`);
+there is no server or database, and `EL_TELEMETRY_DISABLED=1` forces it off.
+Full opt-in rules, the event schema, and a `jq` reader are in
+[docs/telemetry.md](./docs/telemetry.md).
+
 ### Networking (IPv4 preference)
 
 el-linear talks only to `api.linear.app` (Cloudflare, dual-stack). On a network
