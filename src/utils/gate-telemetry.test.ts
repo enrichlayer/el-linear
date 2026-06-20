@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -89,8 +89,14 @@ describe("emitGateEvent", () => {
 		).rejects.toThrow();
 	});
 
-	it("never throws on an unwritable path", async () => {
-		process.env.EL_TELEMETRY_DIR = "/proc/nonexistent-readonly/\0bad";
+	it("never throws when the ledger dir can't be created", async () => {
+		// Point EL_TELEMETRY_DIR at a path *under a regular file* so the
+		// recursive mkdir fails fast with ENOTDIR — a deterministic,
+		// cross-platform unwritable-path simulation (a NUL-byte path can hang
+		// on some Linux fs layers; an EACCES dir is flaky under CI-as-root).
+		const blocker = join(dir, "iam-a-file");
+		await writeFile(blocker, "x", "utf8");
+		process.env.EL_TELEMETRY_DIR = join(blocker, "nested");
 		await expect(
 			emitGateEvent("el-linear", "issues create", {
 				gate: "issues-create-dup",
