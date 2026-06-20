@@ -827,6 +827,28 @@ describe("issues commands", () => {
 			expect(mockCreateIssue).toHaveBeenCalled();
 		});
 
+		it("--skip-validation bypasses the gate and emits nothing (DEV-4834)", async () => {
+			mockLoadConfig.mockReturnValue(enabledConfig);
+			mockSearchIssues.mockResolvedValue([dupeCandidate]);
+			mockCreateIssue.mockResolvedValue({ id: "x", identifier: "DEV-999" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Migrate remaining scripts/*.mjs to TypeScript (52 files)",
+				...validArgs,
+				"--skip-validation",
+			]);
+
+			// Blanket bypass: no search, no telemetry (not a gate-specific override,
+			// so it must not count toward override-rate), issue created.
+			expect(mockSearchIssues).not.toHaveBeenCalled();
+			expect(mockEmitGateEvent).not.toHaveBeenCalled();
+			expect(mockCreateIssue).toHaveBeenCalled();
+		});
+
 		it("does not block on a merely same-domain candidate", async () => {
 			mockLoadConfig.mockReturnValue(enabledConfig);
 			mockSearchIssues.mockResolvedValue([

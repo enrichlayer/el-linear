@@ -712,10 +712,16 @@ async function enforceNoDuplicateIssue(
 			limit: 50,
 		});
 	} catch (err) {
+		// The "pass --allow-duplicate" hint only makes sense when the caller
+		// hasn't already passed it (under --allow-duplicate we ran the search
+		// only to detect a would-fire for telemetry, and we proceed regardless).
+		const silenceHint = options.allowDuplicate
+			? ""
+			: " Pass --allow-duplicate to silence.";
 		outputWarning(
 			`Duplicate-detection search failed (${
 				err instanceof Error ? err.message : String(err)
-			}); proceeding without the dup check. Pass --allow-duplicate to silence.`,
+			}); proceeding without the dup check.${silenceHint}`,
 		);
 		return;
 	}
