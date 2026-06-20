@@ -48,6 +48,39 @@ describe("tokenizeTitle", () => {
 	it("returns an empty set for a title with no salient tokens", () => {
 		expect(tokenizeTitle("to the a of").size).toBe(0);
 	});
+
+	// DEV-4830: tool-name / CLI-scaffolding boilerplate is dropped so it can't
+	// inflate Jaccard between distinct issues that touch the same command.
+	it("drops tool-name and CLI-scaffolding boilerplate tokens", () => {
+		// el-linear splits to el + linear; both, plus issues/create/flag, go.
+		expect(
+			tokenizeTitle("Add --checkout flag to el-linear issues create"),
+		).toEqual(new Set(["add", "checkout"]));
+		// el-git → el + git; command/cli scaffolding dropped.
+		expect(tokenizeTitle("Standardize el-git pipeline watch command")).toEqual(
+			new Set(["standardize", "pipeline", "watch"]),
+		);
+	});
+
+	it("keeps topical words that are merely tool suffixes", () => {
+		// "research"/"telemetry" carry real signal — only the `el` prefix goes.
+		const t = tokenizeTitle("Standardize el-research and el-telemetry output");
+		expect(t).toContain("research");
+		expect(t).toContain("telemetry");
+		expect(t.has("el")).toBe(false);
+	});
+
+	// DEV-4830: an all-boilerplate title tokenizes to the empty set, so the gate
+	// fails open (no candidates) — same posture as the non-Latin-script case.
+	// Pinned so a future stopword-set edit can't silently turn it into a fire.
+	it("tokenizes an all-boilerplate title to the empty set (fails open)", () => {
+		expect(tokenizeTitle("Update el-git command flag").size).toBe(0);
+		expect(
+			scoreDuplicateCandidates("Update el-git command flag", [
+				issue("X", "Update el-git command flag"),
+			]),
+		).toEqual([]);
+	});
 });
 
 describe("jaccardSimilarity", () => {
@@ -108,6 +141,27 @@ describe("scoreDuplicateCandidates — does not false-positive on same-domain is
 
 	it("returns no matches for merely same-verb issues", () => {
 		expect(scoreDuplicateCandidates(NEW_TITLE, SAME_DOMAIN)).toEqual([]);
+	});
+
+	// DEV-4830: the "Add --X flag to el-linear issues create" family scored
+	// 0.45–0.60 on shared tool-name boilerplate alone (top false positives in
+	// the 288-title precision sweep). Boilerplate stopwording drops the real
+	// DEV-3665↔DEV-4050 pair to ~0.20 — well below the 0.35 default.
+	it("does not flag the el-linear-issues-create flag family (DEV-4830)", () => {
+		const matches = scoreDuplicateCandidates(
+			"Add --checkout flag to el-linear issues create", // DEV-3665
+			[
+				issue(
+					"DEV-4050",
+					"Add --parent flag alias for --parent-ticket on el-linear issues create",
+				),
+				issue(
+					"DEV-3347",
+					"Add --due-date flag to el-linear issues create and update commands",
+				),
+			],
+		);
+		expect(matches).toEqual([]);
 	});
 
 	// Observed on real input (Ship-Use-Refine): a different-problem el-linear
