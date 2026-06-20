@@ -127,6 +127,9 @@ export async function resolveAssignee(
 	// EL_IDENTITY_URL, never throws. Falls back to the bundled config
 	// (resolveMember) when unconfigured, on a miss, or on any failure — so a
 	// non-EL install and an unreachable registry both behave exactly as before.
+	// Scope note: only `--assignee` routes through the registry. `--delegate`
+	// (plain resolveMember) and the batch fast-path resolveAssigneeId stay
+	// config-only by design here — registry parity for those is a follow-up.
 	if (isRegistryConfigured()) {
 		const viaRegistry = await resolveViaRegistry(input);
 		if (viaRegistry) {
