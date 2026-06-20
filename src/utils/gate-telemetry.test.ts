@@ -2,7 +2,11 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { emitGateEvent, gateEventsPath } from "./gate-telemetry.js";
+import {
+	decideGateLedger,
+	emitGateEvent,
+	gateEventsPath,
+} from "./gate-telemetry.js";
 
 describe("gateEventsPath", () => {
 	const saved = process.env.EL_TELEMETRY_DIR;
@@ -24,6 +28,53 @@ describe("gateEventsPath", () => {
 	});
 });
 
+// The opt-in policy is the open-source-safety contract — exhaustively pinned.
+describe("decideGateLedger (opt-in policy)", () => {
+	const defaultDir = "/home/u/.cache/el-telemetry";
+
+	it("is OFF when disabled, regardless of everything else", () => {
+		expect(
+			decideGateLedger({
+				disabled: true,
+				explicitDir: "/explicit",
+				defaultDir,
+				defaultDirExists: true,
+			}),
+		).toBeNull();
+	});
+
+	it("is ON to an explicit EL_TELEMETRY_DIR (opt-in by destination)", () => {
+		expect(
+			decideGateLedger({
+				disabled: false,
+				explicitDir: "/explicit",
+				defaultDir,
+				defaultDirExists: false,
+			}),
+		).toBe("/explicit/gate-events.jsonl");
+	});
+
+	it("is OFF for a fresh install — no explicit dir and the default dir does not exist", () => {
+		expect(
+			decideGateLedger({
+				disabled: false,
+				defaultDir,
+				defaultDirExists: false,
+			}),
+		).toBeNull();
+	});
+
+	it("is ON when the default dir already exists (EL telemetry tooling present)", () => {
+		expect(
+			decideGateLedger({
+				disabled: false,
+				defaultDir,
+				defaultDirExists: true,
+			}),
+		).toBe(`${defaultDir}/gate-events.jsonl`);
+	});
+});
+
 describe("emitGateEvent", () => {
 	let dir: string;
 	const savedDir = process.env.EL_TELEMETRY_DIR;
@@ -31,6 +82,7 @@ describe("emitGateEvent", () => {
 
 	beforeEach(async () => {
 		dir = await mkdtemp(join(tmpdir(), "gate-tel-"));
+		// Explicit dir = opt-in, so the write path is exercised.
 		process.env.EL_TELEMETRY_DIR = dir;
 		delete process.env.EL_TELEMETRY_DISABLED;
 	});
@@ -42,7 +94,7 @@ describe("emitGateEvent", () => {
 		else process.env.EL_TELEMETRY_DISABLED = savedDisabled;
 	});
 
-	it("appends a well-formed gate event (creating the dir)", async () => {
+	it("appends a well-formed gate event when opted in (creating the dir)", async () => {
 		await emitGateEvent("el-linear", "issues create", {
 			gate: "issues-create-dup",
 			outcome: "blocked",
@@ -78,7 +130,7 @@ describe("emitGateEvent", () => {
 		expect(raw.trim().split("\n")).toHaveLength(2);
 	});
 
-	it("is a no-op when EL_TELEMETRY_DISABLED is set", async () => {
+	it("is a no-op (writes nothing) when EL_TELEMETRY_DISABLED is set", async () => {
 		process.env.EL_TELEMETRY_DISABLED = "1";
 		await emitGateEvent("el-linear", "issues create", {
 			gate: "issues-create-dup",
