@@ -13,6 +13,7 @@ import {
 	resolveAssignee,
 	resolveLabels,
 	resolveMember,
+	resolveMemberWithRegistry,
 	resolveTeam,
 } from "../config/resolver.js";
 import { resolveDefaultStatus } from "../config/status-defaults.js";
@@ -328,7 +329,7 @@ async function handleListIssues(
 				? await resolveAssignee(options.assignee, rootOpts)
 				: undefined,
 			delegateId: options.delegate
-				? resolveMember(options.delegate as string)
+				? await resolveMemberWithRegistry(options.delegate as string)
 				: undefined,
 			project: resolveProjectFlag(options.project),
 			labelNames: options.labels ? splitList(options.labels) : undefined,
@@ -388,7 +389,7 @@ async function handleSearchIssues(
 			? await resolveAssignee(options.assignee, rootOpts)
 			: undefined,
 		delegateId: options.delegate
-			? resolveMember(options.delegate as string)
+			? await resolveMemberWithRegistry(options.delegate as string)
 			: undefined,
 		project: resolveProjectFlag(options.project),
 		status: explicitStatus,
@@ -560,7 +561,7 @@ async function resolveCreateInputs(
 		? await resolveAssignee(effectiveAssignee, rootOpts)
 		: undefined;
 	const delegateId = options.delegate
-		? resolveMember(options.delegate as string)
+		? await resolveMemberWithRegistry(options.delegate as string)
 		: undefined;
 
 	let labelIds: string[] = [];
@@ -586,6 +587,9 @@ async function resolveCreateInputs(
 
 	let subscriberIds: string[] | undefined;
 	if (options.subscriber) {
+		// --subscriber intentionally stays on the sync config-only resolveMember
+		// for now; registry parity (→ resolveMemberWithRegistry) is tracked in
+		// DEV-4880. Keep this the last config-only person-resolution entry point.
 		subscriberIds = splitList(options.subscriber).map((s: string) =>
 			resolveMember(s),
 		);
@@ -1186,7 +1190,7 @@ async function handleUpdateIssue(
 	const delegateId = options.clearDelegate
 		? null
 		: options.delegate
-			? resolveMember(options.delegate as string)
+			? await resolveMemberWithRegistry(options.delegate as string)
 			: undefined;
 	const updateArgs = buildUpdateArgs(issueId, options, assigneeId, delegateId);
 	const result = await withProjectResolverEnrichment(

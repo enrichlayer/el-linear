@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { multipleMatchesError, notFoundError } from "./error-messages.js";
 
 vi.mock("@linear/sdk", () => ({
@@ -6,6 +6,22 @@ vi.mock("@linear/sdk", () => ({
 		client = { rawRequest: vi.fn() };
 	},
 }));
+
+// Opt-in identity registry (DEV-4872). Default DORMANT (isRegistryConfigured →
+// false) so every existing test keeps the config/Linear-API resolution path;
+// the registry-first tests below flip it on and afterEach resets to dormant.
+const { mockIsRegistryConfigured, mockResolveViaRegistry } = vi.hoisted(() => ({
+	mockIsRegistryConfigured: vi.fn(() => false),
+	mockResolveViaRegistry: vi.fn(),
+}));
+vi.mock("../config/registry-resolve.js", () => ({
+	isRegistryConfigured: mockIsRegistryConfigured,
+	resolveViaRegistry: mockResolveViaRegistry,
+}));
+afterEach(() => {
+	mockIsRegistryConfigured.mockReturnValue(false);
+	mockResolveViaRegistry.mockReset();
+});
 
 const { GraphQLIssuesService } = await import("./graphql-issues-service.js");
 const { GraphQLService } = await import("./graphql-service.js");
@@ -999,6 +1015,50 @@ describe("GraphQLIssuesService", () => {
 			const filter = (filteredCall?.[1] as { filter: Record<string, unknown> })
 				.filter;
 			expect(filter.assignee).toEqual({ id: { eq: "assignee-uuid" } });
+		});
+
+		it("resolves an assignee via the registry first when configured, skipping the Linear-API lookup (DEV-4872)", async () => {
+			mockIsRegistryConfigured.mockReturnValue(true);
+			mockResolveViaRegistry.mockResolvedValue("registry-assignee-uuid");
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			const resolveUserId = vi.spyOn(linearService, "resolveUserId");
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValue({ issues: { nodes: [] } });
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			await service.searchIssues({ assigneeId: "dima", limit: 5 });
+
+			// Registry resolved name → UUID; the Linear-API user lookup was skipped.
+			expect(mockResolveViaRegistry).toHaveBeenCalledWith("dima");
+			expect(resolveUserId).not.toHaveBeenCalled();
+			const filteredCall = rawRequest.mock.calls.find(([q]) =>
+				String(q).includes("IssueFilter"),
+			);
+			const filter = (filteredCall?.[1] as { filter: Record<string, unknown> })
+				.filter;
+			expect(filter.assignee).toEqual({ id: { eq: "registry-assignee-uuid" } });
+		});
+
+		it("falls back to the Linear-API lookup when the registry misses (DEV-4872)", async () => {
+			mockIsRegistryConfigured.mockReturnValue(true);
+			mockResolveViaRegistry.mockResolvedValue(null);
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			const resolveUserId = vi
+				.spyOn(linearService, "resolveUserId")
+				.mockResolvedValue("assignee-uuid");
+			vi.spyOn(graphQLService, "rawRequest").mockResolvedValue({
+				issues: { nodes: [] },
+			});
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			await service.searchIssues({ assigneeId: "Yury Tsukerman", limit: 5 });
+
+			// Registry miss → the existing user lookup still resolves the name.
+			expect(mockResolveViaRegistry).toHaveBeenCalledWith("Yury Tsukerman");
+			expect(resolveUserId).toHaveBeenCalledWith("Yury Tsukerman");
 		});
 
 		it("passes a UUID assignee through without a lookup", async () => {

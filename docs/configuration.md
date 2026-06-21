@@ -387,12 +387,15 @@ The legacy `~/.config/linctl/` location is also read as a fallback if the new pa
 
 ## Identity registry resolution (opt-in, Enrich Layer-only)
 
-`resolveAssignee` (used by `--assignee` on `issues`/`batch`) can optionally
-resolve an identifier through the company-wide identity registry
+Person resolution for **`--assignee` and `--delegate`** (on `issues`/`batch`,
+including the batch search/create fast-paths) can optionally resolve an
+identifier through the company-wide identity registry
 ([DEV-4827](https://linear.app/verticalint/issue/DEV-4827/)) before falling back
 to the bundled `members` config. This is **off by default and EL-internal** —
 el-linear is open-source, so a fresh install does nothing here and never
-contacts a network service.
+contacts a network service. (`--subscriber` stays config-only for now —
+registry parity is tracked in
+[DEV-4880](https://linear.app/verticalint/issue/DEV-4880/).)
 
 Activate it (Enrich Layer machines only) by setting the registry URL; add the
 Cloudflare-Access service-token pair when the registry is fronted by CF Access:
@@ -403,8 +406,9 @@ Cloudflare-Access service-token pair when the registry is fronted by CF Access:
 | `EL_IDENTITY_CF_ACCESS_CLIENT_ID` | CF-Access service-token id (optional). |
 | `EL_IDENTITY_CF_ACCESS_CLIENT_SECRET` | CF-Access service-token secret (optional). |
 
-When set, `--assignee dima` resolves `dima` → the person's Linear UUID via
-`GET <EL_IDENTITY_URL>/api/people/resolve`. Resolution **fails open**: on a
+When set, `--assignee dima` / `--delegate dima` resolves `dima` → the person's
+Linear UUID via `GET <EL_IDENTITY_URL>/api/people/resolve`. Resolution **fails
+open**: on a
 miss, an unreachable registry, a CF-Access challenge, or a malformed response it
 silently falls back to the config-based `resolveMember`, so a registry hiccup
 never breaks a command. The same env-var names are shared with the tools

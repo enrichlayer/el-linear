@@ -77,6 +77,9 @@ const mockResolveTeam = vi
 const mockResolveMember = vi
 	.fn()
 	.mockImplementation((v: string) => `member-id-${v}`);
+const mockResolveMemberWithRegistry = vi
+	.fn()
+	.mockImplementation((v: string) => Promise.resolve(`member-id-${v}`));
 const mockResolveAssignee = vi
 	.fn()
 	.mockImplementation((v: string) => Promise.resolve(`member-id-${v}`));
@@ -84,6 +87,7 @@ const mockResolveLabels = vi.fn().mockReturnValue([]);
 vi.mock("../config/resolver.js", () => ({
 	resolveTeam: mockResolveTeam,
 	resolveMember: mockResolveMember,
+	resolveMemberWithRegistry: mockResolveMemberWithRegistry,
 	resolveAssignee: mockResolveAssignee,
 	resolveLabels: mockResolveLabels,
 }));
@@ -295,7 +299,7 @@ describe("issues commands", () => {
 			setupIssuesCommands(program);
 			await runCommand(program, ["issues", "list", "--delegate", "claude"]);
 
-			expect(mockResolveMember).toHaveBeenCalledWith("claude");
+			expect(mockResolveMemberWithRegistry).toHaveBeenCalledWith("claude");
 			expect(mockSearchIssues).toHaveBeenCalledWith(
 				expect.objectContaining({
 					delegateId: "member-id-claude",
@@ -471,7 +475,7 @@ describe("issues commands", () => {
 				...requiredArgs,
 			]);
 
-			expect(mockResolveMember).toHaveBeenCalledWith("claude");
+			expect(mockResolveMemberWithRegistry).toHaveBeenCalledWith("claude");
 			expect(mockCreateIssue).toHaveBeenCalledWith(
 				expect.objectContaining({
 					delegateId: "member-id-claude",
