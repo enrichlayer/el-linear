@@ -74,8 +74,12 @@ git checkout -b add-batch-archive
 pnpm test && pnpm exec biome check --fix src/
 git commit -m "feat: add batch archive command"
 git push -u origin add-batch-archive
-gh pr create --fill
+gh pr create   # opens the PR template in $EDITOR — fill in each section
 ```
+
+> Use plain `gh pr create` (not `--fill`): `--fill` reuses the commit message as
+> the body and skips `.github/PULL_REQUEST_TEMPLATE.md`, so the What / Why / How
+> / Test sections never get prompted. The web UI loads the template automatically.
 
 ### Commit messages
 
