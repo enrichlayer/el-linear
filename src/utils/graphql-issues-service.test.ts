@@ -1115,6 +1115,104 @@ describe("GraphQLIssuesService", () => {
 		});
 	});
 
+	describe("searchIssues terminal-state exclusion (DEV-4879)", () => {
+		it("excludes completed, canceled AND duplicate states by default", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValue({ issues: { nodes: [] } });
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			await service.searchIssues({
+				teamId: undefined,
+				excludeTerminalStates: true,
+				limit: 5,
+			});
+
+			const filteredCall = rawRequest.mock.calls.find(([q]) =>
+				String(q).includes("IssueFilter"),
+			);
+			expect(filteredCall).toBeDefined();
+			const filter = (filteredCall?.[1] as { filter: Record<string, unknown> })
+				.filter;
+			// Regression: the hardcoded ["completed","canceled"] list omitted the
+			// workspace's `duplicate`-typed state, so resolved duplicates leaked
+			// into the default open-issues view.
+			expect(filter.state).toEqual({
+				type: { nin: ["completed", "canceled", "duplicate"] },
+			});
+		});
+
+		it("does not apply the terminal-state filter when excludeTerminalStates is false (--include-closed)", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValue({ issues: { nodes: [] } });
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			// A UUID assignee forces the IssueFilter query path so we can assert
+			// the *absence* of a terminal-state filter (no lookup, passes through).
+			await service.searchIssues({
+				assigneeId: "11111111-1111-4111-8111-111111111111",
+				excludeTerminalStates: false,
+				limit: 5,
+			});
+
+			const filteredCall = rawRequest.mock.calls.find(([q]) =>
+				String(q).includes("IssueFilter"),
+			);
+			expect(filteredCall).toBeDefined();
+			const filter = (filteredCall?.[1] as { filter: Record<string, unknown> })
+				.filter;
+			expect(filter.state).toBeUndefined();
+		});
+
+		it("post-filters duplicate-typed issues out of full-text search results (DEV-4879)", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			// Full-text search (`--query`) can't express the server-side state-type
+			// `nin`, so exclusion happens in the in-memory post-filter. Return an
+			// open issue + a duplicate-typed one and assert only the open survives.
+			vi.spyOn(graphQLService, "rawRequest").mockResolvedValue({
+				searchIssues: {
+					nodes: [
+						{
+							id: "a",
+							identifier: "DEV-1",
+							title: "Open",
+							priority: 0,
+							state: { id: "s1", name: "Todo", type: "unstarted" },
+							labels: { nodes: [] },
+							createdAt: "2026-01-01T00:00:00.000Z",
+							updatedAt: "2026-01-01T00:00:00.000Z",
+						},
+						{
+							id: "b",
+							identifier: "DEV-2",
+							title: "Dupe",
+							priority: 0,
+							state: { id: "s2", name: "Duplicate", type: "duplicate" },
+							labels: { nodes: [] },
+							createdAt: "2026-01-01T00:00:00.000Z",
+							updatedAt: "2026-01-01T00:00:00.000Z",
+						},
+					],
+				},
+			});
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			const result = await service.searchIssues({
+				query: "anything",
+				excludeTerminalStates: true,
+				limit: 5,
+			});
+
+			expect(result.map((i) => i.identifier)).toEqual(["DEV-1"]);
+		});
+	});
+
 	describe("getIssuesByRefs (DEV-4477)", () => {
 		// Minimal node — only the fields the test logic checks. `transformIssueData`
 		// fills in defaults from missing fields, so we don't have to enumerate all.

@@ -42,6 +42,22 @@ interface StateRef {
 	type?: string;
 }
 
+/**
+ * Workflow-state types treated as terminal / closed for default filtering.
+ * `issues list` / `issues search` exclude these unless `--include-closed` (or
+ * an explicit `--status`) is passed (DEV-4478).
+ *
+ * `duplicate` is included (DEV-4879) because this workspace parks resolved
+ * duplicates in a `duplicate`-typed state — they carry a `duplicate-of`
+ * relation and are semantically closed, so they must not leak into the default
+ * open-issues view the way `completed` / `canceled` don't.
+ */
+export const TERMINAL_STATE_TYPES: readonly string[] = [
+	"completed",
+	"canceled",
+	"duplicate",
+];
+
 interface ProjectRef {
 	id: string;
 	name: string;

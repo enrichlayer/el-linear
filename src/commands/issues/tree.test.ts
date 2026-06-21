@@ -158,6 +158,53 @@ describe("issues tree (DEV-4480)", () => {
 		expect(emitted.children.nodes[0].identifier).toBe("DEV-2");
 	});
 
+	it("prunes duplicate-typed children too under --no-include-closed (DEV-4879)", async () => {
+		mockResolveIssueId.mockResolvedValue("uuid-1");
+		mockRawRequest.mockResolvedValue({
+			issue: {
+				id: "uuid-1",
+				identifier: "DEV-1",
+				title: "Root",
+				state: { id: "s", name: "In Progress", type: "started" },
+				assignee: null,
+				children: {
+					nodes: [
+						{
+							id: "uuid-2",
+							identifier: "DEV-2",
+							title: "Alive",
+							state: { id: "s2", name: "Todo", type: "unstarted" },
+							assignee: null,
+							children: { nodes: [] },
+						},
+						{
+							id: "uuid-3",
+							identifier: "DEV-3",
+							title: "Dupe",
+							state: { id: "s3", name: "Duplicate", type: "duplicate" },
+							assignee: null,
+							children: { nodes: [] },
+						},
+					],
+				},
+			},
+		});
+
+		const program = setupProgram();
+		await runCommand(program, [
+			"issues",
+			"tree",
+			"DEV-1",
+			"--no-include-closed",
+		]);
+
+		// The duplicate-typed child is pruned just like completed/canceled —
+		// tree.ts now shares TERMINAL_STATE_TYPES with list/search.
+		const emitted = mockOutputSuccess.mock.calls[0][0];
+		expect(emitted.children.nodes).toHaveLength(1);
+		expect(emitted.children.nodes[0].identifier).toBe("DEV-2");
+	});
+
 	it("includes terminal-state branches by default", async () => {
 		mockResolveIssueId.mockResolvedValue("uuid-1");
 		const tree = {

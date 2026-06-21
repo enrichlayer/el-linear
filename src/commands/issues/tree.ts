@@ -26,6 +26,7 @@ import {
 	type IssueTreeNode,
 	MAX_TREE_DEPTH,
 } from "../../queries/issue-tree.js";
+import { TERMINAL_STATE_TYPES } from "../../types/linear.js";
 import { formatTree } from "../../utils/format-tree.js";
 import { createIssuesService } from "../../utils/issues-service-bootstrap.js";
 import { handleAsyncCommand, outputSuccess } from "../../utils/output.js";
@@ -116,10 +117,11 @@ function parseDepth(raw: string | undefined): number {
 }
 
 /**
- * Walk the tree depth-first and drop any node whose `state.type` is
- * `completed` or `canceled`. Pure function — does not mutate the input.
- * A pruned child takes its entire subtree with it (consistent with how
- * `issues list --no-include-closed` excludes closed work entirely).
+ * Walk the tree depth-first and drop any node whose `state.type` is terminal
+ * (`completed` / `canceled` / `duplicate` — `TERMINAL_STATE_TYPES`, DEV-4879).
+ * Pure function — does not mutate the input. A pruned child takes its entire
+ * subtree with it (consistent with how `issues list --no-include-closed`
+ * excludes closed work entirely — same shared constant).
  *
  * Assumes Linear's parent → children graph stays single-parent (a tree,
  * not a DAG). If Linear ever ships multi-parent issues, this recursion
@@ -140,6 +142,5 @@ function pruneTerminalStates(root: IssueTreeNode): IssueTreeNode {
 }
 
 function isTerminalState(node: IssueTreeNode): boolean {
-	const t = node.state?.type;
-	return t === "completed" || t === "canceled";
+	return TERMINAL_STATE_TYPES.includes(node.state?.type ?? "");
 }
