@@ -4,6 +4,13 @@ All notable changes to `@enrichlayer/el-linear` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.29.1](https://github.com/enrichlayer/el-linear/compare/v1.29.0...v1.29.1) (2026-06-21)
+
+
+### Bug Fixes
+
+* **issues:** exclude duplicate-typed states from default list/search (DEV-4879) ([#179](https://github.com/enrichlayer/el-linear/issues/179)) ([5cf6852](https://github.com/enrichlayer/el-linear/commit/5cf68529be5bfb518cc37c1d6717fd3d84a19bb1))
+
 ## [1.29.0](https://github.com/enrichlayer/el-linear/compare/v1.28.0...v1.29.0) (2026-06-21)
 
 
