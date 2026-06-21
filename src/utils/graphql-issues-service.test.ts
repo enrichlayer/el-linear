@@ -1108,6 +1108,49 @@ describe("GraphQLIssuesService", () => {
 				.filter;
 			expect(filter.state).toBeUndefined();
 		});
+
+		it("post-filters duplicate-typed issues out of full-text search results (DEV-4879)", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			// Full-text search (`--query`) can't express the server-side state-type
+			// `nin`, so exclusion happens in the in-memory post-filter. Return an
+			// open issue + a duplicate-typed one and assert only the open survives.
+			vi.spyOn(graphQLService, "rawRequest").mockResolvedValue({
+				searchIssues: {
+					nodes: [
+						{
+							id: "a",
+							identifier: "DEV-1",
+							title: "Open",
+							priority: 0,
+							state: { id: "s1", name: "Todo", type: "unstarted" },
+							labels: { nodes: [] },
+							createdAt: "2026-01-01T00:00:00.000Z",
+							updatedAt: "2026-01-01T00:00:00.000Z",
+						},
+						{
+							id: "b",
+							identifier: "DEV-2",
+							title: "Dupe",
+							priority: 0,
+							state: { id: "s2", name: "Duplicate", type: "duplicate" },
+							labels: { nodes: [] },
+							createdAt: "2026-01-01T00:00:00.000Z",
+							updatedAt: "2026-01-01T00:00:00.000Z",
+						},
+					],
+				},
+			});
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			const result = await service.searchIssues({
+				query: "anything",
+				excludeTerminalStates: true,
+				limit: 5,
+			});
+
+			expect(result.map((i) => i.identifier)).toEqual(["DEV-1"]);
+		});
 	});
 
 	describe("getIssuesByRefs (DEV-4477)", () => {
