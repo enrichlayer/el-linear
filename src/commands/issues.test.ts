@@ -483,6 +483,33 @@ describe("issues commands", () => {
 			);
 		});
 
+		it("resolves each --subscriber through the registry helper (DEV-4880)", async () => {
+			mockCreateIssue.mockResolvedValue({ id: "new-issue-id" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Task",
+				"--team",
+				"DEV",
+				"--subscriber",
+				"claude,bob",
+				...requiredArgs,
+			]);
+
+			// Both subscribers resolve via the same registry helper as
+			// --assignee/--delegate (not the config-only sync resolveMember).
+			expect(mockResolveMemberWithRegistry).toHaveBeenCalledWith("claude");
+			expect(mockResolveMemberWithRegistry).toHaveBeenCalledWith("bob");
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({
+					subscriberIds: ["member-id-claude", "member-id-bob"],
+				}),
+			);
+		});
+
 		it("resolves labels when --labels is provided", async () => {
 			mockResolveLabels.mockReturnValue(["label-uuid-1", "label-uuid-2"]);
 			mockCreateIssue.mockResolvedValue({ id: "new-issue-id" });

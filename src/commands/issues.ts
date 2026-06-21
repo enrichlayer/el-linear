@@ -12,7 +12,6 @@ import {
 import {
 	resolveAssignee,
 	resolveLabels,
-	resolveMember,
 	resolveMemberWithRegistry,
 	resolveTeam,
 } from "../config/resolver.js";
@@ -587,11 +586,13 @@ async function resolveCreateInputs(
 
 	let subscriberIds: string[] | undefined;
 	if (options.subscriber) {
-		// --subscriber intentionally stays on the sync config-only resolveMember
-		// for now; registry parity (→ resolveMemberWithRegistry) is tracked in
-		// DEV-4880. Keep this the last config-only person-resolution entry point.
-		subscriberIds = splitList(options.subscriber).map((s: string) =>
-			resolveMember(s),
+		// --subscriber resolves through the opt-in registry too (DEV-4880),
+		// matching --assignee / --delegate. Each entry falls back to config on a
+		// miss; resolveMemberWithRegistry is fail-open and dormant when unconfigured.
+		subscriberIds = await Promise.all(
+			splitList(options.subscriber).map((s: string) =>
+				resolveMemberWithRegistry(s),
+			),
 		);
 	}
 
