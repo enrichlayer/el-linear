@@ -224,6 +224,24 @@ describe("resolveMentions — auto-mention for bare names", () => {
 		expect(mentions[0].attrs!.label).toBe("Bob");
 	});
 
+	it("does not double-count a capitalized @Name that also matches a bare candidate (DEV-4987)", async () => {
+		// "@Bob" matches the explicit loop AND the bare candidate "Bob" (the `@`
+		// isn't a word char, so the bare lookbehind passes). The bodyData emits a
+		// single mention node, so `resolved` must report Bob exactly once — not
+		// twice — or the mention report (and --quiet summary) over-counts.
+		const result = await resolveMentions("cc @Bob", mockLinearService());
+		expect(result).not.toBeNull();
+		expect(result!.resolved).toHaveLength(1);
+		expect(result!.resolved[0].userId).toBe(UUID_BOB);
+		// label is the typed @name (explicit-first), not the bare candidate.
+		expect(result!.resolved[0].label).toBe("Bob");
+		// And the structured body still carries exactly one mention node.
+		const mentions = result!.bodyData!.content![0].content!.filter(
+			(n) => n.type === "suggestion_userMentions",
+		);
+		expect(mentions).toHaveLength(1);
+	});
+
 	it("auto-converts bare display name (e.g. 'Erin')", async () => {
 		const result = await resolveMentions(
 			"Erin's research concluded X",

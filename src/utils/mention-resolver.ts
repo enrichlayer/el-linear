@@ -128,7 +128,21 @@ export async function resolveMentions(
 		return null;
 	}
 
-	const resolved = [...explicit.values(), ...bare.values()];
+	// De-dup by userId for the reported set: a capitalized explicit `@Bob` also
+	// matches the bare candidate "Bob" (the `@` isn't a word char, so the bare
+	// lookbehind passes), landing the same user in both maps. The injected
+	// bodyData is unaffected (the `@name` alternation consumes the span first,
+	// so only one mention node is emitted), but `resolved` would over-count and
+	// `--quiet` would print the user twice — which undercuts the whole point of
+	// a trustworthy mention report. Explicit-first so the label is the typed
+	// `@name`, not the capitalized bare candidate.
+	const resolvedByUser = new Map<string, ResolvedMention>();
+	for (const m of [...explicit.values(), ...bare.values()]) {
+		if (!resolvedByUser.has(m.userId)) {
+			resolvedByUser.set(m.userId, m);
+		}
+	}
+	const resolved = [...resolvedByUser.values()];
 
 	// Only build the structured doc when something actually resolved; a body
 	// whose only mention was an unresolved `@typo` is sent as plain markdown.
