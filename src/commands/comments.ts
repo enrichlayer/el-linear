@@ -29,8 +29,16 @@ import {
 	createLinearService,
 	type LinearService,
 } from "../utils/linear-service.js";
-import { resolveMentions } from "../utils/mention-resolver.js";
-import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
+import { logger } from "../utils/logger.js";
+import {
+	type MentionReport,
+	resolveMentions,
+} from "../utils/mention-resolver.js";
+import {
+	getQuietMode,
+	handleAsyncCommand,
+	outputSuccess,
+} from "../utils/output.js";
 import { getRootOpts } from "../utils/root-opts.js";
 import { validateReferences } from "../utils/validate-references.js";
 import { parsePositiveInt } from "../utils/validators.js";
@@ -40,6 +48,77 @@ import { getWorkspaceUrlKey } from "../utils/workspace-url.js";
 // tweak on their side doesn't silently regress the fallback path.
 const BODY_DATA_ERROR_RE = /prosemirror|bodydata|invalid.*body/i;
 const ISSUE_IDENTIFIER_REGEX = /^[A-Z][A-Z0-9]*-\d+$/;
+
+/**
+ * Structured, machine-readable record of mention resolution, attached to the
+ * command output alongside `autoLinked`. `delivered` is false when Linear
+ * rejected the structured body and we fell back to plain text — i.e. the
+ * resolved mentions did NOT fire notifications.
+ */
+interface MentionsOutput {
+	resolved: { label: string; userId: string }[];
+	unresolved: string[];
+	delivered: boolean;
+}
+
+/**
+ * Turn a {@link MentionReport} into the `mentions` output field, or `undefined`
+ * when there is nothing to report. `delivered=false` records a bodyData→plain
+ * fallback so the JSON output never falsely claims a ping was sent.
+ */
+function buildMentionsOutput(
+	report: MentionReport | null,
+	delivered: boolean,
+): MentionsOutput | undefined {
+	if (!report) {
+		return undefined;
+	}
+	if (report.resolved.length === 0 && report.unresolvedExplicit.length === 0) {
+		return undefined;
+	}
+	return {
+		resolved: report.resolved.map((m) => ({
+			label: m.label,
+			userId: m.userId,
+		})),
+		unresolved: report.unresolvedExplicit,
+		delivered,
+	};
+}
+
+/**
+ * Emit the human-facing side of mention resolution to **stderr** (so it never
+ * pollutes the machine-stable stdout line, and survives `--quiet`):
+ *   - a loud warning for each explicit `@name` that resolved to nobody,
+ *   - a warning when a bodyData rejection dropped resolved mentions,
+ *   - under `--quiet`, a one-line confirmation of what resolved (since the
+ *     quiet stdout line can't carry the `mentions` field).
+ */
+function reportMentions(mentions: MentionsOutput | undefined): void {
+	if (!mentions) {
+		return;
+	}
+	for (const name of mentions.unresolved) {
+		logger.error(
+			`⚠ @${name} did not resolve to a team member — left as plain text (no notification sent)`,
+		);
+	}
+	if (!mentions.delivered && mentions.resolved.length > 0) {
+		logger.error(
+			`⚠ Linear rejected the structured comment body; fell back to plain text — ${mentions.resolved.length} mention(s) were NOT delivered as notifications`,
+		);
+	}
+	// In quiet mode stdout is a single `comment <id>` line with no room for the
+	// `mentions` field, so echo a concise confirmation to stderr.
+	if (getQuietMode()) {
+		const resolved = mentions.delivered
+			? mentions.resolved.map((m) => `${m.label}→${m.userId}`).join(", ")
+			: "(none delivered)";
+		logger.error(
+			`mentions: resolved=[${resolved}] unresolved=[${mentions.unresolved.join(", ")}]`,
+		);
+	}
+}
 
 function readBody(options: OptionValues): string {
 	// --body and --body-file are two sources for the same field; accepting both
@@ -202,12 +281,15 @@ async function handleCreateComment(
 		selfUserId,
 	});
 	const input: Record<string, unknown> = { issueId: resolvedIssueId };
-	if (mentionResult) {
+	if (mentionResult?.bodyData) {
 		input.bodyData = mentionResult.bodyData;
 	} else {
 		input.body = body;
 	}
 
+	// Tracks whether resolved mentions actually shipped as structured nodes;
+	// flipped to false if the bodyData fallback below sends plain text instead.
+	let mentionsDelivered = true;
 	let result: CreateCommentResponse;
 	try {
 		result = await graphQLService.rawRequest<CreateCommentResponse>(
@@ -220,6 +302,7 @@ async function handleCreateComment(
 		// Linear handle the conversion server-side.
 		const msg = err instanceof Error ? err.message : String(err);
 		if (input.bodyData && BODY_DATA_ERROR_RE.test(msg)) {
+			mentionsDelivered = false;
 			const fallbackInput: Record<string, unknown> = {
 				issueId: resolvedIssueId,
 				body,
@@ -255,7 +338,13 @@ async function handleCreateComment(
 		linearService,
 	});
 	const output = transformComment(mutation.comment);
-	outputSuccess(autoLinked ? { ...output, autoLinked } : output);
+	const mentions = buildMentionsOutput(mentionResult, mentionsDelivered);
+	reportMentions(mentions);
+	outputSuccess({
+		...output,
+		...(autoLinked ? { autoLinked } : {}),
+		...(mentions ? { mentions } : {}),
+	});
 }
 
 async function handleUpdateComment(
@@ -284,12 +373,13 @@ async function handleUpdateComment(
 		selfUserId,
 	});
 	const input: Record<string, unknown> = {};
-	if (mentionResult) {
+	if (mentionResult?.bodyData) {
 		input.bodyData = mentionResult.bodyData;
 	} else {
 		input.body = body;
 	}
 
+	let mentionsDelivered = true;
 	let result: UpdateCommentResponse;
 	try {
 		result = await graphQLService.rawRequest<UpdateCommentResponse>(
@@ -307,6 +397,7 @@ async function handleUpdateComment(
 		// extraction; copy-then-refactor on the third per the repo convention.
 		const msg = err instanceof Error ? err.message : String(err);
 		if (input.bodyData && BODY_DATA_ERROR_RE.test(msg)) {
+			mentionsDelivered = false;
 			const fallbackInput: Record<string, unknown> = { body };
 			result = await graphQLService.rawRequest<UpdateCommentResponse>(
 				UPDATE_COMMENT_MUTATION,
@@ -335,7 +426,13 @@ async function handleUpdateComment(
 		});
 	}
 	const output = transformComment(comment);
-	outputSuccess(autoLinked ? { ...output, autoLinked } : output);
+	const mentions = buildMentionsOutput(mentionResult, mentionsDelivered);
+	reportMentions(mentions);
+	outputSuccess({
+		...output,
+		...(autoLinked ? { autoLinked } : {}),
+		...(mentions ? { mentions } : {}),
+	});
 }
 
 async function handleListComments(

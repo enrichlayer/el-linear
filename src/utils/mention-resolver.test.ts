@@ -74,7 +74,7 @@ describe("resolveMentions", () => {
 		// followed by zero word chars and produced no useful name.
 		const result = await resolveMentions("cc @Юрий", mockLinearService());
 		expect(result).not.toBeNull();
-		const nodes = result!.bodyData.content![0].content!;
+		const nodes = result!.bodyData!.content![0].content!;
 		const mention = nodes.find((n) => n.type === "suggestion_userMentions");
 		expect(mention?.attrs?.id).toBe(UUID_YURY);
 	});
@@ -88,7 +88,7 @@ describe("resolveMentions", () => {
 			mockLinearService(),
 		);
 		expect(result).not.toBeNull();
-		const nodes = result!.bodyData.content![0].content!;
+		const nodes = result!.bodyData!.content![0].content!;
 		const mention = nodes.find((n) => n.type === "suggestion_userMentions");
 		expect(mention?.attrs?.id).toBe(UUID_YURY);
 	});
@@ -99,7 +99,7 @@ describe("resolveMentions", () => {
 			mockLinearService(),
 		);
 		expect(result).not.toBeNull();
-		const doc = result!.bodyData;
+		const doc = result!.bodyData!;
 		expect(doc.type).toBe("doc");
 		expect(doc.content).toHaveLength(1);
 		const paragraph = doc.content![0];
@@ -120,7 +120,7 @@ describe("resolveMentions", () => {
 			mockLinearService(),
 		);
 		expect(result).not.toBeNull();
-		const nodes = result!.bodyData.content![0].content!;
+		const nodes = result!.bodyData!.content![0].content!;
 		const mentionNodes = nodes.filter(
 			(n) => n.type === "suggestion_userMentions",
 		);
@@ -137,14 +137,39 @@ describe("resolveMentions", () => {
 		const service = mockLinearService();
 		const result = await resolveMentions("CC @ilya", service);
 		expect(result).not.toBeNull();
-		const nodes = result!.bodyData.content![0].content!;
+		const nodes = result!.bodyData!.content![0].content!;
 		const mention = nodes.find((n) => n.type === "suggestion_userMentions");
 		expect(mention?.attrs?.id).toBe("c3c901a5-c633-488a-b8ea-2fa26ff577fc");
 	});
 
-	it("returns null when mentions exist but none resolve", async () => {
+	it("reports an unresolved explicit @name (no bodyData, surfaced for warning)", async () => {
 		const result = await resolveMentions(
 			"Hey @unknown check",
+			mockLinearService(),
+		);
+		// Previously returned null (silent drop). Now the failed explicit ping is
+		// reported so the caller can warn — but bodyData stays null since nothing
+		// resolved, and the comment ships as plain text.
+		expect(result).not.toBeNull();
+		expect(result!.bodyData).toBeNull();
+		expect(result!.resolved).toEqual([]);
+		expect(result!.unresolvedExplicit).toEqual(["unknown"]);
+	});
+
+	it("reports resolved mentions alongside an unresolved one", async () => {
+		const result = await resolveMentions(
+			"@bob owns it, cc @unknown",
+			mockLinearService(),
+		);
+		expect(result).not.toBeNull();
+		expect(result!.bodyData).not.toBeNull();
+		expect(result!.resolved.map((m) => m.label)).toContain("bob");
+		expect(result!.unresolvedExplicit).toEqual(["unknown"]);
+	});
+
+	it("returns null when there are no mentions at all", async () => {
+		const result = await resolveMentions(
+			"plain text only",
 			mockLinearService(),
 		);
 		expect(result).toBeNull();
@@ -156,14 +181,14 @@ describe("resolveMentions", () => {
 			mockLinearService(),
 		);
 		expect(result).not.toBeNull();
-		expect(result!.bodyData.content).toHaveLength(2);
+		expect(result!.bodyData!.content).toHaveLength(2);
 	});
 
 	it("deduplicates mentions of the same user", async () => {
 		const service = mockLinearService();
 		const result = await resolveMentions("@bob see @bob comment", service);
 		expect(result).not.toBeNull();
-		const nodes = result!.bodyData.content![0].content!;
+		const nodes = result!.bodyData!.content![0].content!;
 		const mentions = nodes.filter((n) => n.type === "suggestion_userMentions");
 		expect(mentions).toHaveLength(2);
 		expect(mentions[0].attrs!.id).toBe("a1a780e3-a411-466e-b6c8-0fe04ff355fa");
@@ -176,7 +201,7 @@ describe("resolveMentions", () => {
 			mockLinearService(),
 		);
 		expect(result).not.toBeNull();
-		const nodes = result!.bodyData.content![0].content!;
+		const nodes = result!.bodyData!.content![0].content!;
 		// @unknown should appear as plain text, @bob as mention
 		const mentions = nodes.filter((n) => n.type === "suggestion_userMentions");
 		expect(mentions).toHaveLength(1);
@@ -191,12 +216,30 @@ describe("resolveMentions — auto-mention for bare names", () => {
 			mockLinearService(),
 		);
 		expect(result).not.toBeNull();
-		const mentions = result!.bodyData.content![0].content!.filter(
+		const mentions = result!.bodyData!.content![0].content!.filter(
 			(n) => n.type === "suggestion_userMentions",
 		);
 		expect(mentions).toHaveLength(1);
 		expect(mentions[0].attrs!.id).toBe(UUID_BOB);
 		expect(mentions[0].attrs!.label).toBe("Bob");
+	});
+
+	it("does not double-count a capitalized @Name that also matches a bare candidate (DEV-4987)", async () => {
+		// "@Bob" matches the explicit loop AND the bare candidate "Bob" (the `@`
+		// isn't a word char, so the bare lookbehind passes). The bodyData emits a
+		// single mention node, so `resolved` must report Bob exactly once — not
+		// twice — or the mention report (and --quiet summary) over-counts.
+		const result = await resolveMentions("cc @Bob", mockLinearService());
+		expect(result).not.toBeNull();
+		expect(result!.resolved).toHaveLength(1);
+		expect(result!.resolved[0].userId).toBe(UUID_BOB);
+		// label is the typed @name (explicit-first), not the bare candidate.
+		expect(result!.resolved[0].label).toBe("Bob");
+		// And the structured body still carries exactly one mention node.
+		const mentions = result!.bodyData!.content![0].content!.filter(
+			(n) => n.type === "suggestion_userMentions",
+		);
+		expect(mentions).toHaveLength(1);
 	});
 
 	it("auto-converts bare display name (e.g. 'Erin')", async () => {
@@ -205,7 +248,7 @@ describe("resolveMentions — auto-mention for bare names", () => {
 			mockLinearService(),
 		);
 		expect(result).not.toBeNull();
-		const mentions = result!.bodyData.content![0].content!.filter(
+		const mentions = result!.bodyData!.content![0].content!.filter(
 			(n) => n.type === "suggestion_userMentions",
 		);
 		expect(mentions).toHaveLength(1);
@@ -218,7 +261,7 @@ describe("resolveMentions — auto-mention for bare names", () => {
 			mockLinearService(),
 		);
 		expect(result).not.toBeNull();
-		const mentions = result!.bodyData.content![0].content!.filter(
+		const mentions = result!.bodyData!.content![0].content!.filter(
 			(n) => n.type === "suggestion_userMentions",
 		);
 		expect(mentions).toHaveLength(1);
@@ -231,7 +274,7 @@ describe("resolveMentions — auto-mention for bare names", () => {
 			mockLinearService(),
 		);
 		expect(result).not.toBeNull();
-		const mentions = result!.bodyData.content![0].content!.filter(
+		const mentions = result!.bodyData!.content![0].content!.filter(
 			(n) => n.type === "suggestion_userMentions",
 		);
 		expect(mentions).toHaveLength(2);
@@ -302,7 +345,7 @@ describe("resolveMentions — auto-mention for bare names", () => {
 			},
 		);
 		expect(result).not.toBeNull();
-		const mentions = result!.bodyData.content![0].content!.filter(
+		const mentions = result!.bodyData!.content![0].content!.filter(
 			(n) => n.type === "suggestion_userMentions",
 		);
 		expect(mentions).toHaveLength(1);
@@ -314,7 +357,7 @@ describe("resolveMentions — auto-mention for bare names", () => {
 			mockLinearService(),
 		);
 		expect(result).not.toBeNull();
-		const mentions = result!.bodyData.content![0].content!.filter(
+		const mentions = result!.bodyData!.content![0].content!.filter(
 			(n) => n.type === "suggestion_userMentions",
 		);
 		expect(mentions).toHaveLength(2);
@@ -374,7 +417,7 @@ describe("resolveMentions — DEV-3785 schema regression", () => {
 				}
 			}
 		};
-		walk(result!.bodyData as Parameters<typeof walk>[0]);
+		walk(result!.bodyData! as Parameters<typeof walk>[0]);
 
 		const forbidden = [
 			"bulletList",
@@ -458,7 +501,7 @@ describe("resolveMentions — DEV-3785 schema regression", () => {
 				walk(child, inListItem || node.type === "list_item");
 			}
 		};
-		walk(result!.bodyData as Node, false);
+		walk(result!.bodyData! as Node, false);
 
 		// Both bare names resolved to mention nodes.
 		const labels = mentions.map((m) => m.attrs?.label).sort();
@@ -489,7 +532,7 @@ describe("resolveMentions — DEV-3785 schema regression", () => {
 		const result = await resolveMentions(body, mockLinearService());
 		expect(result).not.toBeNull();
 
-		const paragraph = result!.bodyData.content![0];
+		const paragraph = result!.bodyData!.content![0];
 		expect(paragraph.type).toBe("paragraph");
 		const children = paragraph.content!;
 		expect(children[0].type).toBe("suggestion_userMentions");

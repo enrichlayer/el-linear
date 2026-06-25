@@ -31,6 +31,15 @@ export function setQuietMode(enabled: boolean): void {
 	quietMode = enabled;
 }
 
+/**
+ * Whether `--quiet` is active. Lets a command decide to route extra
+ * human-facing detail (e.g. a mention-resolution confirmation) to stderr,
+ * keeping the single machine-stable stdout line intact.
+ */
+export function getQuietMode(): boolean {
+	return quietMode;
+}
+
 export function setJqFilter(filter: string | null): void {
 	jqFilter = filter;
 }

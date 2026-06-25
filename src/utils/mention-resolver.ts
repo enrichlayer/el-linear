@@ -32,6 +32,24 @@ interface ResolvedMention {
 	userId: string;
 }
 
+export interface MentionReport {
+	/**
+	 * ProseMirror doc carrying `suggestion_userMentions` nodes — the structured
+	 * body that makes Linear fire real notifications. `null` when nothing
+	 * resolved (the caller should send the plain markdown `body` instead).
+	 */
+	bodyData: ProseMirrorNode | null;
+	/** Mentions that resolved to a real user (explicit `@name` + bare names). */
+	resolved: ResolvedMention[];
+	/**
+	 * Explicit `@name` tokens that did NOT resolve to any team member — almost
+	 * always a typo or an unknown handle. Left as plain text (no notification),
+	 * so the caller surfaces them as a warning. Bare-name non-matches are not
+	 * tracked here: they were never an intended ping.
+	 */
+	unresolvedExplicit: string[];
+}
+
 /**
  * Resolve mentions in markdown body text to Linear user IDs.
  *
@@ -43,19 +61,21 @@ interface ResolvedMention {
  * are also converted to mentions — without requiring the `@` prefix. This
  * catches cases like "Bob owns the design" → "@bob owns the design".
  *
- * Returns a ProseMirror `bodyData` doc with `suggestion_userMentions` nodes,
- * or `null` if nothing was resolved.
+ * Returns a {@link MentionReport} describing which names resolved, which
+ * explicit `@names` did not, and the `bodyData` doc to send — or `null` when
+ * there was nothing to resolve and nothing to warn about.
  */
 export async function resolveMentions(
 	body: string,
 	linearService: LinearService,
 	options: ResolveMentionsOptions = {},
-): Promise<{ bodyData: ProseMirrorNode } | null> {
+): Promise<MentionReport | null> {
 	const autoMention = options.autoMention !== false;
 	const selfUserId = options.selfUserId;
 
 	// 1. Resolve explicit @name mentions (existing behavior).
 	const explicit = new Map<string, ResolvedMention>();
+	const unresolvedExplicit: string[] = [];
 	const explicitNames = [...body.matchAll(EXPLICIT_MENTION_REGEX)].map(
 		(m) => m[1],
 	);
@@ -63,6 +83,10 @@ export async function resolveMentions(
 		const userId = await resolveUserByName(name, linearService);
 		if (userId) {
 			explicit.set(name, { userId, label: name });
+		} else {
+			// An explicit `@name` the author clearly meant as a ping, but it
+			// matched no team member — surface it so the ping never dies silently.
+			unresolvedExplicit.push(name);
 		}
 	}
 
@@ -95,13 +119,39 @@ export async function resolveMentions(
 		}
 	}
 
-	if (explicit.size === 0 && bare.size === 0) {
+	// Nothing resolved and no failed explicit ping → caller has nothing to do.
+	if (
+		explicit.size === 0 &&
+		bare.size === 0 &&
+		unresolvedExplicit.length === 0
+	) {
 		return null;
 	}
 
-	const doc = markdownToProseMirror(body);
-	const bodyData = injectMentions(doc, explicit, bare);
-	return { bodyData };
+	// De-dup by userId for the reported set: a capitalized explicit `@Bob` also
+	// matches the bare candidate "Bob" (the `@` isn't a word char, so the bare
+	// lookbehind passes), landing the same user in both maps. The injected
+	// bodyData is unaffected (the `@name` alternation consumes the span first,
+	// so only one mention node is emitted), but `resolved` would over-count and
+	// `--quiet` would print the user twice — which undercuts the whole point of
+	// a trustworthy mention report. Explicit-first so the label is the typed
+	// `@name`, not the capitalized bare candidate.
+	const resolvedByUser = new Map<string, ResolvedMention>();
+	for (const m of [...explicit.values(), ...bare.values()]) {
+		if (!resolvedByUser.has(m.userId)) {
+			resolvedByUser.set(m.userId, m);
+		}
+	}
+	const resolved = [...resolvedByUser.values()];
+
+	// Only build the structured doc when something actually resolved; a body
+	// whose only mention was an unresolved `@typo` is sent as plain markdown.
+	const bodyData =
+		explicit.size > 0 || bare.size > 0
+			? injectMentions(markdownToProseMirror(body), explicit, bare)
+			: null;
+
+	return { bodyData, resolved, unresolvedExplicit };
 }
 
 async function resolveUserByName(
