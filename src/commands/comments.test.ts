@@ -122,6 +122,107 @@ describe("comments commands", () => {
 			);
 		});
 
+		it("attaches a mentions field and ships bodyData when an @name resolves (DEV-4987)", async () => {
+			mockResolveUserId.mockResolvedValue("user-alice");
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			// --no-auto-mention skips the `{ viewer }` self-fetch so the create
+			// mutation is the first rawRequest call; explicit @name resolution
+			// runs regardless of the flag.
+			await runCommand(program, [
+				"comments",
+				"create",
+				"ENG-123",
+				"--no-auto-mention",
+				"--body",
+				"cc @alice please review",
+			]);
+
+			expect(mockOutputSuccess).toHaveBeenCalledWith(
+				expect.objectContaining({
+					mentions: {
+						resolved: [{ label: "alice", userId: "user-alice" }],
+						unresolved: [],
+						delivered: true,
+					},
+				}),
+			);
+			// A resolved mention takes the structured bodyData path (real notification).
+			const input = (
+				mockRawRequest.mock.calls[0][1] as { input: Record<string, unknown> }
+			).input;
+			expect(input).toHaveProperty("bodyData");
+		});
+
+		it("warns on stderr and reports an unresolved @name as plain text (DEV-4987)", async () => {
+			mockResolveUserId.mockRejectedValue(new Error("not found"));
+			const errSpy = vi.spyOn(logger, "error").mockImplementation(() => {});
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, [
+				"comments",
+				"create",
+				"ENG-123",
+				"--no-auto-mention",
+				"--body",
+				"cc @ghost",
+			]);
+
+			expect(errSpy).toHaveBeenCalledWith(
+				expect.stringContaining("@ghost did not resolve to a team member"),
+			);
+			expect(mockOutputSuccess).toHaveBeenCalledWith(
+				expect.objectContaining({
+					mentions: expect.objectContaining({
+						resolved: [],
+						unresolved: ["ghost"],
+					}),
+				}),
+			);
+			// Nothing resolved → plain markdown body, not bodyData.
+			const input = (
+				mockRawRequest.mock.calls[0][1] as { input: Record<string, unknown> }
+			).input;
+			expect(input).toHaveProperty("body");
+			expect(input).not.toHaveProperty("bodyData");
+			errSpy.mockRestore();
+		});
+
+		it("marks mentions undelivered and warns when bodyData is rejected and falls back (DEV-4987)", async () => {
+			mockResolveUserId.mockResolvedValue("user-alice");
+			// First attempt (bodyData) is rejected by Linear; the default
+			// beforeEach mockResolvedValue serves the plain-body retry.
+			mockRawRequest.mockRejectedValueOnce(
+				new Error(
+					"Invalid bodyData value. Value must be a valid prosemirror document.",
+				),
+			);
+			const errSpy = vi.spyOn(logger, "error").mockImplementation(() => {});
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			// --no-auto-mention skips the `{ viewer }` self-fetch so the
+			// mockRejectedValueOnce lands on the create mutation, not the
+			// viewer query — the create's bodyData attempt is what must fail.
+			await runCommand(program, [
+				"comments",
+				"create",
+				"ENG-123",
+				"--no-auto-mention",
+				"--body",
+				"cc @alice",
+			]);
+
+			expect(errSpy).toHaveBeenCalledWith(
+				expect.stringContaining("were NOT delivered as notifications"),
+			);
+			expect(mockOutputSuccess).toHaveBeenCalledWith(
+				expect.objectContaining({
+					mentions: expect.objectContaining({ delivered: false }),
+				}),
+			);
+			errSpy.mockRestore();
+		});
+
 		it("throws when --body not provided", async () => {
 			const program = createTestProgram();
 			setupCommentsCommands(program);
