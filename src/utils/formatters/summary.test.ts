@@ -840,6 +840,29 @@ describe("dispatch", () => {
 		expect(out).toContain("foo:");
 		expect(out).toContain("bar");
 	});
+
+	it("routes a relate envelope end-to-end (inferKind → dispatch → table)", () => {
+		// Mirrors the real `--format summary` path: the relate handler's
+		// { data, meta } envelope flows through inferKindFromPayload into
+		// dispatch, covering the relation-list switch case + detection wiring.
+		const envelope = {
+			data: [
+				{
+					id: "rel-1",
+					type: "related",
+					issue: { id: "u1", identifier: "DEV-1", title: "src" },
+					relatedIssue: { id: "u2", identifier: "DEV-2", title: "target" },
+				},
+			],
+			meta: { count: 1, source: "DEV-1" },
+		};
+		const out = dispatch(inferKindFromPayload(envelope), envelope);
+		expect(out).toMatch(/TYPE\s+FROM\s+TO\s+TITLE/);
+		expect(out).toContain("related");
+		expect(out).toContain("DEV-1");
+		expect(out).toContain("DEV-2");
+		expect(out.trimEnd().endsWith("1 relation")).toBe(true);
+	});
 });
 
 describe("formatLine (--quiet write confirmation, DEV-4650)", () => {
@@ -967,6 +990,23 @@ describe("formatLine (--quiet write confirmation, DEV-4650)", () => {
 			meta: { count: 1, source: "u-src" },
 		});
 		expect(out).toBe("u-src  related DEV-2  (1)");
+	});
+
+	it("renders a duplicate-of relation without inverting the type", () => {
+		// duplicate-of is the one type that exercises the non-`blocks`,
+		// non-inverted branch (source stays on the `issue` side).
+		const out = formatLine({
+			data: [
+				{
+					id: "rel-1",
+					type: "duplicate",
+					issue: { id: "u-src", identifier: "DEV-1", title: "src" },
+					relatedIssue: { id: "u-dup", identifier: "DEV-9", title: "dup" },
+				},
+			],
+			meta: { count: 1, source: "DEV-1" },
+		});
+		expect(out).toBe("DEV-1  duplicate DEV-9  (1)");
 	});
 });
 

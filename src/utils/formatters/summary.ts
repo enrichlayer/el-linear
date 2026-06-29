@@ -852,9 +852,10 @@ function relField(v: unknown, field: "identifier" | "title"): string {
 /**
  * Table render for an `issues relate` result — the `{ data: IssueRelation[] }`
  * envelope each entry is `{ type, issue, relatedIssue }`. Rendered literally
- * as `TYPE  FROM → TO  TITLE` (the stored relation direction), so a reverse
- * relation (e.g. `--blocked-by`) reads naturally from whichever side it was
- * written. The source-oriented one-line view lives in `formatLine` (--quiet).
+ * as `TYPE  FROM  TO  TITLE` (the stored relation direction, FROM→TO), so a
+ * reverse relation (e.g. `--blocked-by`) reads naturally from whichever side
+ * it was written. The source-oriented one-line view lives in `formatLine`
+ * (--quiet).
  */
 export function formatRelationList(relations: unknown[]): string {
 	return renderTable(
@@ -1418,6 +1419,13 @@ export function formatLine(payload: unknown): string {
  * `relatedIssue` side — mirroring `normalizeInverseType` in the relations
  * query path. The `meta.source` is the raw arg the user passed (identifier or
  * UUID); we match it against either node's `identifier` or `id`.
+ *
+ * Coupling note: this source-matching is only sound because `resolveIssueId`
+ * admits `meta.source` solely as a canonical `TEAM-NUM` identifier or a UUID —
+ * the two forms compared below. If that resolver is ever widened to accept
+ * Linear URLs / slug-ids (as `--project` already does), `matchesSource` would
+ * stop matching and reverse relations would mis-group; match on the resolved
+ * `sourceId` instead at that point.
  */
 function formatRelationLine(payload: unknown): string {
 	const obj = asObj(payload);
