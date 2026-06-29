@@ -18,6 +18,7 @@ import {
 	formatMilestoneSummary,
 	formatProjectList,
 	formatProjectSummary,
+	formatRelationList,
 	formatReleaseList,
 	formatReleaseSummary,
 	formatSearchResultList,
@@ -759,6 +760,35 @@ describe("inferKindFromPayload", () => {
 			]),
 		).toBe("attachment-list");
 	});
+
+	it("identifies a relation list (issue+relatedIssue+type) by envelope", () => {
+		expect(
+			inferKindFromPayload({
+				data: [
+					{
+						id: "rel-1",
+						type: "related",
+						issue: { id: "u1", identifier: "DEV-1", title: "a" },
+						relatedIssue: { id: "u2", identifier: "DEV-2", title: "b" },
+					},
+				],
+				meta: { count: 1, source: "DEV-1" },
+			}),
+		).toBe("relation-list");
+	});
+
+	it("identifies a bare relation array as a relation list", () => {
+		expect(
+			inferKindFromPayload([
+				{
+					id: "rel-1",
+					type: "blocks",
+					issue: { id: "u1", identifier: "DEV-1", title: "a" },
+					relatedIssue: { id: "u2", identifier: "DEV-2", title: "b" },
+				},
+			]),
+		).toBe("relation-list");
+	});
 });
 
 describe("dispatch", () => {
@@ -809,6 +839,32 @@ describe("dispatch", () => {
 		const out = dispatch("generic", { foo: "bar" });
 		expect(out).toContain("foo:");
 		expect(out).toContain("bar");
+	});
+
+	it("routes a relate envelope end-to-end (inferKind → dispatch → table)", () => {
+		// Mirrors the real `--format summary` path: the relate handler's
+		// { data, meta } envelope flows through inferKindFromPayload into
+		// dispatch, covering the relation-list switch case + detection wiring.
+		const envelope = {
+			data: [
+				{
+					id: "rel-1",
+					type: "related",
+					issue: { id: "u1", identifier: "DEV-1", title: "src" },
+					relatedIssue: { id: "u2", identifier: "DEV-2", title: "target" },
+				},
+			],
+			meta: { count: 1, source: "DEV-1" },
+		};
+		const out = dispatch(inferKindFromPayload(envelope), envelope);
+		// Source-oriented table: TYPE / TARGET / TITLE, no FROM/TO, and the
+		// source issue (DEV-1) is not a column — only the peer (DEV-2) is.
+		expect(out).toMatch(/TYPE\s+TARGET\s+TITLE/);
+		expect(out).toContain("related");
+		expect(out).toContain("DEV-2");
+		expect(out).toContain("target");
+		expect(out).not.toContain("DEV-1");
+		expect(out.trimEnd().endsWith("1 relation")).toBe(true);
 	});
 });
 
@@ -862,6 +918,181 @@ describe("formatLine (--quiet write confirmation, DEV-4650)", () => {
 		const out = formatLine({ foo: "bar", n: 1 });
 		expect(out).toBe('{"foo":"bar","n":1}');
 		expect(out).not.toContain("\n");
+	});
+
+	it("renders a relate result as SOURCE  type targets  (count) on one line", () => {
+		const out = formatLine({
+			data: [
+				{
+					id: "rel-1",
+					type: "related",
+					issue: { id: "u-src", identifier: "DEV-1", title: "src" },
+					relatedIssue: { id: "u-a", identifier: "DEV-2", title: "a" },
+				},
+				{
+					id: "rel-2",
+					type: "related",
+					issue: { id: "u-src", identifier: "DEV-1", title: "src" },
+					relatedIssue: { id: "u-b", identifier: "DEV-3", title: "b" },
+				},
+			],
+			meta: { count: 2, source: "DEV-1" },
+		});
+		expect(out).toBe("DEV-1  related DEV-2,DEV-3  (2)");
+		expect(out).not.toContain("\n");
+	});
+
+	it("inverts type when the source sits on the relatedIssue side (blocked-by)", () => {
+		// createRelations stores --blocked-by X as { type: blocks, issue: X,
+		// relatedIssue: source }, so from the source it reads "blockedBy".
+		const out = formatLine({
+			data: [
+				{
+					id: "rel-1",
+					type: "blocks",
+					issue: { id: "u-blocker", identifier: "DEV-9", title: "blocker" },
+					relatedIssue: { id: "u-src", identifier: "DEV-1", title: "src" },
+				},
+			],
+			meta: { count: 1, source: "DEV-1" },
+		});
+		expect(out).toBe("DEV-1  blockedBy DEV-9  (1)");
+	});
+
+	it("groups mixed relation types into one stable line", () => {
+		const out = formatLine({
+			data: [
+				{
+					id: "rel-1",
+					type: "related",
+					issue: { id: "u-src", identifier: "DEV-1", title: "src" },
+					relatedIssue: { id: "u-a", identifier: "DEV-2", title: "a" },
+				},
+				{
+					id: "rel-2",
+					type: "blocks",
+					issue: { id: "u-src", identifier: "DEV-1", title: "src" },
+					relatedIssue: { id: "u-b", identifier: "DEV-3", title: "b" },
+				},
+			],
+			meta: { count: 2, source: "DEV-1" },
+		});
+		expect(out).toBe("DEV-1  related DEV-2; blocks DEV-3  (2)");
+	});
+
+	it("matches the source by UUID when meta.source is a uuid", () => {
+		const out = formatLine({
+			data: [
+				{
+					id: "rel-1",
+					type: "related",
+					issue: { id: "u-src", identifier: "DEV-1", title: "src" },
+					relatedIssue: { id: "u-a", identifier: "DEV-2", title: "a" },
+				},
+			],
+			meta: { count: 1, source: "u-src" },
+		});
+		expect(out).toBe("u-src  related DEV-2  (1)");
+	});
+
+	it("renders a duplicate-of relation without inverting the type", () => {
+		// duplicate-of is the one type that exercises the non-`blocks`,
+		// non-inverted branch (source stays on the `issue` side).
+		const out = formatLine({
+			data: [
+				{
+					id: "rel-1",
+					type: "duplicate",
+					issue: { id: "u-src", identifier: "DEV-1", title: "src" },
+					relatedIssue: { id: "u-dup", identifier: "DEV-9", title: "dup" },
+				},
+			],
+			meta: { count: 1, source: "DEV-1" },
+		});
+		expect(out).toBe("DEV-1  duplicate DEV-9  (1)");
+	});
+});
+
+describe("formatRelationList (issues relate summary)", () => {
+	it("renders source-oriented TYPE / TARGET / TITLE columns and a count", () => {
+		const out = formatRelationList(
+			[
+				{
+					id: "rel-1",
+					type: "related",
+					issue: { id: "u1", identifier: "DEV-1", title: "src" },
+					relatedIssue: {
+						id: "u2",
+						identifier: "DEV-2",
+						title: "target title",
+					},
+				},
+			],
+			"DEV-1",
+		);
+		expect(out).toMatch(/TYPE\s+TARGET\s+TITLE/);
+		expect(out).not.toContain("FROM");
+		expect(out).not.toContain("TO ");
+		expect(out).toContain("related");
+		expect(out).toContain("DEV-2"); // peer (target)
+		expect(out).not.toContain("DEV-1"); // source is not a column
+		expect(out).toContain("target title");
+		expect(out.trimEnd().endsWith("1 relation")).toBe(true);
+	});
+
+	it("re-frames a reverse (blocked-by) relation from the source's view", () => {
+		// Stored reversed: { type:blocks, issue:peer, relatedIssue:source }.
+		// From DEV-1's perspective that's `blockedBy DEV-9`.
+		const out = formatRelationList(
+			[
+				{
+					type: "blocks",
+					issue: { identifier: "DEV-9", title: "blocker" },
+					relatedIssue: { identifier: "DEV-1", title: "src" },
+				},
+			],
+			"DEV-1",
+		);
+		expect(out).toContain("blockedBy");
+		expect(out).toContain("DEV-9"); // peer
+		expect(out).toContain("blocker"); // peer's title
+		expect(out).not.toContain("DEV-1");
+	});
+
+	it("falls back to stored direction when no source is given (bare array)", () => {
+		const out = formatRelationList([
+			{
+				type: "blocks",
+				issue: { identifier: "DEV-9", title: "blocker" },
+				relatedIssue: { identifier: "DEV-1", title: "src" },
+			},
+		]);
+		// No source ⇒ no inversion, peer = relatedIssue.
+		expect(out).toContain("blocks");
+		expect(out).toContain("DEV-1");
+	});
+
+	it("pluralizes the relation count", () => {
+		const out = formatRelationList(
+			[
+				{
+					type: "related",
+					issue: { identifier: "DEV-1", title: "src" },
+					relatedIssue: { identifier: "DEV-2", title: "a" },
+				},
+				{
+					type: "related",
+					issue: { identifier: "DEV-1", title: "src" },
+					relatedIssue: { identifier: "DEV-3", title: "b" },
+				},
+			],
+			"DEV-1",
+		);
+		expect(out.trimEnd().endsWith("2 relations")).toBe(true);
+	});
+
+	it("renders the empty marker for no relations", () => {
+		expect(formatRelationList([])).toBe("(no relations)");
 	});
 });
 

@@ -662,9 +662,9 @@ Mutually exclusive with `--field` / `--sections` / `--with`.
 
 ### One-line write confirmations: `-q, --quiet`
 
-`issues create|update` and `comments create|update` accept `-q, --quiet`,
-printing a single confirmation line instead of the full JSON envelope so
-you don't have to `grep` the result:
+`issues create|update`, `issues relate`, and `comments create|update` accept
+`-q, --quiet`, printing a single confirmation line instead of the full JSON
+envelope so you don't have to `grep` the result:
 
 ```bash
 el-linear issues update DEV-123 --status "In Review" --quiet
@@ -672,6 +672,24 @@ el-linear issues update DEV-123 --status "In Review" --quiet
 
 el-linear comments create DEV-123 --body "..." --quiet
 # comment 6f1c…
+
+el-linear issues relate DEV-123 --related-to "DEV-456,DEV-789" --quiet
+# DEV-123  related DEV-456,DEV-789  (2)
+```
+
+For `issues relate` the line is source-oriented — relations are grouped by
+type from the source issue's perspective, so a `--blocked-by` reads back as
+`blockedBy`. `--format summary` renders the same source-oriented view as a
+`TYPE / TARGET / TITLE` table (TARGET is the peer issue; the source isn't
+repeated as a column):
+
+```bash
+el-linear issues relate DEV-1 --blocked-by DEV-9 --format summary
+# TYPE        TARGET   TITLE
+# ------------------------------------
+# blockedBy   DEV-9    Add IP ban system
+#
+# 1 relation
 ```
 
 `--quiet` overrides `--format` and is independent of `--fields` / `--jq`.

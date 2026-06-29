@@ -1820,6 +1820,10 @@ export function setupIssuesCommands(program: Command): void {
 		.option("--blocks <issues>", "issues this blocks (comma-separated)")
 		.option("--blocked-by <issues>", "issues blocking this (comma-separated)")
 		.option("--duplicate-of <issue>", "mark as duplicate of another issue")
+		.option(
+			"-q, --quiet",
+			"print one confirmation line (SOURCE  type targets  (count)) instead of the full JSON",
+		)
 		.action(handleAsyncCommand(handleRelateIssue));
 
 	issues
