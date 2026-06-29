@@ -197,7 +197,15 @@ el-linear issues search "keywords from proposed title" --include-closed 2>&1
    el-linear issues create "Title" --team ENG --related-to "ENG-456,ENG-789" ... 2>&1
    ```
 
-### Surfacing relation candidates — explicit user reply required ([DEV-4494](https://linear.app/verticalint/issue/DEV-4494/))
+### Existence check — before an "add capability X" issue ([DEV-5097](https://linear.app/verticalint/issue/DEV-5097/))
+
+The dup-check above guards against duplicating an *issue*. This guards against duplicating *reality*: before filing an issue to **add** a flag / guard / command / subcommand, confirm it doesn't **already exist**.
+
+- `<cli> <subcommand> --help` (the flag may be a global option absent from the subcommand's help — check `<cli> --help` too).
+- `el-catalog commands --search "<intent>"` / `el-catalog clis --search` (the snapshot likely already lists it).
+- For a hook/guard, grep the source — e.g. `cli/el-hook/src/checks`.
+
+Skipping it cost two needless branch+MR cycles in one session: a "feature" issue to add a hook guard that already existed and was firing, and one to add `--jq`/`--fields` flags that already worked — both premises only caught at implementation.
 
 When `el-linear issues search` (or the cross-resource `search`) returns rows
 carrying issue identifiers, the JSON envelope embeds a `_warnings` line
