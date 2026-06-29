@@ -843,40 +843,70 @@ export function formatLabelList(labels: unknown[]): string {
 
 // ── relations ──────────────────────────────────────────────────
 
-/** Pull a string field off a nested issue node ({ identifier, title, … }). */
-function relField(v: unknown, field: "identifier" | "title"): string {
-	const o = asObj(v);
-	return s(o?.[field]);
+/**
+ * Re-frame a stored relation row from the source issue's perspective: returns
+ * the normalized relation `type` (a reverse `blocks` becomes `blockedBy`) and
+ * the `peer` — the non-source issue node. `createRelations` stores a
+ * `--blocked-by X` row reversed (`{ type:"blocks", issue:X, relatedIssue:source }`),
+ * so the source can sit on either side; we orient by `sourceRef`.
+ *
+ * `sourceRef` is the raw arg the user passed — a canonical `TEAM-NUM`
+ * identifier or a UUID, the only two forms `resolveIssueId` admits — matched
+ * against either node's `identifier` or `id`. (Coupling note: if that resolver
+ * is ever widened to accept Linear URLs / slug-ids, as `--project` already
+ * does, this match would need the resolved `sourceId` instead.) With no source
+ * (`"—"`, e.g. a bare array with no `meta`), nothing matches, so it falls back
+ * to the stored direction: peer = `relatedIssue`, type uninverted.
+ */
+function relationFromSource(
+	rel: Record<string, unknown>,
+	sourceRef: string,
+): { type: string; peer: Record<string, unknown> | null } {
+	const matchesSource = (node: Record<string, unknown> | null): boolean =>
+		!!node &&
+		sourceRef !== "—" &&
+		(s(node.identifier) === sourceRef || s(node.id) === sourceRef);
+	const issue = asObj(rel.issue);
+	const related = asObj(rel.relatedIssue);
+	// Source on the relatedIssue side ⇒ this is the inverse direction.
+	const sourceIsRelated = matchesSource(related) && !matchesSource(issue);
+	const peer = sourceIsRelated ? issue : related;
+	const rawType = s(rel.type);
+	const type = sourceIsRelated && rawType === "blocks" ? "blockedBy" : rawType;
+	return { type, peer };
 }
 
 /**
  * Table render for an `issues relate` result — the `{ data: IssueRelation[] }`
- * envelope each entry is `{ type, issue, relatedIssue }`. Rendered literally
- * as `TYPE  FROM  TO  TITLE` (the stored relation direction, FROM→TO), so a
- * reverse relation (e.g. `--blocked-by`) reads naturally from whichever side
- * it was written. The source-oriented one-line view lives in `formatLine`
- * (--quiet).
+ * envelope where each entry is `{ type, issue, relatedIssue }`. Rendered
+ * **source-oriented** (`TYPE  TARGET  TITLE`) to match the `--quiet` line: the
+ * type is normalized from the source's perspective (a `--blocked-by` reads as
+ * `blockedBy`) and TARGET is the peer (non-source) issue. `sourceRef` comes
+ * from the envelope's `meta.source` via `dispatch`; absent it (a bare array),
+ * the row falls back to the stored direction.
  */
-export function formatRelationList(relations: unknown[]): string {
+export function formatRelationList(
+	relations: unknown[],
+	sourceRef = "—",
+): string {
+	const rows = relations.map((raw) => {
+		const { type, peer } = relationFromSource(asObj(raw) ?? {}, sourceRef);
+		return {
+			type,
+			target: s(peer?.identifier ?? peer?.id),
+			title: s(peer?.title),
+		};
+	});
 	return renderTable(
-		relations.map((raw) => asObj(raw) ?? {}),
+		rows,
 		[
-			{ header: "TYPE", minWidth: 4, extract: (r) => s(r.type) },
-			{
-				header: "FROM",
-				minWidth: 4,
-				extract: (r) => relField(r.issue, "identifier"),
-			},
-			{
-				header: "TO",
-				minWidth: 4,
-				extract: (r) => relField(r.relatedIssue, "identifier"),
-			},
+			{ header: "TYPE", minWidth: 4, extract: (r) => r.type },
+			{ header: "TARGET", minWidth: 6, extract: (r) => r.target },
 			{
 				header: "TITLE",
 				minWidth: 5,
 				maxWidth: TITLE_TRUNC,
-				extract: (r) => relField(r.relatedIssue, "title"),
+				extract: (r) => r.title,
 			},
 		],
 		{ emptyText: "(no relations)", itemNoun: "relation" },
@@ -1364,7 +1394,7 @@ export function dispatch(
 		case "search-result-list":
 			return formatSearchResultList(list ?? []);
 		case "relation-list":
-			return formatRelationList(list ?? []);
+			return formatRelationList(list ?? [], s(asObj(obj?.meta)?.source));
 		case "empty-list":
 			return "(no results)";
 		case "generic":
@@ -1413,19 +1443,9 @@ export function formatLine(payload: unknown): string {
  *   EMW-331  related EMW-339,EMW-340  (2)
  *   EMW-331  blockedBy EMW-400; related EMW-339  (2)
  *
- * Direction matters: `createRelations` stores a `--blocked-by X` row with
- * `type: "blocks"`, `issue: X`, `relatedIssue: source`. Seen from the source
- * that's "blockedBy", so we invert the type when the source sits on the
- * `relatedIssue` side — mirroring `normalizeInverseType` in the relations
- * query path. The `meta.source` is the raw arg the user passed (identifier or
- * UUID); we match it against either node's `identifier` or `id`.
- *
- * Coupling note: this source-matching is only sound because `resolveIssueId`
- * admits `meta.source` solely as a canonical `TEAM-NUM` identifier or a UUID —
- * the two forms compared below. If that resolver is ever widened to accept
- * Linear URLs / slug-ids (as `--project` already does), `matchesSource` would
- * stop matching and reverse relations would mis-group; match on the resolved
- * `sourceId` instead at that point.
+ * The per-row reframing (peer + type inversion for reverse `--blocked-by`)
+ * is shared with the summary table via `relationFromSource`; see its doc for
+ * the direction and source-matching rules.
  */
 function formatRelationLine(payload: unknown): string {
 	const obj = asObj(payload);
@@ -1436,24 +1456,12 @@ function formatRelationLine(payload: unknown): string {
 			: [];
 	const sourceRef = s(asObj(obj?.meta)?.source);
 
-	const matchesSource = (node: Record<string, unknown> | null): boolean =>
-		!!node &&
-		sourceRef !== "—" &&
-		(s(node.identifier) === sourceRef || s(node.id) === sourceRef);
-
 	// Preserve first-seen type order for a stable line.
 	const byType = new Map<string, string[]>();
 	for (const raw of relations) {
 		const rel = asObj(raw);
 		if (!rel) continue;
-		const issue = asObj(rel.issue);
-		const related = asObj(rel.relatedIssue);
-		// Source on the relatedIssue side ⇒ this is the inverse direction.
-		const sourceIsRelated = matchesSource(related) && !matchesSource(issue);
-		const peer = sourceIsRelated ? issue : related;
-		const rawType = s(rel.type);
-		const type =
-			sourceIsRelated && rawType === "blocks" ? "blockedBy" : rawType;
+		const { type, peer } = relationFromSource(rel, sourceRef);
 		const targetId = s(peer?.identifier ?? peer?.id);
 		const bucket = byType.get(type);
 		if (bucket) bucket.push(targetId);

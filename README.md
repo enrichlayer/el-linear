@@ -679,8 +679,18 @@ el-linear issues relate DEV-123 --related-to "DEV-456,DEV-789" --quiet
 
 For `issues relate` the line is source-oriented — relations are grouped by
 type from the source issue's perspective, so a `--blocked-by` reads back as
-`blockedBy`. The same result under `--format summary` renders a
-`TYPE / FROM / TO / TITLE` table.
+`blockedBy`. `--format summary` renders the same source-oriented view as a
+`TYPE / TARGET / TITLE` table (TARGET is the peer issue; the source isn't
+repeated as a column):
+
+```bash
+el-linear issues relate DEV-1 --blocked-by DEV-9 --format summary
+# TYPE        TARGET   TITLE
+# ------------------------------------
+# blockedBy   DEV-9    Add IP ban system
+#
+# 1 relation
+```
 
 `--quiet` overrides `--format` and is independent of `--fields` / `--jq`.
 

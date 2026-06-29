@@ -857,10 +857,13 @@ describe("dispatch", () => {
 			meta: { count: 1, source: "DEV-1" },
 		};
 		const out = dispatch(inferKindFromPayload(envelope), envelope);
-		expect(out).toMatch(/TYPE\s+FROM\s+TO\s+TITLE/);
+		// Source-oriented table: TYPE / TARGET / TITLE, no FROM/TO, and the
+		// source issue (DEV-1) is not a column — only the peer (DEV-2) is.
+		expect(out).toMatch(/TYPE\s+TARGET\s+TITLE/);
 		expect(out).toContain("related");
-		expect(out).toContain("DEV-1");
 		expect(out).toContain("DEV-2");
+		expect(out).toContain("target");
+		expect(out).not.toContain("DEV-1");
 		expect(out.trimEnd().endsWith("1 relation")).toBe(true);
 	});
 });
@@ -1011,38 +1014,80 @@ describe("formatLine (--quiet write confirmation, DEV-4650)", () => {
 });
 
 describe("formatRelationList (issues relate summary)", () => {
-	it("renders TYPE / FROM / TO / TITLE columns and a relation count", () => {
-		const out = formatRelationList([
-			{
-				id: "rel-1",
-				type: "related",
-				issue: { id: "u1", identifier: "DEV-1", title: "src" },
-				relatedIssue: { id: "u2", identifier: "DEV-2", title: "target title" },
-			},
-		]);
-		expect(out).toContain("TYPE");
-		expect(out).toContain("FROM");
-		expect(out).toContain("TO");
+	it("renders source-oriented TYPE / TARGET / TITLE columns and a count", () => {
+		const out = formatRelationList(
+			[
+				{
+					id: "rel-1",
+					type: "related",
+					issue: { id: "u1", identifier: "DEV-1", title: "src" },
+					relatedIssue: {
+						id: "u2",
+						identifier: "DEV-2",
+						title: "target title",
+					},
+				},
+			],
+			"DEV-1",
+		);
+		expect(out).toMatch(/TYPE\s+TARGET\s+TITLE/);
+		expect(out).not.toContain("FROM");
+		expect(out).not.toContain("TO ");
 		expect(out).toContain("related");
-		expect(out).toContain("DEV-1");
-		expect(out).toContain("DEV-2");
+		expect(out).toContain("DEV-2"); // peer (target)
+		expect(out).not.toContain("DEV-1"); // source is not a column
 		expect(out).toContain("target title");
 		expect(out.trimEnd().endsWith("1 relation")).toBe(true);
 	});
 
-	it("pluralizes the relation count", () => {
+	it("re-frames a reverse (blocked-by) relation from the source's view", () => {
+		// Stored reversed: { type:blocks, issue:peer, relatedIssue:source }.
+		// From DEV-1's perspective that's `blockedBy DEV-9`.
+		const out = formatRelationList(
+			[
+				{
+					type: "blocks",
+					issue: { identifier: "DEV-9", title: "blocker" },
+					relatedIssue: { identifier: "DEV-1", title: "src" },
+				},
+			],
+			"DEV-1",
+		);
+		expect(out).toContain("blockedBy");
+		expect(out).toContain("DEV-9"); // peer
+		expect(out).toContain("blocker"); // peer's title
+		expect(out).not.toContain("DEV-1");
+	});
+
+	it("falls back to stored direction when no source is given (bare array)", () => {
 		const out = formatRelationList([
 			{
-				type: "related",
-				issue: { identifier: "DEV-1", title: "src" },
-				relatedIssue: { identifier: "DEV-2", title: "a" },
-			},
-			{
-				type: "related",
-				issue: { identifier: "DEV-1", title: "src" },
-				relatedIssue: { identifier: "DEV-3", title: "b" },
+				type: "blocks",
+				issue: { identifier: "DEV-9", title: "blocker" },
+				relatedIssue: { identifier: "DEV-1", title: "src" },
 			},
 		]);
+		// No source ⇒ no inversion, peer = relatedIssue.
+		expect(out).toContain("blocks");
+		expect(out).toContain("DEV-1");
+	});
+
+	it("pluralizes the relation count", () => {
+		const out = formatRelationList(
+			[
+				{
+					type: "related",
+					issue: { identifier: "DEV-1", title: "src" },
+					relatedIssue: { identifier: "DEV-2", title: "a" },
+				},
+				{
+					type: "related",
+					issue: { identifier: "DEV-1", title: "src" },
+					relatedIssue: { identifier: "DEV-3", title: "b" },
+				},
+			],
+			"DEV-1",
+		);
 		expect(out.trimEnd().endsWith("2 relations")).toBe(true);
 	});
 
