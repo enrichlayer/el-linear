@@ -4,6 +4,13 @@ All notable changes to `@enrichlayer/el-linear` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.31.0](https://github.com/enrichlayer/el-linear/compare/v1.30.0...v1.31.0) (2026-06-29)
+
+
+### Features
+
+* **issues:** add --quiet and summary output to issues relate (DEV-5081) ([#191](https://github.com/enrichlayer/el-linear/issues/191)) ([8aaa102](https://github.com/enrichlayer/el-linear/commit/8aaa102d00ccad93ef097b8162210c74c1b0a8e0))
+
 ## [1.30.0](https://github.com/enrichlayer/el-linear/compare/v1.29.1...v1.30.0) (2026-06-25)
 
 
