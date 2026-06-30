@@ -4,6 +4,13 @@ All notable changes to `@enrichlayer/el-linear` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.32.0](https://github.com/enrichlayer/el-linear/compare/v1.31.0...v1.32.0) (2026-06-30)
+
+
+### Features
+
+* **branch:** add branch validate subcommand (team-validity gate) ([#194](https://github.com/enrichlayer/el-linear/issues/194)) ([477c732](https://github.com/enrichlayer/el-linear/commit/477c7322c19c474b21e07722609fcc9dae5d18f9))
+
 ## [1.31.0](https://github.com/enrichlayer/el-linear/compare/v1.30.0...v1.31.0) (2026-06-29)
 
 
