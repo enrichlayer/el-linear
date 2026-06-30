@@ -69,6 +69,45 @@ describe("resolveMentions", () => {
 		expect(result).toBeNull();
 	});
 
+	it("ignores scoped package names instead of warning on package scopes (DEV-5120)", async () => {
+		const result = await resolveMentions(
+			"Upgrade @enrichlayer/el-linear and @scope/pkg in Tools.",
+			mockLinearService(),
+		);
+		expect(result).toBeNull();
+	});
+
+	it("ignores versioned scoped package coordinates (DEV-5120)", async () => {
+		const result = await resolveMentions(
+			"Pin @enrichlayer/el-linear@1.26.0 and @scope/pkg@^2.0.0.",
+			mockLinearService(),
+		);
+		expect(result).toBeNull();
+	});
+
+	it("ignores email addresses instead of warning on email hostnames (DEV-5120)", async () => {
+		const result = await resolveMentions(
+			"Send the note to ops@example.com and bob@example.org.",
+			mockLinearService(),
+		);
+		expect(result).toBeNull();
+	});
+
+	it("keeps real explicit mentions next to scoped package names (DEV-5120)", async () => {
+		const result = await resolveMentions(
+			"@bob please review @enrichlayer/el-linear.",
+			mockLinearService(),
+		);
+		expect(result).not.toBeNull();
+		expect(result!.unresolvedExplicit).toEqual([]);
+		expect(result!.resolved).toEqual([{ label: "bob", userId: UUID_BOB }]);
+		const mentions = result!.bodyData!.content![0].content!.filter(
+			(n) => n.type === "suggestion_userMentions",
+		);
+		expect(mentions).toHaveLength(1);
+		expect(mentions[0].attrs!.label).toBe("bob");
+	});
+
 	it("resolves explicit mentions with non-Latin (Cyrillic) names (ALL-935)", async () => {
 		// Pre-fix: `@(\w+)` was ASCII-only, so `@Юрий` matched `@`
 		// followed by zero word chars and produced no useful name.
