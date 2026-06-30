@@ -24,6 +24,7 @@ import { createLinearService } from "../utils/linear-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
 import { getRootOpts } from "../utils/root-opts.js";
 import { getCurrentBranch, parseBranchName } from "./issue-id.js";
+import { TEAMS_LIST_DEFAULT_LIMIT } from "./teams.js";
 
 // Branches that never carry a Linear ID and must not be blocked. Mirrors the
 // exemptions in the tools-repo gate (main/master/detached HEAD/empty).
@@ -83,13 +84,13 @@ export function setupBranchCommands(program: Command): void {
 							configTTL: loadConfig().cacheTTLSeconds,
 							noCacheFlag: rootOpts.cache === false,
 						});
-						// Same cache key as `teams list` (limit 100) — share the entry.
+						// Same cache key and limit as `teams list` default — share the entry.
 						const teams = await cached(
-							"teams-list-limit:100",
+							`teams-list-limit:${TEAMS_LIST_DEFAULT_LIMIT}`,
 							ttl,
 							async () => {
 								const service = await createLinearService(rootOpts);
-								return service.getTeams(100);
+								return service.getTeams(TEAMS_LIST_DEFAULT_LIMIT);
 							},
 						);
 						teamKeys = teams.map((t) => t.key);

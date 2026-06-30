@@ -109,4 +109,13 @@ describe("branch validate", () => {
 		);
 		expect(process.exitCode).toBe(0);
 	});
+
+	it("--exit-zero suppresses exit 2 when teams can't be loaded", async () => {
+		mockGetTeams.mockRejectedValue(new Error("offline"));
+		await validate("feature/EMW-349-pricing-panel", ["--exit-zero"]);
+		expect(mockOutputSuccess).toHaveBeenCalledWith(
+			expect.objectContaining({ valid: null, reason: "teams-unavailable" }),
+		);
+		expect(process.exitCode).toBe(0);
+	});
 });
