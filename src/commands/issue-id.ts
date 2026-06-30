@@ -64,7 +64,7 @@ export function parseBranchName(branch: string): ParsedBranch {
 	};
 }
 
-function getCurrentBranch(): string {
+export function getCurrentBranch(): string {
 	const result = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
 		encoding: "utf8",
 	});

@@ -6,6 +6,8 @@ import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
 import { getRootOpts } from "../utils/root-opts.js";
 import { parsePositiveInt } from "../utils/validators.js";
 
+export const TEAMS_LIST_DEFAULT_LIMIT = 100;
+
 export function setupTeamsCommands(program: Command): void {
 	const teams = program
 		.command("teams")
@@ -16,7 +18,11 @@ export function setupTeamsCommands(program: Command): void {
 	teams
 		.command("list")
 		.description("List all teams")
-		.option("-l, --limit <number>", "limit results", "100")
+		.option(
+			"-l, --limit <number>",
+			"limit results",
+			String(TEAMS_LIST_DEFAULT_LIMIT),
+		)
 		.action(
 			handleAsyncCommand(async (options: OptionValues, command: Command) => {
 				const rootOpts = getRootOpts(command);
