@@ -301,8 +301,10 @@ export class GraphQLIssuesService {
 	/**
 	 * Batch-fetches N issues in a single GraphQL round-trip (DEV-4477).
 	 *
-	 * Replaces `Promise.all(refs.map(getIssueById))` — that pattern issues N
-	 * concurrent queries; this one issues exactly one. Useful for
+	 * Replaces `Promise.all(refs.map(getIssueById))` as the primary path. The
+	 * batch response is still order-restored locally; if Linear omits an input
+	 * ref from that response, the missing ref falls back to the single-issue
+	 * lookup path so valid issues are not misreported as missing. Useful for
 	 * `el-linear issues read <id...>`, the only caller today.
 	 *
 	 * Identifier shapes accepted (mirrors `getIssueById`):
@@ -384,15 +386,16 @@ export class GraphQLIssuesService {
 			}
 		}
 
-		const ordered: IssueWithCommentsNode[] = [];
+		const ordered: LinearIssue[] = [];
 		for (const ref of refs) {
 			const node = isUuid(ref) ? byUuid.get(ref) : byIdentifier.get(ref);
 			if (!node) {
-				throw notFoundError("Issue", ref);
+				ordered.push(await this.getIssueById(ref));
+				continue;
 			}
-			ordered.push(node);
+			ordered.push(this.transformIssueData(node));
 		}
-		return ordered.map((issue) => this.transformIssueData(issue));
+		return ordered;
 	}
 
 	private async getFirstStartedStatus(team: {

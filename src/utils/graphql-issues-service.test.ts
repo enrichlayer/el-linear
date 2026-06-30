@@ -1293,6 +1293,49 @@ describe("GraphQLIssuesService", () => {
 			expect(result[3].identifier).toBe("DEV-2");
 		});
 
+		it("falls back per ref when a valid final identifier is missing from the batch response", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			const batchNodes = [
+				makeNode("uuid-5119", "DEV-5119"),
+				makeNode("uuid-5124", "DEV-5124"),
+				makeNode("uuid-5125", "DEV-5125"),
+				makeNode("uuid-5131", "DEV-5131"),
+				makeNode("uuid-5132", "DEV-5132"),
+			];
+			const fallbackNode = makeNode("uuid-4365", "DEV-4365");
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValueOnce({ issues: { nodes: batchNodes } })
+				.mockResolvedValueOnce({ issues: { nodes: [fallbackNode] } });
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			const result = await service.getIssuesByRefs([
+				"DEV-5119",
+				"DEV-5124",
+				"DEV-5125",
+				"DEV-5131",
+				"DEV-5132",
+				"DEV-4365",
+			]);
+
+			expect(rawRequest).toHaveBeenCalledTimes(2);
+			expect(rawRequest.mock.calls[0][0]).toContain("BatchGetIssues");
+			expect(rawRequest.mock.calls[1][0]).toContain("GetIssueByIdentifier");
+			expect(rawRequest.mock.calls[1][1]).toEqual({
+				teamKey: "DEV",
+				number: 4365,
+			});
+			expect(result.map((issue) => issue.identifier)).toEqual([
+				"DEV-5119",
+				"DEV-5124",
+				"DEV-5125",
+				"DEV-5131",
+				"DEV-5132",
+				"DEV-4365",
+			]);
+		});
+
 		it("falls back to a single getIssueById call for one ref", async () => {
 			const graphQLService = new GraphQLService({ apiKey: "token" });
 			const linearService = new LinearService({ apiKey: "token" });
@@ -1327,9 +1370,11 @@ describe("GraphQLIssuesService", () => {
 		it("throws notFoundError naming the first missing ref", async () => {
 			const graphQLService = new GraphQLService({ apiKey: "token" });
 			const linearService = new LinearService({ apiKey: "token" });
-			vi.spyOn(graphQLService, "rawRequest").mockResolvedValue({
-				issues: { nodes: [makeNode("uuid-1", "DEV-1")] },
-			});
+			vi.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValueOnce({
+					issues: { nodes: [makeNode("uuid-1", "DEV-1")] },
+				})
+				.mockResolvedValueOnce({ issues: { nodes: [] } });
 			const service = new GraphQLIssuesService(graphQLService, linearService);
 
 			// DEV-1 resolves, DEV-2 does not — error should name DEV-2.
