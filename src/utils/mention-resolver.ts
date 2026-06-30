@@ -8,7 +8,11 @@ import { isUuid } from "./uuid.js";
 // Unicode-aware mention regex: ASCII-only `\w` would silently fail to
 // match Cyrillic / accented Latin / CJK names (`@Юрий`, `@Niño`).
 // `\p{L}` covers all Unicode letters; `\p{N}` covers all numerics.
-const EXPLICIT_MENTION_REGEX = /@([\p{L}\p{N}_]+)/gu;
+const MENTION_NAME_CHARS = "\\p{L}\\p{N}_";
+const EXPLICIT_MENTION_REGEX = new RegExp(
+	`(?<![${MENTION_NAME_CHARS}])@([${MENTION_NAME_CHARS}]+)(?![${MENTION_NAME_CHARS}/])`,
+	"gu",
+);
 const WHITESPACE_SPLIT_REGEX = /\s+/;
 const FENCED_CODE_REGEX = /```[\s\S]*?```/g;
 const INLINE_CODE_REGEX = /`[^`]+`/g;
@@ -346,7 +350,9 @@ function buildCombinedRegex(
 		// Same Unicode-aware character class as EXPLICIT_MENTION_REGEX
 		// at module top so the splitter and the resolver agree on
 		// what counts as a name char.
-		parts.push("@[\\p{L}\\p{N}_]+");
+		parts.push(
+			`(?<![${MENTION_NAME_CHARS}])@[${MENTION_NAME_CHARS}]+(?![${MENTION_NAME_CHARS}/])`,
+		);
 	}
 
 	if (bare.size > 0) {
