@@ -77,6 +77,14 @@ describe("resolveMentions", () => {
 		expect(result).toBeNull();
 	});
 
+	it("ignores versioned scoped package coordinates (DEV-5120)", async () => {
+		const result = await resolveMentions(
+			"Pin @enrichlayer/el-linear@1.26.0 and @scope/pkg@^2.0.0.",
+			mockLinearService(),
+		);
+		expect(result).toBeNull();
+	});
+
 	it("ignores email addresses instead of warning on email hostnames (DEV-5120)", async () => {
 		const result = await resolveMentions(
 			"Send the note to ops@example.com and bob@example.org.",
