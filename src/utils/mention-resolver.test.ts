@@ -19,6 +19,7 @@ vi.mock("../config/resolver.js", () => ({
 			erin: UUID_ERIN,
 			rae: UUID_ERIN,
 			smith: UUID_ERIN,
+			"alice-gh": UUID_ERIN,
 			юрий: UUID_YURY,
 			tsukerman: UUID_YURY,
 		};
@@ -85,6 +86,22 @@ describe("resolveMentions", () => {
 		expect(result).toBeNull();
 	});
 
+	it("ignores hyphenated scoped package coordinates (DEV-5202)", async () => {
+		const result = await resolveMentions(
+			"Pin @ast-grep/napi@0.44.0 before rerunning the audit.",
+			mockLinearService(),
+		);
+		expect(result).toBeNull();
+	});
+
+	it("ignores explicit-looking tokens inside inline code (DEV-5202)", async () => {
+		const result = await resolveMentions(
+			"Use `@ast-grep/napi@0.44.0` and do not ping `@bob` from code.",
+			mockLinearService(),
+		);
+		expect(result).toBeNull();
+	});
+
 	it("ignores email addresses instead of warning on email hostnames (DEV-5120)", async () => {
 		const result = await resolveMentions(
 			"Send the note to ops@example.com and bob@example.org.",
@@ -106,6 +123,18 @@ describe("resolveMentions", () => {
 		);
 		expect(mentions).toHaveLength(1);
 		expect(mentions[0].attrs!.label).toBe("bob");
+	});
+
+	it("keeps real explicit hyphenated handles working (DEV-5202)", async () => {
+		const result = await resolveMentions(
+			"@alice-gh please review the package bump.",
+			mockLinearService(),
+		);
+		expect(result).not.toBeNull();
+		expect(result!.unresolvedExplicit).toEqual([]);
+		expect(result!.resolved).toEqual([
+			{ label: "alice-gh", userId: UUID_ERIN },
+		]);
 	});
 
 	it("resolves explicit mentions with non-Latin (Cyrillic) names (ALL-935)", async () => {

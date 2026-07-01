@@ -8,7 +8,7 @@ import { isUuid } from "./uuid.js";
 // Unicode-aware mention regex: ASCII-only `\w` would silently fail to
 // match Cyrillic / accented Latin / CJK names (`@Юрий`, `@Niño`).
 // `\p{L}` covers all Unicode letters; `\p{N}` covers all numerics.
-const MENTION_NAME_CHARS = "\\p{L}\\p{N}_";
+const MENTION_NAME_CHARS = "\\p{L}\\p{N}_\\-";
 const EXPLICIT_MENTION_REGEX = new RegExp(
 	`(?<![${MENTION_NAME_CHARS}])@([${MENTION_NAME_CHARS}]+)(?![${MENTION_NAME_CHARS}/])`,
 	"gu",
@@ -80,9 +80,10 @@ export async function resolveMentions(
 	// 1. Resolve explicit @name mentions (existing behavior).
 	const explicit = new Map<string, ResolvedMention>();
 	const unresolvedExplicit: string[] = [];
-	const explicitNames = [...body.matchAll(EXPLICIT_MENTION_REGEX)].map(
-		(m) => m[1],
-	);
+	const explicitScanBody = stripCodeAndLinks(body);
+	const explicitNames = [
+		...explicitScanBody.matchAll(EXPLICIT_MENTION_REGEX),
+	].map((m) => m[1]);
 	for (const name of new Set(explicitNames)) {
 		const userId = await resolveUserByName(name, linearService);
 		if (userId) {

@@ -188,6 +188,33 @@ describe("comments commands", () => {
 			errSpy.mockRestore();
 		});
 
+		it("does not warn on hyphenated scoped package coordinates (DEV-5202)", async () => {
+			const errSpy = vi.spyOn(logger, "error").mockImplementation(() => {});
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, [
+				"comments",
+				"create",
+				"ENG-123",
+				"--no-auto-mention",
+				"--body",
+				"Pin @ast-grep/napi@0.44.0 before rerunning the audit.",
+			]);
+
+			expect(mockResolveUserId).not.toHaveBeenCalled();
+			expect(errSpy).not.toHaveBeenCalled();
+			expect(mockRawRequest).toHaveBeenCalledWith(
+				expect.stringContaining("commentCreate"),
+				expect.objectContaining({
+					input: expect.objectContaining({
+						issueId: "resolved-uuid",
+						body: "Pin @ast-grep/napi@0.44.0 before rerunning the audit.",
+					}),
+				}),
+			);
+			errSpy.mockRestore();
+		});
+
 		it("marks mentions undelivered and warns when bodyData is rejected and falls back (DEV-4987)", async () => {
 			mockResolveUserId.mockResolvedValue("user-alice");
 			// First attempt (bodyData) is rejected by Linear; the default
