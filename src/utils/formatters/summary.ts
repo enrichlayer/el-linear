@@ -916,6 +916,47 @@ export function formatRelationList(
 	);
 }
 
+/**
+ * Table render for `issues related <id>` — the `{ data: RelatedIssueEntry[] }`
+ * envelope where each entry is `{ type, direction, issue }`. Distinct from
+ * `formatRelationList` (the `issues relate` mutation echo, `{ type, issue,
+ * relatedIssue }` shape): this is the read-path listing of ALL of an issue's
+ * relations, so direction, state, and assignee are surfaced per row instead
+ * of collapsing to a single source-oriented type/target/title line.
+ */
+export function formatIssueRelationList(relations: unknown[]): string {
+	const rows = relations.map((raw) => asObj(raw) ?? {});
+	return renderTable(
+		rows,
+		[
+			{ header: "RELATION", minWidth: 8, extract: (r) => s(r.type) },
+			{ header: "DIRECTION", minWidth: 9, extract: (r) => s(r.direction) },
+			{
+				header: "ID",
+				minWidth: 2,
+				extract: (r) => s(asObj(r.issue)?.identifier),
+			},
+			{
+				header: "STATE",
+				minWidth: 5,
+				extract: (r) => getName(asObj(r.issue)?.state),
+			},
+			{
+				header: "ASSIGNEE",
+				minWidth: 8,
+				extract: (r) => getName(asObj(r.issue)?.assignee),
+			},
+			{
+				header: "TITLE",
+				minWidth: 5,
+				maxWidth: TITLE_TRUNC,
+				extract: (r) => s(asObj(r.issue)?.title),
+			},
+		],
+		{ emptyText: "(no issue relations)", itemNoun: "relation" },
+	);
+}
+
 // ── users ──────────────────────────────────────────────────────
 
 export function formatUserSummary(user: Record<string, unknown>): string {
@@ -1200,6 +1241,7 @@ export type ResourceKind =
 	| "release-list"
 	| "search-result-list"
 	| "relation-list"
+	| "issue-relation-list"
 	| "empty-list"
 	| "generic";
 
@@ -1266,6 +1308,10 @@ function inferListKind(items: unknown[]): ResourceKind {
 	// identifier/title, so this must precede the issue-list check below.
 	if ("relatedIssue" in sample && "issue" in sample && "type" in sample)
 		return "relation-list";
+	// `issues related <id>` rows ({ type, direction, issue }) — the read-path
+	// listing, distinct from the `relatedIssue`-shaped mutation echo above.
+	if ("direction" in sample && "issue" in sample && "type" in sample)
+		return "issue-relation-list";
 	if ("identifier" in sample && "title" in sample) {
 		// could be issue or search result
 		if ("type" in sample && !("templateData" in sample)) {
@@ -1398,6 +1444,8 @@ export function dispatch(
 			return formatSearchResultList(list ?? []);
 		case "relation-list":
 			return formatRelationList(list ?? [], s(asObj(obj?.meta)?.source));
+		case "issue-relation-list":
+			return formatIssueRelationList(list ?? []);
 		case "empty-list":
 			return "(no results)";
 		case "generic":

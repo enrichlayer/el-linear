@@ -1433,8 +1433,52 @@ export function setupIssuesCommands(program: Command): void {
 	const issues = program
 		.command("issues")
 		.alias("issue")
-		.description("Issue operations");
-	issues.action(() => issues.help());
+		.description("Issue operations")
+		.argument(
+			"[issueId...]",
+			"issue ID(s) to read when no subcommand is given — shorthand for `issues read`",
+		)
+		.option(
+			"--body",
+			"Print the issue's full description as raw markdown text — no JSON " +
+				"envelope, single-issue only. Exits non-zero if the issue has no " +
+				"description. The whole-body sibling of --field; mutually exclusive " +
+				"with --field / --sections / --with.",
+		)
+		.option(
+			"--field <name>",
+			'Extract a single named section from the issue description (e.g. "Done when"). ' +
+				"Matches H2/H3 headers and bold pseudo-headers case-insensitively. " +
+				"Outputs the section text only — no JSON envelope. Single-issue only.",
+		)
+		.option(
+			"--sections <names>",
+			'Extract multiple named description sections in one call (comma-separated, e.g. "Done when,Out of scope"). ' +
+				"Single-issue only. Returns a JSON envelope { identifier, sections: { name -> text|null } }; missing sections appear as null + a _warnings entry. " +
+				"Sibling of --field (singular). Named --sections rather than --fields because the program already has a global --fields for output-key filtering.",
+		)
+		.option(
+			"--with <names>",
+			"Comma-separated opt-in includes. Each value fetches an extra " +
+				'block of data and adds it to the JSON envelope. Currently supported: "relations" ' +
+				"(adds an array of cross-issue relations under a top-level `relations` key).",
+		)
+		.addHelpText(
+			"after",
+			"\nNo-subcommand shorthand: `el-linear issue DEV-123` behaves like `issues read DEV-123`, " +
+				"including its options (--body, --field, --sections, --with).",
+		);
+	issues.action(
+		handleAsyncCommand(
+			(issueIds: string[] = [], options: OptionValues, command: Command) => {
+				if (issueIds.length === 0) {
+					issues.help();
+					return Promise.resolve();
+				}
+				return readIssues(issueIds, options, command);
+			},
+		),
+	);
 
 	// DEV-4480: `issues tree <ID>` lives in its own file because the
 	// recursive query builder + ASCII formatter belong together and are
