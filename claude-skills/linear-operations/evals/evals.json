@@ -10,6 +10,28 @@
 				"Selects labels from the known label taxonomy (e.g., bug)",
 				"Description includes a 'Why we need this' section",
 				"Uses el-linear CLI to create the issue, not raw curl"
+			],
+			"assertions": [
+				{
+					"type": "skill_used",
+					"name": "linear-operations",
+					"description": "Issue creation must route through the Linear operations skill."
+				},
+				{
+					"type": "command_matches",
+					"pattern": "el-linear\\s+issues?\\s+search",
+					"description": "Duplicate checking runs before creating the issue."
+				},
+				{
+					"type": "command_matches",
+					"pattern": "el-linear\\s+issues?\\s+create",
+					"description": "The issue is created through el-linear."
+				},
+				{
+					"type": "output_contains",
+					"value": "Why we need this",
+					"description": "The issue body includes the required intent section."
+				}
 			]
 		},
 		{
@@ -20,6 +42,23 @@
 				"Uses el-linear search command with appropriate query",
 				"Does not attempt to use curl against api.linear.app",
 				"Returns formatted results with issue IDs and titles"
+			],
+			"assertions": [
+				{
+					"type": "skill_used",
+					"name": "linear-operations",
+					"description": "Linear search should use the Linear operations skill."
+				},
+				{
+					"type": "command_matches",
+					"pattern": "el-linear\\s+issues?\\s+search\\s+.*auth",
+					"description": "Searches Linear with the requested auth query."
+				},
+				{
+					"type": "output_not_contains",
+					"value": "api.linear.app",
+					"description": "Does not bypass el-linear with raw Linear API calls."
+				}
 			]
 		},
 		{
@@ -30,6 +69,23 @@
 				"Uses el-linear update command with the issue identifier DEV-123",
 				"Sets the status to In Progress",
 				"Does not create a new issue"
+			],
+			"assertions": [
+				{
+					"type": "skill_used",
+					"name": "linear-operations",
+					"description": "Issue mutation should use the Linear operations skill."
+				},
+				{
+					"type": "command_matches",
+					"pattern": "el-linear\\s+issues?\\s+update\\s+DEV-123\\b.*--status\\s+['\\\"]?In Progress",
+					"description": "Updates DEV-123 to In Progress through el-linear."
+				},
+				{
+					"type": "command_matches",
+					"pattern": "el-linear\\s+issues?\\s+read\\s+DEV-123",
+					"description": "Reads the existing issue before mutation."
+				}
 			]
 		},
 		{
@@ -40,6 +96,33 @@
 				"Does NOT trigger linear-operations skill",
 				"Routes to git-branch-from-linear instead",
 				"No el-linear create or update commands are issued"
+			],
+			"assertions": [
+				{
+					"type": "skill_not_used",
+					"name": "linear-operations",
+					"description": "Branch creation is outside linear-operations scope."
+				},
+				{
+					"type": "skill_used",
+					"name": "git-branch-from-linear",
+					"description": "Branch creation should route to the branch skill."
+				},
+				{
+					"type": "command_matches",
+					"pattern": "el-linear\\s+issues?\\s+read\\s+DEV-456",
+					"description": "Reading issue metadata is allowed for branch creation."
+				},
+				{
+					"type": "output_not_contains",
+					"value": "el-linear issues create",
+					"description": "Does not create a new issue for branch creation."
+				},
+				{
+					"type": "output_not_contains",
+					"value": "el-linear issues update",
+					"description": "Does not update issue fields for branch creation."
+				}
 			]
 		}
 	]
