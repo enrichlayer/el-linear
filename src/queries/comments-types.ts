@@ -23,6 +23,7 @@ interface CommentUserRef {
 export interface CommentResourceNode {
 	id: string;
 	body: string;
+	url?: string | null;
 	createdAt: string;
 	updatedAt: string;
 	user: CommentUserRef;
@@ -35,12 +36,23 @@ interface UpdatedCommentResourceNode extends CommentResourceNode {
 	} | null;
 }
 
+interface ReadCommentResourceNode extends CommentResourceNode {
+	issue: {
+		id: string;
+		identifier: string;
+	} | null;
+}
+
 export interface ListCommentsResponse {
 	issue: {
 		id: string;
 		identifier: string;
 		comments: { nodes: CommentResourceNode[] };
 	} | null;
+}
+
+export interface GetCommentResponse {
+	comment: ReadCommentResourceNode | null;
 }
 
 export interface CreateCommentResponse {

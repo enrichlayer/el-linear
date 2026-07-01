@@ -306,9 +306,24 @@ describe("formatCommentSummary / formatCommentList", () => {
 			user: { name: "Bob" },
 		};
 		const out = formatCommentSummary(comment);
+		expect(out).toContain("comment c1");
 		expect(out).toContain("Bob");
 		expect(out).toContain("2026-05-08T12:00:00Z");
 		expect(out).toContain("lgtm");
+	});
+
+	it("renders a complete body when summary full-body mode is requested", () => {
+		const longBody = `${"body ".repeat(80)}tail`;
+		const out = formatCommentSummary({
+			id: "c2",
+			body: longBody,
+			createdAt: "2026-05-08T12:00:00Z",
+			user: { name: "Bob" },
+			_summaryFullBody: true,
+		});
+
+		expect(out).toContain(longBody);
+		expect(out).not.toContain("(truncated; --format json for full body)");
 	});
 
 	it("separates list items with a delimiter", () => {

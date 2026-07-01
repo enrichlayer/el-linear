@@ -442,7 +442,7 @@ el-linear <command> --help       # detailed help for one command
 | Group | Common commands |
 |-------|-----------------|
 | Issues | `issues {list, search, create, read, update, start, delete, history, related, link-references}` |
-| Comments | `comments {list, create, update}` |
+| Comments | `comments {list, read, create, update, delete}` |
 | Labels | `labels {list, create, retire, restore}` |
 | Projects | `projects {list, add-team, remove-team}` |
 | Cycles | `cycles {list, read}` |
@@ -659,6 +659,29 @@ el-linear issues read DEV-123 --body
 ```
 
 Mutually exclusive with `--field` / `--sections` / `--with`.
+
+### Read full comment bodies without JSON parsing
+
+`comments read <comment-id>` reads one comment by full UUID, `comment-<hash>`
+token, or a Linear URL containing `#comment-<hash>`. Use `--body` for the raw
+markdown body with real newlines and no JSON envelope. `comments list --body`
+prints every complete body on an issue as plain text blocks, and
+`comments list --format summary --no-truncate` keeps the summary shape while
+showing full bodies.
+
+```bash
+el-linear comments list DEV-123 --format summary
+# comment c5d15b28-...  Alice  2026-07-01T00:00:00.000Z
+# Short preview...
+
+el-linear comments read comment-c5d15b28 --body
+# Full comment body...
+
+el-linear comments list DEV-123 --body
+# comment c5d15b28-...
+#
+# Full comment body...
+```
 
 ### One-line write confirmations: `-q, --quiet`
 
