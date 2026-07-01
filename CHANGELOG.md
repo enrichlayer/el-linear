@@ -4,6 +4,13 @@ All notable changes to `@enrichlayer/el-linear` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.34.0](https://github.com/enrichlayer/el-linear/compare/v1.33.0...v1.34.0) (2026-07-01)
+
+
+### Features
+
+* **issues:** add no-subcommand read shorthand + related summary table (DEV-5174) ([#205](https://github.com/enrichlayer/el-linear/issues/205)) ([d3ff369](https://github.com/enrichlayer/el-linear/commit/d3ff3695feda0d80b71fff0fe54f2ad250438a90))
+
 ## [1.33.0](https://github.com/enrichlayer/el-linear/compare/v1.32.3...v1.33.0) (2026-07-01)
 
 
