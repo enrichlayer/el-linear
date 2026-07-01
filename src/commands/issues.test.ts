@@ -350,6 +350,66 @@ describe("issues commands", () => {
 		});
 	});
 
+	describe("issues <id> shorthand (DEV-5174)", () => {
+		it("reads the issue when an ID is given directly to `issues`", async () => {
+			const issueData = {
+				id: "uuid-1",
+				identifier: "DEV-123",
+				title: "My issue",
+			};
+			mockGetIssueById.mockResolvedValue(issueData);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, ["issues", "DEV-123"]);
+
+			expect(mockGetIssueById).toHaveBeenCalledWith("DEV-123");
+			expect(mockOutputSuccess).toHaveBeenCalledWith(issueData);
+		});
+
+		it("reads the issue when an ID is given directly to the `issue` alias", async () => {
+			const issueData = {
+				id: "uuid-1",
+				identifier: "DEV-123",
+				title: "My issue",
+			};
+			mockGetIssueById.mockResolvedValue(issueData);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, ["issue", "DEV-123"]);
+
+			expect(mockGetIssueById).toHaveBeenCalledWith("DEV-123");
+			expect(mockOutputSuccess).toHaveBeenCalledWith(issueData);
+		});
+
+		it("carries read-style options (--field) on the shorthand path", async () => {
+			mockGetIssueById.mockResolvedValue({
+				id: "uuid-1",
+				identifier: "DEV-123",
+				title: "My issue",
+				description: "## Done when\nShip it.\n",
+			});
+			const stdoutWriteSpy = vi
+				.spyOn(process.stdout, "write")
+				.mockImplementation(() => true);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, ["issues", "DEV-123", "--field", "Done when"]);
+
+			expect(stdoutWriteSpy).toHaveBeenCalledWith("Ship it.\n");
+		});
+
+		it("falls through to help with no issue ID (does not call getIssueById)", async () => {
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, ["issues"]);
+
+			expect(mockGetIssueById).not.toHaveBeenCalled();
+		});
+	});
+
 	describe("issues search — relation_candidates warning (DEV-4494)", () => {
 		// Composition lock for the primary dup-check path: handleSearchIssues
 		// → buildRelationCandidatePrompt → outputWarning. search.test.ts covers

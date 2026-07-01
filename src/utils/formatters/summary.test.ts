@@ -11,6 +11,7 @@ import {
 	formatDocumentSummary,
 	formatGenericSummary,
 	formatIssueList,
+	formatIssueRelationList,
 	formatIssueSummary,
 	formatLabelList,
 	formatLine,
@@ -804,6 +805,41 @@ describe("inferKindFromPayload", () => {
 			]),
 		).toBe("relation-list");
 	});
+
+	it("identifies an `issues related` envelope as an issue-relation list (DEV-5174)", () => {
+		// Distinct from the `relatedIssue`-shaped mutation echo above: this
+		// shape (`direction` + `issue`, no `relatedIssue`) is the read-path
+		// `issues related <id>` listing.
+		expect(
+			inferKindFromPayload({
+				id: "u1",
+				identifier: "DEV-1",
+				title: "src",
+				data: [
+					{
+						id: "rel-1",
+						type: "related",
+						direction: "outgoing",
+						issue: { id: "u2", identifier: "DEV-2", title: "b" },
+					},
+				],
+				meta: { count: 1 },
+			}),
+		).toBe("issue-relation-list");
+	});
+
+	it("identifies a bare issue-relation array (DEV-5174)", () => {
+		expect(
+			inferKindFromPayload([
+				{
+					id: "rel-1",
+					type: "blockedBy",
+					direction: "incoming",
+					issue: { id: "u2", identifier: "DEV-2", title: "b" },
+				},
+			]),
+		).toBe("issue-relation-list");
+	});
 });
 
 describe("dispatch", () => {
@@ -880,6 +916,96 @@ describe("dispatch", () => {
 		expect(out).toContain("target");
 		expect(out).not.toContain("DEV-1");
 		expect(out.trimEnd().endsWith("1 relation")).toBe(true);
+	});
+
+	it("routes an `issues related` envelope end-to-end (DEV-5174)", () => {
+		// Mirrors the real `--format summary` path for the read-side listing
+		// (`issues related <id>`), distinct from the relate-mutation echo above.
+		const envelope = {
+			id: "u1",
+			identifier: "DEV-1",
+			title: "src",
+			data: [
+				{
+					id: "rel-1",
+					type: "related",
+					direction: "outgoing",
+					issue: {
+						id: "u2",
+						identifier: "DEV-2",
+						title: "target",
+						state: { name: "In Progress" },
+						assignee: { name: "Alice" },
+					},
+				},
+			],
+			meta: { count: 1 },
+		};
+		const out = dispatch(inferKindFromPayload(envelope), envelope);
+		expect(out).toMatch(/RELATION\s+DIRECTION\s+ID\s+STATE\s+ASSIGNEE\s+TITLE/);
+		expect(out).toContain("related");
+		expect(out).toContain("outgoing");
+		expect(out).toContain("DEV-2");
+		expect(out).toContain("In Progress");
+		expect(out).toContain("Alice");
+		expect(out).toContain("target");
+		expect(out.trimEnd().endsWith("1 relation")).toBe(true);
+	});
+});
+
+describe("formatIssueRelationList (issues related summary, DEV-5174)", () => {
+	it("renders RELATION / DIRECTION / ID / STATE / ASSIGNEE / TITLE columns", () => {
+		const out = formatIssueRelationList([
+			{
+				type: "blocks",
+				direction: "incoming",
+				issue: {
+					identifier: "DEV-9",
+					title: "blocker",
+					state: { name: "Todo" },
+					assignee: { name: "Bob" },
+				},
+			},
+		]);
+		expect(out).toMatch(/RELATION\s+DIRECTION\s+ID\s+STATE\s+ASSIGNEE\s+TITLE/);
+		expect(out).toContain("blocks");
+		expect(out).toContain("incoming");
+		expect(out).toContain("DEV-9");
+		expect(out).toContain("Todo");
+		expect(out).toContain("Bob");
+		expect(out).toContain("blocker");
+	});
+
+	it("renders an em-dash placeholder for a missing state/assignee", () => {
+		const out = formatIssueRelationList([
+			{
+				type: "related",
+				direction: "outgoing",
+				issue: { identifier: "DEV-2", title: "peer" },
+			},
+		]);
+		expect(out).toContain("DEV-2");
+		expect(out).toContain("—");
+	});
+
+	it("pluralizes the relation count", () => {
+		const out = formatIssueRelationList([
+			{
+				type: "related",
+				direction: "outgoing",
+				issue: { identifier: "DEV-2", title: "a" },
+			},
+			{
+				type: "related",
+				direction: "incoming",
+				issue: { identifier: "DEV-3", title: "b" },
+			},
+		]);
+		expect(out.trimEnd().endsWith("2 relations")).toBe(true);
+	});
+
+	it("renders the empty marker for no relations", () => {
+		expect(formatIssueRelationList([])).toBe("(no issue relations)");
 	});
 });
 
