@@ -21,6 +21,28 @@ export const LIST_COMMENTS_QUERY = `
   }
 `;
 
+export const GET_COMMENT_QUERY = `
+  query GetComment($id: String, $hash: String) {
+    comment(id: $id, hash: $hash) {
+      id
+      body
+      url
+      createdAt
+      updatedAt
+      user {
+        id
+        name
+        displayName
+        url
+      }
+      issue {
+        id
+        identifier
+      }
+    }
+  }
+`;
+
 export const CREATE_COMMENT_MUTATION = `
   mutation CreateComment($input: CommentCreateInput!) {
     commentCreate(input: $input) {

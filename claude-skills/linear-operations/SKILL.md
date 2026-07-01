@@ -63,6 +63,9 @@ el-linear issues read DEV-123 --format summary 2>&1
 
 # ✅ Whole description as raw text → --body. Terse write confirmation → --quiet
 el-linear issues read DEV-123 --body 2>&1
+el-linear comments read comment-c5d15b28 --body 2>&1
+el-linear comments list DEV-123 --body 2>&1
+el-linear comments list DEV-123 --format summary --no-truncate 2>&1
 el-linear issues update DEV-123 --status Done --quiet 2>&1
 ```
 
@@ -96,6 +99,28 @@ el-linear issues read DEV-123 --format json 2>&1 | python3 -c "import json,sys; 
 
 `--body` is mutually exclusive with `--field` / `--sections` / `--with` (those extract named parts or extend the JSON envelope; `--body` is the whole thing as text).
 
+### Comment reads and full comment bodies
+
+When you need a specific comment, or the full text of a long comment, use the
+comments read/list surfaces instead of dumping JSON:
+
+```bash
+# ✅ Resolve a Linear permalink anchor or full comment UUID
+el-linear comments read comment-c5d15b28 --format summary 2>&1
+el-linear comments read comment-c5d15b28 --body 2>&1
+
+# ✅ Full bodies for every comment on an issue
+el-linear comments list DEV-123 --body 2>&1
+el-linear comments list DEV-123 --format summary --no-truncate 2>&1
+
+# ❌ Don't do this
+el-linear comments list DEV-123 --format json 2>&1 | python3 -c "import json,sys; print(json.load(sys.stdin)['data'][0]['body'])"
+```
+
+`comments read` accepts a full UUID, `comment-<hash>`, or a URL containing
+`#comment-<hash>`. `comments list --format summary` includes each comment id
+so you can copy it straight into `comments read`.
+
 ### Terse write confirmations: `-q, --quiet`
 
 `issues create|update` and `comments create|update` accept `-q, --quiet`, which prints a single machine-stable confirmation line instead of the full JSON envelope — no need to `grep` the result for the identifier / state / url:
@@ -118,7 +143,7 @@ For tools that aren't `el-linear` (e.g. `gh`, `glab`, `kubectl`), prefer `jq` fo
 
 `--format summary` is implemented for:
 
-- **Single resources:** `issues read`, `projects read`, `cycles read`, `project-milestones read`, `documents read`, `templates read`, releases (`graphql` query results), `users read`
+- **Single resources:** `issues read`, `comments read`, `projects read`, `cycles read`, `project-milestones read`, `documents read`, `templates read`, releases (`graphql` query results), `users read`
 - **Lists:** `issues list`, `issues search`, `projects list`, `comments list`, `cycles list`, `project-milestones list`, `labels list`, `teams list`, `users list`, `documents list`, `templates list`, `attachments list`, `releases list`, and the cross-resource `search` command
 
 Commands without a dedicated formatter (e.g. `config show`, custom `graphql` queries) fall back to a generic key/value rendering of their JSON payload.

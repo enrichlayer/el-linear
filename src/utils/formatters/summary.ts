@@ -689,8 +689,11 @@ export function formatProjectList(
 export function formatCommentSummary(comment: Record<string, unknown>): string {
 	const author = getName(comment.user);
 	const createdAt = s(comment.createdAt);
-	const body = clipDescription(comment.body as string | undefined);
-	const headerLine = `${author}  ${createdAt}`;
+	const body =
+		comment._summaryFullBody === true
+			? s(comment.body)
+			: clipDescription(comment.body as string | undefined);
+	const headerLine = `comment ${s(comment.id)}  ${author}  ${createdAt}`;
 	const parts = [headerLine];
 	if (body) parts.push("", body);
 	return parts.join("\n");

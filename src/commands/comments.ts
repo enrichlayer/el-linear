@@ -4,6 +4,7 @@ import { resolveUserDisplayName } from "../config/resolver.js";
 import {
 	CREATE_COMMENT_MUTATION,
 	DELETE_COMMENT_MUTATION,
+	GET_COMMENT_QUERY,
 	LIST_COMMENTS_QUERY,
 	UPDATE_COMMENT_MUTATION,
 } from "../queries/comments.js";
@@ -11,6 +12,7 @@ import type {
 	CommentResourceNode,
 	CreateCommentResponse,
 	DeleteCommentResponse,
+	GetCommentResponse,
 	ListCommentsResponse,
 	UpdateCommentResponse,
 } from "../queries/comments-types.js";
@@ -35,6 +37,7 @@ import {
 	resolveMentions,
 } from "../utils/mention-resolver.js";
 import {
+	getOutputFormat,
 	getQuietMode,
 	handleAsyncCommand,
 	outputSuccess,
@@ -48,6 +51,9 @@ import { getWorkspaceUrlKey } from "../utils/workspace-url.js";
 // tweak on their side doesn't silently regress the fallback path.
 const BODY_DATA_ERROR_RE = /prosemirror|bodydata|invalid.*body/i;
 const ISSUE_IDENTIFIER_REGEX = /^[A-Z][A-Z0-9]*-\d+$/;
+const UUID_REGEX =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const COMMENT_ANCHOR_REGEX = /(?:^|[#/])comment-([A-Za-z0-9-]+)/;
 
 /**
  * Structured, machine-readable record of mention resolution, attached to the
@@ -153,10 +159,12 @@ async function fetchSelfUserId(
 
 function transformComment(
 	comment: CommentResourceNode,
+	options: { fullBodySummary?: boolean } = {},
 ): Record<string, unknown> {
 	return {
 		id: comment.id,
 		body: comment.body,
+		url: comment.url ?? undefined,
 		user: {
 			id: comment.user.id,
 			name: resolveUserDisplayName(comment.user.id, comment.user.name),
@@ -164,7 +172,40 @@ function transformComment(
 		},
 		createdAt: comment.createdAt,
 		updatedAt: comment.updatedAt,
+		...(options.fullBodySummary ? { _summaryFullBody: true } : {}),
 	};
+}
+
+function normalizeCommentRef(input: string): { id?: string; hash?: string } {
+	const trimmed = input.trim();
+	const anchorMatch = COMMENT_ANCHOR_REGEX.exec(trimmed);
+	const candidate = anchorMatch?.[1] ?? trimmed.replace(/^#?comment-/, "");
+	if (UUID_REGEX.test(candidate)) {
+		return { id: candidate.toLowerCase() };
+	}
+	return { hash: candidate };
+}
+
+function printRawCommentBody(
+	comment: Record<string, unknown>,
+	label: string,
+): void {
+	const body = typeof comment.body === "string" ? comment.body : "";
+	if (body.trim() === "") {
+		process.stderr.write(`el-linear: comment ${label} has no body\n`);
+		process.exit(1);
+	}
+	process.stdout.write(`${body}\n`);
+}
+
+function formatCommentBodyBlocks(comments: Record<string, unknown>[]): string {
+	return comments
+		.map((comment) => {
+			const id = typeof comment.id === "string" ? comment.id : "-";
+			const body = typeof comment.body === "string" ? comment.body : "";
+			return `comment ${id}\n\n${body}`;
+		})
+		.join("\n\n---\n\n");
 }
 
 interface PreparedCommentBody {
@@ -454,7 +495,15 @@ async function handleListComments(
 	if (!result.issue) {
 		throw new Error(`Issue "${issueId}" not found`);
 	}
-	const nodes = result.issue.comments.nodes.map(transformComment);
+	const fullBodySummary =
+		options.truncate === false && getOutputFormat() === "summary";
+	const nodes = result.issue.comments.nodes.map((comment) =>
+		transformComment(comment, { fullBodySummary }),
+	);
+	if (options.body === true) {
+		process.stdout.write(`${formatCommentBodyBlocks(nodes)}\n`);
+		return;
+	}
 	outputSuccess({
 		data: nodes,
 		meta: {
@@ -462,6 +511,31 @@ async function handleListComments(
 			issue: result.issue.identifier,
 		},
 	});
+}
+
+async function handleReadComment(
+	commentRef: string,
+	options: OptionValues,
+	command: Command,
+): Promise<void> {
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const ref = normalizeCommentRef(commentRef);
+	const result = await graphQLService.rawRequest<GetCommentResponse>(
+		GET_COMMENT_QUERY,
+		ref,
+	);
+	if (!result.comment) {
+		throw new Error(`Comment "${commentRef}" not found`);
+	}
+	const comment = transformComment(result.comment, {
+		fullBodySummary: getOutputFormat() === "summary",
+	});
+	if (options.body === true) {
+		printRawCommentBody(comment, commentRef);
+		return;
+	}
+	outputSuccess(comment);
 }
 
 async function handleDeleteComment(
@@ -543,7 +617,31 @@ export function setupCommentsCommands(program: Command): void {
 			"\nBoth UUID and identifiers like ABC-123 are supported.",
 		)
 		.option("-l, --limit <number>", "limit results", "25")
+		.option(
+			"--body",
+			"print complete comment bodies as plain text blocks instead of JSON",
+		)
+		.option(
+			"--no-truncate",
+			"do not truncate comment bodies in --format summary output",
+		)
 		.action(handleAsyncCommand(handleListComments));
+
+	comments
+		.command("read <commentId>")
+		.alias("get")
+		.alias("show")
+		.description("Read a comment by id or Linear #comment-<hash> anchor.")
+		.addHelpText(
+			"after",
+			"\nAccepts a full comment UUID, a comment-<hash> token, or a URL containing #comment-<hash>.",
+		)
+		.option("--body", "print the raw comment body with no JSON envelope")
+		.option(
+			"-q, --quiet",
+			"print one confirmation line (comment <id>) instead of the full JSON",
+		)
+		.action(handleAsyncCommand(handleReadComment));
 
 	comments
 		.command("delete <commentId>")

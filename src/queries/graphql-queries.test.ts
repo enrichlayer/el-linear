@@ -8,6 +8,7 @@ import {
 import {
 	CREATE_COMMENT_MUTATION,
 	DELETE_COMMENT_MUTATION,
+	GET_COMMENT_QUERY,
 	LIST_COMMENTS_QUERY,
 	UPDATE_COMMENT_MUTATION,
 } from "./comments.js";
@@ -214,6 +215,7 @@ const ALL_QUERIES: [string, string][] = [
 
 	// comments.ts
 	["CREATE_COMMENT_MUTATION", CREATE_COMMENT_MUTATION],
+	["GET_COMMENT_QUERY", GET_COMMENT_QUERY],
 	["LIST_COMMENTS_QUERY", LIST_COMMENTS_QUERY],
 	["UPDATE_COMMENT_MUTATION", UPDATE_COMMENT_MUTATION],
 	["DELETE_COMMENT_MUTATION", DELETE_COMMENT_MUTATION],
@@ -663,6 +665,12 @@ describe("releases.ts — queries and mutations", () => {
 });
 
 describe("comments.ts — list and update", () => {
+	it("GET_COMMENT_QUERY accepts full ids and permalink hashes", () => {
+		const vars = extractVariables(GET_COMMENT_QUERY);
+		expect(vars).toContain("id");
+		expect(vars).toContain("hash");
+	});
+
 	it("LIST_COMMENTS_QUERY uses issueId and optional pagination", () => {
 		const vars = extractVariables(LIST_COMMENTS_QUERY);
 		expect(vars).toContain("issueId");
@@ -674,7 +682,11 @@ describe("comments.ts — list and update", () => {
 	});
 
 	it("comment queries include user with displayName", () => {
-		for (const query of [LIST_COMMENTS_QUERY, UPDATE_COMMENT_MUTATION]) {
+		for (const query of [
+			GET_COMMENT_QUERY,
+			LIST_COMMENTS_QUERY,
+			UPDATE_COMMENT_MUTATION,
+		]) {
 			expect(containsField(query, "displayName")).toBe(true);
 		}
 	});

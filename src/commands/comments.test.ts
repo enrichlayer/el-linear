@@ -58,6 +58,8 @@ describe("comments commands", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		suppressExit();
+		mockResolveIssueId.mockResolvedValue("resolved-uuid");
+		mockResolveUserId.mockResolvedValue(undefined);
 		mockRawRequest.mockResolvedValue({
 			commentCreate: {
 				success: true,
@@ -802,6 +804,163 @@ describe("comments commands", () => {
 			expect(types.has("bullet_list")).toBe(true);
 			expect(types.has("suggestion_userMentions")).toBe(true);
 			expect(mockOutputSuccess).toHaveBeenCalled();
+		});
+	});
+
+	describe("comments read", () => {
+		const commentResponse = {
+			comment: {
+				id: "c5d15b28-0000-4000-8000-000000000000",
+				body: "Full comment body\nwith a second line.",
+				url: "https://linear.app/test/issue/DEV-1#comment-c5d15b28",
+				user: {
+					id: "u1",
+					name: "Test User",
+					displayName: null,
+					url: null,
+				},
+				createdAt: "2026-01-01T00:00:00.000Z",
+				updatedAt: "2026-01-01T00:00:00.000Z",
+				issue: { id: "issue-1", identifier: "DEV-1" },
+			},
+		};
+
+		it("reads a full comment id and emits the comment payload", async () => {
+			mockRawRequest.mockResolvedValue(commentResponse);
+
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, [
+				"comments",
+				"read",
+				"c5d15b28-0000-4000-8000-000000000000",
+			]);
+
+			expect(mockRawRequest).toHaveBeenCalledWith(
+				expect.stringContaining("comment(id: $id, hash: $hash)"),
+				{ id: "c5d15b28-0000-4000-8000-000000000000" },
+			);
+			expect(mockOutputSuccess).toHaveBeenCalledWith(
+				expect.objectContaining({
+					id: "c5d15b28-0000-4000-8000-000000000000",
+					body: "Full comment body\nwith a second line.",
+				}),
+			);
+		});
+
+		it("accepts a Linear #comment hash anchor", async () => {
+			mockRawRequest.mockResolvedValue(commentResponse);
+
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, [
+				"comments",
+				"read",
+				"https://linear.app/test/issue/DEV-1#comment-c5d15b28",
+			]);
+
+			expect(mockRawRequest).toHaveBeenCalledWith(
+				expect.stringContaining("comment(id: $id, hash: $hash)"),
+				{ hash: "c5d15b28" },
+			);
+		});
+
+		it("prints the raw body with --body and no JSON envelope", async () => {
+			mockRawRequest.mockResolvedValue(commentResponse);
+			const stdoutSpy = vi
+				.spyOn(process.stdout, "write")
+				.mockImplementation(() => true);
+
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, [
+				"comments",
+				"read",
+				"comment-c5d15b28",
+				"--body",
+			]);
+
+			expect(stdoutSpy).toHaveBeenCalledWith(
+				"Full comment body\nwith a second line.\n",
+			);
+			expect(mockOutputSuccess).not.toHaveBeenCalled();
+			stdoutSpy.mockRestore();
+		});
+	});
+
+	describe("comments list", () => {
+		const listResponse = {
+			issue: {
+				id: "issue-1",
+				identifier: "DEV-1",
+				comments: {
+					nodes: [
+						{
+							id: "c1",
+							body: "first body",
+							user: {
+								id: "u1",
+								name: "Test User",
+								displayName: null,
+								url: null,
+							},
+							createdAt: "2026-01-01T00:00:00.000Z",
+							updatedAt: "2026-01-01T00:00:00.000Z",
+						},
+						{
+							id: "c2",
+							body: "second body\nline two",
+							user: {
+								id: "u2",
+								name: "Other User",
+								displayName: null,
+								url: null,
+							},
+							createdAt: "2026-01-02T00:00:00.000Z",
+							updatedAt: "2026-01-02T00:00:00.000Z",
+						},
+					],
+				},
+			},
+		};
+
+		it("lists comments with ids in the output payload", async () => {
+			mockRawRequest.mockResolvedValue(listResponse);
+
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, ["comments", "list", "DEV-1"]);
+
+			expect(mockResolveIssueId).toHaveBeenCalledWith("DEV-1");
+			expect(mockOutputSuccess).toHaveBeenCalledWith(
+				expect.objectContaining({
+					data: [
+						expect.objectContaining({ id: "c1", body: "first body" }),
+						expect.objectContaining({
+							id: "c2",
+							body: "second body\nline two",
+						}),
+					],
+					meta: { count: 2, issue: "DEV-1" },
+				}),
+			);
+		});
+
+		it("prints complete comment bodies as text blocks with --body", async () => {
+			mockRawRequest.mockResolvedValue(listResponse);
+			const stdoutSpy = vi
+				.spyOn(process.stdout, "write")
+				.mockImplementation(() => true);
+
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, ["comments", "list", "DEV-1", "--body"]);
+
+			expect(stdoutSpy).toHaveBeenCalledWith(
+				"comment c1\n\nfirst body\n\n---\n\ncomment c2\n\nsecond body\nline two\n",
+			);
+			expect(mockOutputSuccess).not.toHaveBeenCalled();
+			stdoutSpy.mockRestore();
 		});
 	});
 
