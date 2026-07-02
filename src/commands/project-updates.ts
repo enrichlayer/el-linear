@@ -67,12 +67,13 @@ async function handleCreateProjectUpdate(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
+	// Validate local input first so bad --body/--health fails with zero network.
+	const body = resolveBody(options);
+	const health = resolveHealth(options.health);
 	const rootOpts = getRootOpts(command);
 	const graphQLService = await createGraphQLService(rootOpts);
 	const linearService = await createLinearService(rootOpts);
 	const projectId = await linearService.resolveProjectId(options.project);
-	const body = resolveBody(options);
-	const health = resolveHealth(options.health);
 	const input: Record<string, unknown> = { projectId, body };
 	if (health !== undefined) {
 		input.health = health;
@@ -107,10 +108,13 @@ async function handleListProjectUpdates(
 		LIST_PROJECT_UPDATES_QUERY,
 		{
 			projectId,
-			first: parsePositiveInt(options.limit || "50", "--limit"),
+			first: parsePositiveInt(options.limit, "--limit"),
 		},
 	);
-	const nodes = result.project?.projectUpdates.nodes ?? [];
+	if (!result.project) {
+		throw notFoundError("Project", options.project);
+	}
+	const nodes = result.project.projectUpdates.nodes;
 	outputSuccess({ data: nodes, meta: { count: nodes.length } });
 }
 

@@ -34,7 +34,7 @@ export const LIST_PROJECT_UPDATES_QUERY = `
     project(id: $projectId) {
       id
       name
-      projectUpdates(first: $first) {
+      projectUpdates(first: $first, orderBy: createdAt) {
         nodes {
           ${PROJECT_UPDATE_FRAGMENT}
         }

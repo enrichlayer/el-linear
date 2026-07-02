@@ -68,6 +68,10 @@ describe("LIST_PROJECT_UPDATES_QUERY", () => {
 			true,
 		);
 	});
+
+	it("orders updates by createdAt (newest first)", () => {
+		expect(LIST_PROJECT_UPDATES_QUERY).toContain("orderBy: createdAt");
+	});
 });
 
 describe("GET_PROJECT_UPDATE_BY_ID_QUERY", () => {

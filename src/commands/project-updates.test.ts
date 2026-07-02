@@ -123,11 +123,40 @@ describe("project-updates commands", () => {
 				"green",
 			]);
 
+			// Local validation runs before any network round-trip.
+			expect(mockResolveProjectId).not.toHaveBeenCalled();
 			expect(mockRawRequest).not.toHaveBeenCalled();
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
 				expect.stringContaining("Invalid --health"),
 			);
 			expect(process.exit).toHaveBeenCalledWith(1);
+		});
+
+		it("passes --diff-hidden through as isDiffHidden", async () => {
+			mockResolveProjectId.mockResolvedValue("proj-uuid-1");
+			mockRawRequest.mockResolvedValue({
+				projectUpdateCreate: { success: true, projectUpdate: { id: "u" } },
+			});
+
+			const program = createTestProgram();
+			setupProjectUpdatesCommands(program);
+			await runCommand(program, [
+				"project-updates",
+				"create",
+				"--project",
+				"My Project",
+				"--body",
+				"hidden diff",
+				"--diff-hidden",
+			]);
+
+			expect(mockRawRequest).toHaveBeenCalledWith(expect.any(String), {
+				input: {
+					projectId: "proj-uuid-1",
+					body: "hidden diff",
+					isDiffHidden: true,
+				},
+			});
 		});
 
 		it("reads the body from --body-file", async () => {
@@ -171,6 +200,7 @@ describe("project-updates commands", () => {
 				"My Project",
 			]);
 
+			expect(mockResolveProjectId).not.toHaveBeenCalled();
 			expect(mockRawRequest).not.toHaveBeenCalled();
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
 				expect.stringContaining("Either --body or --body-file is required"),
@@ -194,6 +224,7 @@ describe("project-updates commands", () => {
 				"/tmp/x.md",
 			]);
 
+			expect(mockResolveProjectId).not.toHaveBeenCalled();
 			expect(mockRawRequest).not.toHaveBeenCalled();
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
 				expect.stringContaining("mutually exclusive"),
@@ -250,6 +281,26 @@ describe("project-updates commands", () => {
 				data: updates,
 				meta: { count: updates.length },
 			});
+		});
+
+		it("errors when the resolved project cannot be read", async () => {
+			mockResolveProjectId.mockResolvedValue("proj-uuid-1");
+			mockRawRequest.mockResolvedValue({ project: null });
+
+			const program = createTestProgram();
+			setupProjectUpdatesCommands(program);
+			await runCommand(program, [
+				"project-updates",
+				"list",
+				"--project",
+				"My Project",
+			]);
+
+			expect(mockOutputSuccess).not.toHaveBeenCalled();
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("not found"),
+			);
+			expect(process.exit).toHaveBeenCalledWith(1);
 		});
 	});
 
