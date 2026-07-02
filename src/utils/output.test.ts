@@ -151,12 +151,18 @@ describe("warning buffer", () => {
 		expect(second._warnings).toBeUndefined();
 	});
 
-	it("skips _warnings for array output", () => {
+	it("routes warnings to stderr for bare-array output, keeping stdout a pure array (DEV-5339)", () => {
 		outputWarning("w1");
 		outputSuccess([1, 2, 3]);
+		// stdout stays a pure JSON array — an array has no envelope to hold a
+		// `_warnings` key, so it must remain jq/pipe-safe.
 		const written = (stdoutSpy.mock.calls[0][0] as string).trim();
 		const parsed = JSON.parse(written);
 		expect(parsed).toEqual([1, 2, 3]);
+		// The warning is NOT silently dropped: it reaches the consumer on stderr
+		// prefixed `_warnings: ` (mirrors the summary path's line convention).
+		const allStderr = stderrSpy.mock.calls.map((c) => c[0] as string).join("");
+		expect(allStderr).toContain("_warnings: w1");
 	});
 
 	it("accumulates multiple warnings", () => {
@@ -250,18 +256,25 @@ describe("warnIfTruncated", () => {
 
 describe("--raw mode", () => {
 	let stdoutSpy: ReturnType<typeof vi.spyOn>;
+	let stderrSpy: ReturnType<typeof vi.spyOn>;
 
 	beforeEach(() => {
 		resetWarnings();
 		setRawMode(true);
+		setFieldsFilter(null);
 		stdoutSpy = vi
 			.spyOn(process.stdout, "write")
+			.mockImplementation(() => true);
+		stderrSpy = vi
+			.spyOn(process.stderr, "write")
 			.mockImplementation(() => true);
 	});
 
 	afterEach(() => {
 		setRawMode(false);
+		setFieldsFilter(null);
 		stdoutSpy.mockRestore();
+		stderrSpy.mockRestore();
 	});
 
 	it("unwraps { data: [...], meta } to just the array", () => {
@@ -289,12 +302,39 @@ describe("--raw mode", () => {
 		expect(parsed.data).toBe("not-an-array");
 	});
 
-	it("still embeds warnings when unwrapping", () => {
+	it("routes warnings to stderr when unwrapping to a bare array (DEV-5339)", () => {
 		outputWarning("watch out");
 		outputSuccess({ data: [{ id: "1" }], meta: { count: 1 }, _warnings: [] });
 		const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
-		// raw mode unwraps after warnings are embedded, so the array has no warnings
+		// raw mode unwraps to a bare array, which can't carry a `_warnings` key,
+		// so stdout stays a pure array...
 		expect(Array.isArray(parsed)).toBe(true);
+		// ...and the buffered warning is emitted to stderr instead of dropped.
+		const allStderr = stderrSpy.mock.calls.map((c) => c[0] as string).join("");
+		expect(allStderr).toContain("_warnings: watch out");
+	});
+
+	// DEV-5339 regression: the DEV-5323 `fields_unresolved:` fail-visible signal
+	// must survive `--raw`, which unwraps { data } to a bare array BEFORE the
+	// fields filter runs — previously the warning was drained and silently
+	// discarded exactly on the `--raw` form CLAUDE.md recommends to agents.
+	it("--raw + unresolved --fields: fields_unresolved reaches stderr, stdout stays a bare array (DEV-5339)", () => {
+		setFieldsFilter(["identifier", "ghost"]);
+		outputSuccess({
+			data: [{ identifier: "DEV-1" }, { identifier: "DEV-2" }],
+			meta: { count: 2 },
+		});
+		// stdout: the unwrapped, projected array — pure JSON, jq-safe. The
+		// unresolved field is still present as an explicit null per item.
+		const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+		expect(parsed).toEqual([
+			{ identifier: "DEV-1", ghost: null },
+			{ identifier: "DEV-2", ghost: null },
+		]);
+		// the naming signal survives on stderr, prefixed `_warnings: `.
+		const allStderr = stderrSpy.mock.calls.map((c) => c[0] as string).join("");
+		expect(allStderr).toContain("_warnings: ");
+		expect(allStderr).toContain("fields_unresolved: ghost");
 	});
 });
 

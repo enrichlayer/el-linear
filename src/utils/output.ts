@@ -100,6 +100,12 @@ function filterFields(
 			const perItem = new Set<string>();
 			const projected = filterFields(item, fields, perItem);
 			for (const field of fields) {
+				// A primitive item short-circuits: filterFields returns it
+				// unchanged and records NOTHING in perItem, so every field counts
+				// as resolved here — a mixed array holding one primitive suppresses
+				// the unresolved warning for all fields. Acceptable: a primitive
+				// item can't meaningfully be projected, and heterogeneous lists
+				// legitimately have per-item gaps.
 				if (!perItem.has(field)) {
 					resolvedSomewhere.add(field);
 				}
@@ -354,21 +360,21 @@ export function outputSuccess(data: unknown): void {
 			output = filterFields(output, fieldsFilter, unresolved);
 		} else if (output !== null && typeof output === "object") {
 			const obj = output as Record<string, unknown>;
-			if (Array.isArray(obj.data)) {
-				output = {
-					...obj,
-					data: filterFields(obj.data, fieldsFilter, unresolved),
-				};
-			} else if (
+			if (
 				obj.data !== null &&
 				obj.data !== undefined &&
 				typeof obj.data === "object"
 			) {
-				// Envelope with an OBJECT data payload (e.g. el-git context):
-				// project inside `data`, same as the array branch. Before
-				// DEV-5323 this fell through to root filtering, so
-				// `--fields branch,issueId` on an envelope returned `{}`.
-				// Paths are relative to `data` for every envelope shape.
+				// Envelope with a `data` payload — project inside `data`,
+				// whether it's an array (list envelope) or an object (e.g.
+				// el-git context). Arrays ARE objects, so this single
+				// `typeof === "object"` check subsumes the former separate
+				// `Array.isArray(obj.data)` arm (DEV-5339 collapsed the two
+				// byte-identical branches); `filterFields` dispatches on
+				// array-vs-object internally. Paths are relative to `data` for
+				// every envelope shape. Before DEV-5323 the object case fell
+				// through to root filtering, so `--fields branch,issueId` on an
+				// envelope returned `{}`.
 				output = {
 					...obj,
 					data: filterFields(obj.data, fieldsFilter, unresolved),
@@ -411,13 +417,32 @@ export function outputSuccess(data: unknown): void {
 	// fields_unprojectable surfaced from a prior dispatch) and embed
 	// them as `_warnings` on the envelope.
 	const warnings = [...drainWarnings(), ...drainSummaryFieldWarnings()];
-	if (
-		warnings.length > 0 &&
-		output !== null &&
-		typeof output === "object" &&
-		!Array.isArray(output)
-	) {
-		output = { ...(output as Record<string, unknown>), _warnings: warnings };
+	if (warnings.length > 0) {
+		if (
+			output !== null &&
+			typeof output === "object" &&
+			!Array.isArray(output)
+		) {
+			output = { ...(output as Record<string, unknown>), _warnings: warnings };
+		} else {
+			// Bare-array (or primitive / null) output has no envelope object to
+			// carry `_warnings`. This is the DEV-5339 fix: previously the buffer
+			// was drained above but only re-embedded for object output, so a
+			// warning was silently dropped on a top-level array payload AND on
+			// `--raw` (which unwraps { data: [...] } to a bare array *before*
+			// this point) — losing exactly the DEV-5323 `fields_unresolved:`
+			// fail-visible signal on the `--raw` form our own CLAUDE.md
+			// recommends to agents. Route each warning to STDERR prefixed
+			// `_warnings: ` so the signal always reaches the consumer while
+			// stdout stays a pure JSON array (safe to pipe to `jq`). Mirrors the
+			// summary path's `_warnings:` line convention — that path uses
+			// logger.info because its stdout is already human text; here stdout
+			// must remain machine-parseable JSON, so we use logger.error
+			// (stderr).
+			for (const w of warnings) {
+				logger.error(`_warnings: ${w}`);
+			}
+		}
 	}
 
 	if (jqFilter) {
