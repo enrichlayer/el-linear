@@ -272,24 +272,35 @@ describe("LinearService", () => {
 
 		// DEV-4103: --team scopes the resolver, ambiguous-name errors otherwise.
 		describe("DEV-4103: --team disambiguation", () => {
-			it("scopes the name filter to --team when provided", async () => {
-				// Team resolution first: DEV → uuid-dev. Then projects lookup.
+			it("scopes the name lookup through Team.projects when --team is provided (DEV-5325)", async () => {
+				// Team resolution first: DEV → uuid-dev. Then the TEAM's
+				// projects connection — ProjectFilter rejects a `teams`
+				// relation filter against the live schema (DEV-5325), so the
+				// lookup must NOT go through client.projects with a teams
+				// filter (the pre-fix shape GraphQL-errored in production).
 				mockTeams.mockResolvedValueOnce({
 					nodes: [{ id: "uuid-dev", key: "DEV", name: "Dev" }],
 				});
-				mockProjects.mockResolvedValueOnce({
+				const mockTeamProjects = vi.fn().mockResolvedValueOnce({
 					nodes: [{ id: "shared-id-dev" }],
 				});
+				mockTeam.mockResolvedValueOnce({ projects: mockTeamProjects });
 				const service = new LinearService({ apiKey: "token" });
 				const result = await service.resolveProjectId("Shared Name", "DEV");
 				expect(result).toBe("shared-id-dev");
-				expect(mockProjects).toHaveBeenLastCalledWith(
+				expect(mockTeam).toHaveBeenCalledWith("uuid-dev");
+				expect(mockTeamProjects).toHaveBeenLastCalledWith(
 					expect.objectContaining({
-						filter: {
-							name: { eqIgnoreCase: "Shared Name" },
-							teams: { some: { id: { eq: "uuid-dev" } } },
-						},
+						filter: { name: { eqIgnoreCase: "Shared Name" } },
 						first: 5,
+					}),
+				);
+				// The invalid shape must not be sent at all.
+				expect(mockProjects).not.toHaveBeenCalledWith(
+					expect.objectContaining({
+						filter: expect.objectContaining({
+							teams: expect.anything(),
+						}),
 					}),
 				);
 			});
@@ -322,7 +333,10 @@ describe("LinearService", () => {
 				mockTeams.mockResolvedValueOnce({
 					nodes: [{ id: "uuid-dev", key: "DEV", name: "Dev" }],
 				});
-				mockProjects.mockResolvedValueOnce({ nodes: [] });
+				// DEV-5325: team-scoped lookups go through Team.projects.
+				mockTeam.mockResolvedValueOnce({
+					projects: vi.fn().mockResolvedValueOnce({ nodes: [] }),
+				});
 				const service = new LinearService({ apiKey: "token" });
 				await expect(
 					service.resolveProjectId("Nonexistent", "DEV"),
@@ -400,5 +414,57 @@ describe("LinearService", () => {
 			expect(result[0].name).toBe("Alice");
 			expect(result[1].name).toBe("Zara");
 		});
+	});
+});
+
+// DEV-5325: `--team` scoping must go through Team.projects — ProjectFilter
+// rejects a `teams` relation filter against the live schema, so the pre-fix
+// `client.projects({ filter: { teams: { some: … } } })` shape GraphQL-errored
+// in production ("Field \"teams\" is not defined by type \"ProjectFilter\"").
+describe("getProjects team scoping (DEV-5325)", () => {
+	const projectNode = {
+		id: "p1",
+		name: "Proj",
+		description: "",
+		state: "started",
+		progress: 0,
+		teams: () => Promise.resolve({ nodes: [] }),
+		lead: Promise.resolve(undefined),
+	};
+
+	it("uses the team's projects connection when teamId is set", async () => {
+		const mockTeamProjects = vi.fn().mockResolvedValueOnce({
+			nodes: [projectNode],
+			pageInfo: { hasNextPage: false },
+		});
+		mockTeam.mockResolvedValueOnce({ projects: mockTeamProjects });
+		const service = new LinearService({ apiKey: "token" });
+		const result = await service.getProjects(10, { teamId: "uuid-dev" });
+		expect(result).toHaveLength(1);
+		expect(mockTeam).toHaveBeenCalledWith("uuid-dev");
+		expect(mockTeamProjects).toHaveBeenCalledWith(
+			expect.objectContaining({ first: 10, includeArchived: false }),
+		);
+		// The invalid ProjectFilter.teams shape must never be sent.
+		const sentFilter = mockTeamProjects.mock.calls[0][0].filter;
+		expect(sentFilter?.teams).toBeUndefined();
+		expect(mockProjects).not.toHaveBeenCalledWith(
+			expect.objectContaining({
+				filter: expect.objectContaining({ teams: expect.anything() }),
+			}),
+		);
+	});
+
+	it("uses the global projects connection without teamId", async () => {
+		mockProjects.mockResolvedValueOnce({
+			nodes: [projectNode],
+			pageInfo: { hasNextPage: false },
+		});
+		const service = new LinearService({ apiKey: "token" });
+		const result = await service.getProjects(10, {});
+		expect(result).toHaveLength(1);
+		expect(mockProjects).toHaveBeenCalledWith(
+			expect.objectContaining({ first: 10 }),
+		);
 	});
 });

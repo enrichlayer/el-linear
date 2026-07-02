@@ -189,20 +189,32 @@ export class LinearService {
 		} else if (options.excludeStates && options.excludeStates.length > 0) {
 			filter.state = { nin: options.excludeStates };
 		}
-		if (options.teamId) {
-			filter.teams = { some: { id: { eq: options.teamId } } };
-		}
 		// `limit === 0` means "no limit" — paginate the full result set.
 		// Otherwise a single page of `limit` projects. DEV-4175: `--all` /
 		// `--limit 0` must return every project so callers never make a false
 		// "does not exist" determination off a silently truncated page.
 		const unlimited = limit === 0;
-		let page = await this.client.projects({
-			filter: nonEmptyFilter(filter),
-			first: unlimited ? 250 : limit,
-			orderBy: sdkOrderBy("updatedAt"),
-			includeArchived: false,
-		});
+		// DEV-5325: ProjectFilter has no `teams` relation filter — the
+		// `teams: { some: … }` shape this used since DEV-4165 errors against
+		// the live GraphQL schema ('Field "teams" is not defined by type
+		// "ProjectFilter"'). Team scoping queries from the team side instead:
+		// `Team.projects` accepts the same name/state ProjectFilter and
+		// paginates identically, keeping the filter server-side. (Args stay
+		// inline in each branch so `sdkOrderBy`'s generic keeps its contextual
+		// type from the SDK signature.)
+		let page = options.teamId
+			? await (await this.client.team(options.teamId)).projects({
+					filter: nonEmptyFilter(filter),
+					first: unlimited ? 250 : limit,
+					orderBy: sdkOrderBy("updatedAt"),
+					includeArchived: false,
+				})
+			: await this.client.projects({
+					filter: nonEmptyFilter(filter),
+					first: unlimited ? 250 : limit,
+					orderBy: sdkOrderBy("updatedAt"),
+					includeArchived: false,
+				});
 		const projectNodes = [...page.nodes];
 		if (unlimited) {
 			while (page.pageInfo.hasNextPage) {
@@ -653,25 +665,21 @@ export class LinearService {
 			throw notFoundError("Project", projectInput);
 		}
 		// DEV-4103: scope by team when provided so a name shared across teams
-		// doesn't resolve to a different team's project. Same SDK filter shape
-		// `getProjects` already uses for `--team` filtering.
+		// doesn't resolve to a different team's project. DEV-5325: the scoping
+		// goes through `Team.projects` (same as `getProjects`) — ProjectFilter
+		// rejects a `teams` relation filter against the live schema.
 		const teamId = teamInput ? await this.resolveTeamId(teamInput) : undefined;
 		const filter: Record<string, unknown> = {
 			name: { eqIgnoreCase: projectInput },
 		};
-		if (teamId) {
-			// Matches the filter shape `getProjects` uses for `--team`.
-			filter.teams = { some: { id: { eq: teamId } } };
-		}
 		// `first: 5` is wide enough to detect ambiguity (same name across
 		// multiple teams) without paying for a deeper page. Linear's UI caps
 		// effective project-name collisions at a handful in practice; if a
 		// workspace ever exceeds this we'll see it as a still-ambiguous error
 		// listing the first 5 teams — better than a silent wrong pick.
-		const projectsConnection = await this.client.projects({
-			filter,
-			first: 5,
-		});
+		const projectsConnection = teamId
+			? await (await this.client.team(teamId)).projects({ filter, first: 5 })
+			: await this.client.projects({ filter, first: 5 });
 		if (projectsConnection.nodes.length === 0) {
 			const context = teamInput ? `on team "${teamInput}"` : undefined;
 			throw notFoundError("Project", projectInput, context);
