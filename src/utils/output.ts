@@ -57,9 +57,63 @@ export function getOutputFormat(): OutputFormat {
 	return outputFormat;
 }
 
-function filterFields(obj: unknown, fields: string[]): unknown {
+/**
+ * Resolve a dot-separated path against a value (`a.b.c`; array indices are
+ * numeric segments, `items.0.id`). Returns `undefined` when any segment is
+ * missing so callers can distinguish "missing" from a real `null` value.
+ * Same path grammar as el-git's `--field` selector — keeping the two flags'
+ * semantics aligned is the point (DEV-5323).
+ */
+function getNestedPath(obj: unknown, path: string): unknown {
+	let cur: unknown = obj;
+	for (const seg of path.split(".")) {
+		if (cur === null || cur === undefined || typeof cur !== "object") {
+			return undefined;
+		}
+		cur = (cur as Record<string, unknown>)[seg];
+	}
+	return cur;
+}
+
+/**
+ * Project `obj` down to the requested fields.
+ *
+ * - Top-level keys copy through as before.
+ * - Dot-separated paths (DEV-5323) resolve nested values; the requested path
+ *   string becomes a flat output key (`{"pipeline.status": "success"}`), so
+ *   consumers read exactly what they asked for.
+ * - A field that resolves nowhere is emitted as an explicit `null` AND
+ *   reported via `unresolved` — never silently omitted. Silent omission made
+ *   a typo'd field indistinguishable from an empty value (DEV-5323).
+ * - For arrays, each item is projected; a field counts as unresolved only
+ *   when it resolves on NO item (heterogeneous lists legitimately have
+ *   per-item gaps).
+ */
+function filterFields(
+	obj: unknown,
+	fields: string[],
+	unresolved?: Set<string>,
+): unknown {
 	if (Array.isArray(obj)) {
-		return obj.map((item) => filterFields(item, fields));
+		const resolvedSomewhere = new Set<string>();
+		const items = obj.map((item) => {
+			const perItem = new Set<string>();
+			const projected = filterFields(item, fields, perItem);
+			for (const field of fields) {
+				if (!perItem.has(field)) {
+					resolvedSomewhere.add(field);
+				}
+			}
+			return projected;
+		});
+		if (unresolved) {
+			for (const field of fields) {
+				if (!resolvedSomewhere.has(field)) {
+					unresolved.add(field);
+				}
+			}
+		}
+		return items;
 	}
 	if (obj !== null && typeof obj === "object") {
 		const source = obj as Record<string, unknown>;
@@ -67,7 +121,17 @@ function filterFields(obj: unknown, fields: string[]): unknown {
 		for (const field of fields) {
 			if (field in source) {
 				result[field] = source[field];
+				continue;
 			}
+			const nested = field.includes(".")
+				? getNestedPath(source, field)
+				: undefined;
+			if (nested !== undefined) {
+				result[field] = nested;
+				continue;
+			}
+			result[field] = null;
+			unresolved?.add(field);
 		}
 		return result;
 	}
@@ -285,15 +349,41 @@ export function outputSuccess(data: unknown): void {
 	// (project.name, teams[].key) the formatter needs to render. Skip the
 	// JSON filter when summary is active and let the formatter do the work.
 	if (fieldsFilter && outputFormat !== "summary") {
+		const unresolved = new Set<string>();
 		if (Array.isArray(output)) {
-			output = filterFields(output, fieldsFilter);
+			output = filterFields(output, fieldsFilter, unresolved);
 		} else if (output !== null && typeof output === "object") {
 			const obj = output as Record<string, unknown>;
 			if (Array.isArray(obj.data)) {
-				output = { ...obj, data: filterFields(obj.data, fieldsFilter) };
+				output = {
+					...obj,
+					data: filterFields(obj.data, fieldsFilter, unresolved),
+				};
+			} else if (
+				obj.data !== null &&
+				obj.data !== undefined &&
+				typeof obj.data === "object"
+			) {
+				// Envelope with an OBJECT data payload (e.g. el-git context):
+				// project inside `data`, same as the array branch. Before
+				// DEV-5323 this fell through to root filtering, so
+				// `--fields branch,issueId` on an envelope returned `{}`.
+				// Paths are relative to `data` for every envelope shape.
+				output = {
+					...obj,
+					data: filterFields(obj.data, fieldsFilter, unresolved),
+				};
 			} else {
-				output = filterFields(output, fieldsFilter);
+				output = filterFields(output, fieldsFilter, unresolved);
 			}
+		}
+		if (unresolved.size > 0) {
+			// Fail-visible: the projected keys carry explicit nulls and this
+			// warning names them, so a typo'd/missing field is never mistaken
+			// for an empty value (DEV-5323).
+			outputWarning(
+				`fields_unresolved: ${[...unresolved].join(", ")} did not resolve on this payload (emitted as null). Paths are dot-separated and relative to the envelope's data when one is present.`,
+			);
 		}
 	}
 

@@ -362,11 +362,68 @@ describe("--fields filter", () => {
 		]);
 	});
 
-	it("silently omits non-existent field names", () => {
+	it("emits non-existent field names as explicit null + a _warnings line (DEV-5323 — was silent omission)", () => {
 		setFieldsFilter(["identifier", "nonexistent"]);
 		outputSuccess({ identifier: "DEV-1", title: "Bug", priority: 2 });
 		const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
-		expect(parsed).toEqual({ identifier: "DEV-1" });
+		expect(parsed.identifier).toBe("DEV-1");
+		expect(parsed.nonexistent).toBeNull();
+		expect(parsed._warnings.join(" ")).toContain(
+			"fields_unresolved: nonexistent",
+		);
+	});
+
+	it("resolves dot-separated nested paths as flat output keys (DEV-5323)", () => {
+		setFieldsFilter(["iid", "pipeline.status"]);
+		outputSuccess({
+			iid: 1740,
+			sha: "abc",
+			pipeline: { id: 9, status: "success" },
+		});
+		const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+		expect(parsed).toEqual({ iid: 1740, "pipeline.status": "success" });
+	});
+
+	it("projects inside an envelope with an OBJECT data payload (DEV-5323 — was {})", () => {
+		setFieldsFilter(["branch", "issueId"]);
+		outputSuccess({
+			data: {
+				branch: "fix/DEV-1-x",
+				issueId: "DEV-1",
+				team: "DEV",
+				staged: [],
+			},
+			meta: { totalChanged: 3 },
+		});
+		const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+		expect(parsed.data).toEqual({ branch: "fix/DEV-1-x", issueId: "DEV-1" });
+		expect(parsed.meta).toEqual({ totalChanged: 3 });
+	});
+
+	it("a real null value resolves without an unresolved warning", () => {
+		setFieldsFilter(["identifier", "dueDate"]);
+		outputSuccess({ identifier: "DEV-1", dueDate: null });
+		const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+		expect(parsed).toEqual({ identifier: "DEV-1", dueDate: null });
+		expect(parsed._warnings).toBeUndefined();
+	});
+
+	it("array projection warns only when a field resolves on NO item", () => {
+		setFieldsFilter(["identifier", "dueDate", "ghost"]);
+		outputSuccess({
+			data: [
+				{ identifier: "DEV-1", dueDate: "2026-07-01" },
+				{ identifier: "DEV-2" },
+			],
+			meta: { count: 2 },
+		});
+		const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+		expect(parsed.data[0].dueDate).toBe("2026-07-01");
+		expect(parsed.data[1].dueDate).toBeNull();
+		expect(parsed.data[1].ghost).toBeNull();
+		const warningText = parsed._warnings.join(" ");
+		expect(warningText).toContain("ghost");
+		expect(warningText).not.toContain("dueDate");
 	});
 
 	it("includes full nested objects for fields like state", () => {
