@@ -796,6 +796,43 @@ export function formatMilestoneList(milestones: unknown[]): string {
 	);
 }
 
+// ── project updates ────────────────────────────────────────────
+
+export function formatProjectUpdateSummary(
+	update: Record<string, unknown>,
+): string {
+	const headerLine = `project-update ${s(update.id)}`;
+	const fields: HeaderField[] = [
+		{ label: "Health", value: s(update.health) },
+		{ label: "Project", value: getName(update.project) },
+		{ label: "Author", value: getName(update.user) },
+		{ label: "Created", value: s(update.createdAt) },
+		{ label: "URL", value: s(update.url) },
+	];
+	const header = renderHeader(fields);
+	const body = clipDescription(update.body as string | undefined);
+	const parts = [headerLine, header];
+	if (body) parts.push("", body);
+	return parts.filter((p) => p !== "").join("\n");
+}
+
+export function formatProjectUpdateList(updates: unknown[]): string {
+	return renderTable(
+		updates.map((raw) => asObj(raw) ?? {}),
+		[
+			{ header: "HEALTH", minWidth: 6, extract: (u) => s(u.health) },
+			{ header: "AUTHOR", minWidth: 6, extract: (u) => getName(u.user) },
+			{
+				header: "CREATED",
+				minWidth: 7,
+				extract: (u) => s(u.createdAt).slice(0, 10),
+			},
+			{ header: "URL", minWidth: 3, maxWidth: 60, extract: (u) => s(u.url) },
+		],
+		{ emptyText: "(no project updates)", itemNoun: "project update" },
+	);
+}
+
 // ── teams ──────────────────────────────────────────────────────
 
 export function formatTeamList(teams: unknown[]): string {
@@ -1228,6 +1265,8 @@ export type ResourceKind =
 	| "cycle-list"
 	| "milestone"
 	| "milestone-list"
+	| "project-update"
+	| "project-update-list"
 	| "team-list"
 	| "label-list"
 	| "user"
@@ -1274,6 +1313,9 @@ export function inferKindFromPayload(value: unknown): ResourceKind {
 		("state" in obj || "lead" in obj || "teams" in obj)
 	)
 		return "project";
+	// Project updates carry body + createdAt + user like comments; `health` is
+	// the distinguishing field, so this must precede the comment check.
+	if ("body" in obj && "health" in obj) return "project-update";
 	if ("body" in obj && "createdAt" in obj && "user" in obj) return "comment";
 	if (
 		("number" in obj || "isActive" in obj) &&
@@ -1319,6 +1361,9 @@ function inferListKind(items: unknown[]): ResourceKind {
 		}
 		return "issue-list";
 	}
+	// Project-update rows carry body + createdAt like comments; `health` is the
+	// distinguishing field, so this must precede the comment-list check.
+	if ("body" in sample && "health" in sample) return "project-update-list";
 	if ("body" in sample && "createdAt" in sample) return "comment-list";
 	if ("progress" in sample && "name" in sample) {
 		if ("startsAt" in sample || "endsAt" in sample) return "cycle-list";
@@ -1418,6 +1463,10 @@ export function dispatch(
 			return formatMilestoneSummary((obj ?? {}) as Record<string, unknown>);
 		case "milestone-list":
 			return formatMilestoneList(list ?? []);
+		case "project-update":
+			return formatProjectUpdateSummary((obj ?? {}) as Record<string, unknown>);
+		case "project-update-list":
+			return formatProjectUpdateList(list ?? []);
 		case "team-list":
 			return formatTeamList(list ?? []);
 		case "label-list":
@@ -1480,6 +1529,11 @@ export function formatLine(payload: unknown): string {
 	}
 	if (kind === "comment" && obj) {
 		return `comment ${s(obj.id)}`;
+	}
+	if (kind === "project-update" && obj) {
+		// create doesn't carry an identifier/title — health + url are the
+		// stable handles a caller needs (matches the summary header style).
+		return `${s(obj.health)}  ${s(obj.url)}`;
 	}
 	if (kind === "relation-list") {
 		return formatRelationLine(payload);
