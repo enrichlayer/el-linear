@@ -38,7 +38,7 @@ import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
 // Mirror of cli/el-git/src/commands/context.ts:BRANCH_RE in the
 // vertical-int/tools repo. If you change one, change the other.
 const BRANCH_RE =
-	/^(?:feature|fix|chore|refactor|bug|spike|dev|codex)[-/]([A-Z]{2,4})-(\d+)(?:[-/](.*))?$/i;
+	/^(?:feature|feat|fix|chore|refactor|bug|spike|dev|codex)[-/]([A-Z]{2,4})-(\d+)(?:[-/](.*))?$/i;
 
 interface ParsedBranch {
 	branch: string;

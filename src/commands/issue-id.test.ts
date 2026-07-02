@@ -123,6 +123,23 @@ describe("parseBranchName", () => {
 		expect(parseBranchName("spike/ALL-7-perf").issueId).toBe("ALL-7");
 	});
 
+	it("parses feat/<TEAM>-<N>-slug branches, same as feature/ (DEV-5342)", () => {
+		// `feat` is the short-form alias for `feature`, already in use on
+		// several branches; it must surface its issue ID the same way
+		// `feature/` does. Mirrors tools-repo DEV-5334 (el-git branch-types
+		// allowlist + check-linear-branch.sh).
+		expect(parseBranchName("feat/DEV-5342-branch-re-feat-prefix")).toEqual({
+			branch: "feat/DEV-5342-branch-re-feat-prefix",
+			issueId: "DEV-5342",
+			team: "DEV",
+			number: 5342,
+			slug: "branch-re-feat-prefix",
+		});
+		expect(parseBranchName("feat/ALL-7-thing").issueId).toBe("ALL-7");
+		// `feature/` still parses — the alias doesn't shadow the long form.
+		expect(parseBranchName("feature/DEV-1-x").issueId).toBe("DEV-1");
+	});
+
 	it("rejects team keys longer than 4 chars (regex limit)", () => {
 		expect(parseBranchName("feature/INFRA-1").issueId).toBeNull();
 	});
