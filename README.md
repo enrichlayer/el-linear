@@ -249,13 +249,14 @@ itself: `el-linear teams list --raw | jq '.[] | {key, id}'`, etc.
 
 ### Gate telemetry (optional)
 
-`issues create` has a duplicate-detection gate. el-linear can record each
-fire/override decision to a local JSONL file so you can measure the gate's
-**override-rate** and tell whether it's too aggressive. It is **off by default**
-and writes nothing unless you opt in (e.g. `export EL_TELEMETRY_DIR=<path>`);
-there is no server or database, and `EL_TELEMETRY_DISABLED=1` forces it off.
-Full opt-in rules, the event schema, and a `jq` reader are in
-[docs/telemetry.md](./docs/telemetry.md).
+`issues create` has a duplicate-detection gate (on by default) and an opt-in
+[SOP-label parent gate](./docs/configuration.md#sop-label-parent-gate-validationsoplabelparentgate).
+el-linear can record each gate's fire/override decision to a local JSONL file so
+you can measure its **override-rate** and tell whether it's too aggressive. It is
+**off by default** and writes nothing unless you opt in (e.g.
+`export EL_TELEMETRY_DIR=<path>`); there is no server or database, and
+`EL_TELEMETRY_DISABLED=1` forces it off. Full opt-in rules, the event schema, and
+a `jq` reader are in [docs/telemetry.md](./docs/telemetry.md).
 
 ### Networking (IPv4 preference)
 

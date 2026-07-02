@@ -200,6 +200,21 @@ and outreach tracked in one place.
 > `validation.duplicateDetection: false` (field validation still runs);
 > `validation.enabled: false` turns off all validation.
 
+> **SOP-label parent gate ([DEV-5378](https://linear.app/verticalint/issue/DEV-5378/), opt-in).** When enabled, `el-linear issues create` requires an
+> issue carrying an **SOP-type label** (any name in `validation.sopLabels`,
+> default `["SOP"]`, case-insensitive) to point at a **parent SOP** — `--parent`
+> or `--related-to` must resolve to another SOP-labeled issue — and **blocks
+> (exit non-zero)** otherwise, naming the rule. An SOP with no parent SOP is
+> unfindable by SOP tooling and breaks the catalog topology. It is **off by
+> default** (`validation.sopLabelParentGate: true` turns it on; the Enrich Layer
+> shared team config flips it on) because "SOP" is a workspace-specific
+> taxonomy, not something an open-source install should assume. Escape hatch:
+> `--allow-unparented-sop` (narrow, for an intentionally top-level SOP);
+> `--skip-validation` also bypasses it but skips all field validation. A typo'd
+> or nonexistent parent reference **blocks** (naming the ref) so a mistake can't
+> orphan an SOP; a transport/service error **fails open** with a warning (and a
+> `fail-open` gate event); a resolvable non-SOP parent hard-blocks.
+
 ```bash
 # --include-closed is required so previously-completed duplicates surface.
 # `issues search` defaults to open states (DEV-4478); the duplicate check
