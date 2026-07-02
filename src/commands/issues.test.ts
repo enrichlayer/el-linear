@@ -1084,7 +1084,7 @@ describe("issues commands", () => {
 			expect(mockCreateIssue).not.toHaveBeenCalled();
 			expect(process.exit).toHaveBeenCalledWith(1);
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
-				expect.stringContaining("carry an SOP label"),
+				expect.stringContaining("resolves to an SOP-labeled issue"),
 			);
 			expect(mockEmitGateEvent).toHaveBeenCalledWith(
 				"el-linear",
@@ -1214,9 +1214,48 @@ describe("issues commands", () => {
 			expect(mockCreateIssue).toHaveBeenCalled();
 		});
 
-		it("fails open (proceeds) when the parent cannot be resolved", async () => {
+		it("blocks a typo'd --related-to before createIssue (no orphan SOP)", async () => {
+			// A nonexistent/typo'd ref throws a not-found error from getIssueById.
+			// It must BLOCK before the create POST — otherwise the issue is created
+			// and the follow-up createRelations throws, leaving an orphan SOP.
 			mockLoadConfig.mockReturnValue(gateConfig);
-			mockGetIssueById.mockRejectedValue(new Error("not found"));
+			mockGetIssueById.mockRejectedValue(
+				new Error('Issue "DEV-9999" not found.'),
+			);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Add onboarding SOP",
+				...sopArgs,
+				"--related-to",
+				"DEV-9999",
+			]);
+
+			expect(mockCreateIssue).not.toHaveBeenCalled();
+			expect(process.exit).toHaveBeenCalledWith(1);
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Could not resolve: DEV-9999"),
+			);
+			expect(mockEmitGateEvent).toHaveBeenCalledWith(
+				"el-linear",
+				"issues create",
+				expect.objectContaining({
+					gate: "issues-create-sop-parent",
+					outcome: "blocked",
+				}),
+			);
+		});
+
+		it("fails open (records fail-open, creates) on a transport/service error", async () => {
+			// A GraphQL/network failure is infra trouble, not a bad reference — the
+			// gate must not block legitimate creation, but records the degradation.
+			mockLoadConfig.mockReturnValue(gateConfig);
+			mockGetIssueById.mockRejectedValue(
+				new Error("GraphQL request failed: fetch failed"),
+			);
 
 			const program = createTestProgram();
 			setupIssuesCommands(program);
@@ -1226,11 +1265,19 @@ describe("issues commands", () => {
 				"Add onboarding SOP",
 				...sopArgs,
 				"--parent",
-				"DEV-404",
+				"DEV-100",
 			]);
 
 			expect(mockOutputWarning).toHaveBeenCalledWith(
-				expect.stringContaining("could not resolve"),
+				expect.stringContaining("service error"),
+			);
+			expect(mockEmitGateEvent).toHaveBeenCalledWith(
+				"el-linear",
+				"issues create",
+				expect.objectContaining({
+					gate: "issues-create-sop-parent",
+					outcome: "fail-open",
+				}),
 			);
 			expect(mockCreateIssue).toHaveBeenCalled();
 		});

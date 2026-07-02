@@ -19,6 +19,7 @@ import {
 	formatSopParentBlock,
 	getSopLabelGateConfig,
 	hasSopLabel,
+	isUnresolvableReferenceError,
 } from "../config/sop-label-validation.js";
 import { resolveDefaultStatus } from "../config/status-defaults.js";
 import { enforceTerms } from "../config/term-enforcer.js";
@@ -812,7 +813,8 @@ async function enforceSopLabelParent(
 	// mirroring the dup gate (DEV-4834): `overridden` when the caller passed
 	// --allow-unparented-sop and we proceed, `blocked` when we stop creation.
 	const decide = async (
-		reason: "no-parent" | "non-sop-parent",
+		reason: "no-parent" | "no-sop-parent",
+		unresolvableRefs?: string[],
 	): Promise<void> => {
 		const gateEvent = { gate: "issues-create-sop-parent" } as const;
 		if (options.allowUnparentedSop) {
@@ -827,7 +829,12 @@ async function enforceSopLabelParent(
 			outcome: "blocked",
 		});
 		throw new Error(
-			`Issue creation blocked: ${formatSopParentBlock({ sopLabels, reason, parentRefs })}`,
+			`Issue creation blocked: ${formatSopParentBlock({
+				sopLabels,
+				reason,
+				parentRefs,
+				unresolvableRefs,
+			})}`,
 		);
 	};
 
@@ -839,13 +846,15 @@ async function enforceSopLabelParent(
 
 	// A referenced issue that resolves AND carries an SOP label satisfies the
 	// gate. Fetch per-ref (not batched) so one unresolvable ref doesn't sink a
-	// sibling that would have passed.
-	let anyResolved = false;
-	let anyErrored = false;
+	// sibling that would have passed. Classify each failure: a clean
+	// not-found/malformed ref is an unresolvable reference (it contributes to a
+	// block — a typo must not slip through), a transport/service error is infra
+	// trouble (fail open so it can't block legitimate creation).
+	const unresolvableRefs: string[] = [];
+	let transportError = false;
 	for (const ref of parentRefs) {
 		try {
 			const issue = await issuesService.getIssueById(ref);
-			anyResolved = true;
 			if (
 				hasSopLabel(
 					issue.labels.map((l) => l.name),
@@ -854,16 +863,25 @@ async function enforceSopLabelParent(
 			) {
 				return; // valid SOP parent — pass
 			}
-		} catch {
-			anyErrored = true;
+		} catch (err) {
+			if (isUnresolvableReferenceError(err)) {
+				unresolvableRefs.push(ref);
+			} else {
+				transportError = true;
+			}
 		}
 	}
 
-	// Couldn't resolve any reference → best-effort fail-open (like the dup gate
-	// on a search failure): warn and proceed rather than block on infra trouble.
-	if (!anyResolved) {
+	// No SOP parent was confirmed. A transport failure may have hidden the real
+	// SOP parent → fail open (best-effort, like the dup gate on a search
+	// failure) and record it so the degradation is measurable (DEV-5378).
+	if (transportError) {
+		await emitGateEvent("el-linear", "issues create", {
+			gate: "issues-create-sop-parent",
+			outcome: "fail-open",
+		});
 		outputWarning(
-			`SOP-parent check could not resolve any of: ${parentRefs.join(", ")}; proceeding without the check.${
+			`SOP-parent check could not verify a parent SOP for ${parentRefs.join(", ")} due to a service error; proceeding without blocking.${
 				options.allowUnparentedSop
 					? ""
 					: " Pass --allow-unparented-sop to silence."
@@ -872,18 +890,13 @@ async function enforceSopLabelParent(
 		return;
 	}
 
-	// At least one ref resolved and none were SOP-labeled, but some refs errored
-	// — one of those *might* be the SOP parent, so fail open with a warning
-	// rather than a false-positive block.
-	if (anyErrored) {
-		outputWarning(
-			`SOP-parent check: none of the resolved references carry an SOP label, but some could not be resolved (${parentRefs.join(", ")}); proceeding without blocking.`,
-		);
-		return;
-	}
-
-	// Every ref resolved and none carries an SOP label → block.
-	await decide("non-sop-parent");
+	// Every reference either resolved to a non-SOP issue or cleanly failed to
+	// resolve (typo / nonexistent) — none is a valid SOP parent → block, naming
+	// any unresolvable refs so a typo reads differently from a real non-SOP parent.
+	await decide(
+		"no-sop-parent",
+		unresolvableRefs.length > 0 ? unresolvableRefs : undefined,
+	);
 }
 
 async function handleCreateIssue(

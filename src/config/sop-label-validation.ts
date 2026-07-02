@@ -65,25 +65,64 @@ export function hasSopLabel(labels: string[], sopLabels: string[]): boolean {
 }
 
 /**
+ * Distinguish a reference that cleanly does NOT resolve to a real issue (a
+ * typo'd or nonexistent `--parent` / `--related-to`) from a transport/service
+ * failure (network, GraphQL 5xx, timeout).
+ *
+ * `getIssueById` throws a plain `Error` for both — this codebase has no error
+ * `code` or subclass to switch on — so we key on the two message families it
+ * produces for an *unresolvable reference*:
+ *   - `notFoundError` → `… not found.`  (well-formed ref, no such issue)
+ *   - `parseIssueIdentifier` → `Invalid issue identifier format: …` /
+ *     `Invalid issue number in identifier: …`  (malformed ref)
+ * Everything else — notably `GraphQL request failed: …` / `GraphQL query
+ * failed` from `graphql-service` — is treated as transport and fails open.
+ *
+ * This is a correctness distinction, not just telemetry: an unresolvable
+ * reference must BLOCK. Otherwise a typo'd `--related-to` on an SOP issue fails
+ * open, the issue is created, and the *follow-up* `createRelations` throws —
+ * leaving an orphan SOP on the board (the exact gap DEV-5378 cycle-1 caught). A
+ * transport error must FAIL OPEN so infra trouble can't block legitimate work.
+ */
+export function isUnresolvableReferenceError(err: unknown): boolean {
+	const message = err instanceof Error ? err.message : String(err);
+	return (
+		message.includes("not found.") ||
+		message.includes("Invalid issue identifier format") ||
+		message.includes("Invalid issue number in identifier")
+	);
+}
+
+/**
  * Render the human/agent-facing block thrown when an SOP-labeled issue has no
  * SOP parent. `reason` distinguishes "no parent at all" from "one or more
- * parents present but none carries an SOP label", so the message points at the
- * exact fix. Names the rule and the `--allow-unparented-sop` escape hatch.
+ * references present but none resolves to an SOP-labeled issue", so the message
+ * points at the exact fix. When some references couldn't be resolved at all,
+ * `unresolvableRefs` names them (a typo'd ref reads differently from a real but
+ * non-SOP parent). Names the rule and the `--allow-unparented-sop` escape hatch.
  */
 export function formatSopParentBlock(opts: {
 	sopLabels: string[];
-	reason: "no-parent" | "non-sop-parent";
+	reason: "no-parent" | "no-sop-parent";
 	parentRefs: string[];
+	unresolvableRefs?: string[];
 }): string {
 	const sopList = opts.sopLabels.join(", ");
 	const head =
 		`SOP-labeled issue must point at a parent SOP (SOP label(s): ${sopList}).\n` +
 		"  An SOP with no parent SOP is unfindable by `el-sop landscape` and breaks the catalog topology.\n";
-	const detail =
-		opts.reason === "no-parent"
-			? "  This issue has no --parent or --related-to. Add one that points at an SOP-labeled issue.\n"
-			: `  None of the referenced issues (${opts.parentRefs.join(", ")}) carry an SOP label.\n` +
-				"  Point --parent or --related-to at an SOP-labeled issue.\n";
+	let detail: string;
+	if (opts.reason === "no-parent") {
+		detail =
+			"  This issue has no --parent or --related-to. Add one that points at an SOP-labeled issue.\n";
+	} else {
+		detail = `  No referenced issue resolves to an SOP-labeled issue (referenced: ${opts.parentRefs.join(", ")}).\n`;
+		if (opts.unresolvableRefs && opts.unresolvableRefs.length > 0) {
+			detail += `  Could not resolve: ${opts.unresolvableRefs.join(", ")} — check the identifier exists.\n`;
+		}
+		detail +=
+			"  Point --parent or --related-to at an existing SOP-labeled issue.\n";
+	}
 	const hatch =
 		"  If this SOP is intentionally top-level, re-run with --allow-unparented-sop.";
 	return head + detail + hatch;

@@ -81,7 +81,13 @@ function gateLedgerIfEnabled(): string | null {
 export interface GateEvent {
 	/** Stable gate id, e.g. `issues-create-dup`. */
 	gate: string;
-	outcome: "blocked" | "overridden";
+	/**
+	 * `blocked` — the gate stopped creation. `overridden` — a gate-specific
+	 * override flag let a would-block proceed. `fail-open` — the gate could not
+	 * evaluate (infra/service error) and let creation proceed rather than block
+	 * on trouble; tracked so degradation is measurable (DEV-5378).
+	 */
+	outcome: "blocked" | "overridden" | "fail-open";
 	/** Highest candidate similarity that triggered the gate (0–1). */
 	topScore?: number;
 	/** How many candidates crossed the threshold. */

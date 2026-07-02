@@ -210,9 +210,10 @@ and outreach tracked in one place.
 > shared team config flips it on) because "SOP" is a workspace-specific
 > taxonomy, not something an open-source install should assume. Escape hatch:
 > `--allow-unparented-sop` (narrow, for an intentionally top-level SOP);
-> `--skip-validation` also bypasses it but skips all field validation. The
-> parent-label lookup is best-effort — an unresolvable reference fails open with
-> a warning; a resolvable non-SOP parent hard-blocks.
+> `--skip-validation` also bypasses it but skips all field validation. A typo'd
+> or nonexistent parent reference **blocks** (naming the ref) so a mistake can't
+> orphan an SOP; a transport/service error **fails open** with a warning (and a
+> `fail-open` gate event); a resolvable non-SOP parent hard-blocks.
 
 ```bash
 # --include-closed is required so previously-completed duplicates surface.

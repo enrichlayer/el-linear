@@ -12,6 +12,7 @@ const {
 	formatSopParentBlock,
 	getSopLabelGateConfig,
 	hasSopLabel,
+	isUnresolvableReferenceError,
 } = await import("./sop-label-validation.js");
 
 afterEach(() => {
@@ -105,14 +106,63 @@ describe("formatSopParentBlock", () => {
 		expect(block).toContain("--allow-unparented-sop");
 	});
 
-	it("lists the offending refs for the non-sop-parent case", () => {
+	it("lists the referenced issues for the no-sop-parent case", () => {
 		const block = formatSopParentBlock({
 			sopLabels: ["SOP"],
-			reason: "non-sop-parent",
+			reason: "no-sop-parent",
 			parentRefs: ["DEV-100", "DEV-200"],
 		});
 		expect(block).toContain("DEV-100, DEV-200");
-		expect(block).toContain("carry an SOP label");
+		expect(block).toContain("resolves to an SOP-labeled issue");
 		expect(block).toContain("--allow-unparented-sop");
+	});
+
+	it("names unresolvable refs when present", () => {
+		const block = formatSopParentBlock({
+			sopLabels: ["SOP"],
+			reason: "no-sop-parent",
+			parentRefs: ["DEV-100", "DEV-404"],
+			unresolvableRefs: ["DEV-404"],
+		});
+		expect(block).toContain("Could not resolve: DEV-404");
+	});
+});
+
+describe("isUnresolvableReferenceError", () => {
+	it("treats a not-found error as unresolvable (blocks)", () => {
+		expect(
+			isUnresolvableReferenceError(new Error('Issue "DEV-404" not found.')),
+		).toBe(true);
+	});
+
+	it("treats a malformed identifier as unresolvable (blocks)", () => {
+		expect(
+			isUnresolvableReferenceError(
+				new Error(
+					'Invalid issue identifier format: "TYPO". Expected format: TEAM-123',
+				),
+			),
+		).toBe(true);
+		expect(
+			isUnresolvableReferenceError(
+				new Error('Invalid issue number in identifier: "DEV-x"'),
+			),
+		).toBe(true);
+	});
+
+	it("treats a transport/service error as NOT unresolvable (fails open)", () => {
+		expect(
+			isUnresolvableReferenceError(
+				new Error("GraphQL request failed: fetch failed"),
+			),
+		).toBe(false);
+		expect(
+			isUnresolvableReferenceError(new Error("GraphQL query failed")),
+		).toBe(false);
+		expect(isUnresolvableReferenceError(new Error("timeout"))).toBe(false);
+	});
+
+	it("handles non-Error throwables by stringifying", () => {
+		expect(isUnresolvableReferenceError("some string")).toBe(false);
 	});
 });

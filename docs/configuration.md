@@ -229,9 +229,13 @@ Escape hatches, in order of narrowness:
   gate.
 - `validation.sopLabelParentGate: false` (or omitting it) — disable the gate.
 
-The parent-label lookup is best-effort: if a referenced issue can't be resolved
-(network error / not found) the gate fails open with a warning rather than
-blocking creation, while a genuinely resolvable non-SOP parent still hard-blocks.
+The parent-label lookup distinguishes two failure modes. A reference that
+**cleanly doesn't resolve** — a typo'd or nonexistent identifier — is treated as
+an invalid parent and **blocks** (naming the ref), so a mistyped `--related-to`
+can't slip an orphan SOP onto the board. A **transport/service error** (network,
+GraphQL 5xx, timeout) **fails open** with a warning and records a `fail-open`
+gate event, so infra trouble can't block legitimate creation. A genuinely
+resolvable non-SOP parent always hard-blocks.
 
 A complete minimal config (token + defaultTeam only) is enough for most basic use:
 
