@@ -25,11 +25,12 @@ import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
 // elsewhere in the workspace. Any addition here is the single point of
 // truth that all skills rely on.
 //
-// Accepted prefixes (DEV-4777 adds bug/spike; DEV-4660 added codex; both
-// mirror tools-repo DEV-4417):
-//   feature | fix | chore | refactor | dev   — SOP-canonical + Linear-CLI direct
+// Accepted prefixes (DEV-4777 adds bug/spike; DEV-4660 added codex; DEV-5342
+// adds the feat short-form alias; all mirror tools-repo DEV-4417/DEV-5334):
+//   feature | feat | fix | chore | refactor | dev — SOP-canonical + Linear-CLI direct
 //   bug | spike                              — sanctioned Linear type labels
 //   codex                                    — Codex-authored branches (codex/<TEAM>-<N>-slug)
+//   feat                                     — short-form alias for feature (DEV-5342)
 // New authoring surfaces (Codex, future agent prefixes) and sanctioned Linear
 // type labels (bug, spike) get first-class issue detection so commit guards,
 // MR descriptions, and session handoff don't go dark on a branch a human
