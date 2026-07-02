@@ -93,12 +93,16 @@ program
 	)
 	.option(
 		"--raw",
-		"strip { data, meta } wrapper from list output — emit the array directly",
+		"strip { data, meta } wrapper from list output — emit the array directly. " +
+			"Warnings (e.g. --fields fields_unresolved) can't ride on a bare array, so " +
+			"they are written to stderr prefixed `_warnings: `, keeping stdout a pure JSON array",
 	)
 	.option("--jq <filter>", "apply a jq filter to the JSON output")
 	.option(
 		"--fields <fields>",
-		"filter output to specific fields (comma-separated)",
+		"filter output to specific fields (comma-separated). Unresolved fields are " +
+			"emitted as null plus a `fields_unresolved:` warning — in the JSON " +
+			"envelope's `_warnings`, or on stderr when output is a bare array (with --raw)",
 	)
 	.option(
 		"--no-cache",
