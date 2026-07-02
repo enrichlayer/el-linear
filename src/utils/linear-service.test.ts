@@ -30,13 +30,14 @@ vi.mock("@linear/sdk", () => ({
 
 const { LinearService } = await import("./linear-service.js");
 
-// Reset every mock's call log and queued implementations before each test so
-// tests are order-independent. Without this, accumulated `.mock.calls` and any
-// leftover `mockResolvedValueOnce` entries leak across tests — changing one
-// test's API path silently broke unrelated neighbors during DEV-5325. Every
-// test below sets its own resolved values, so clearing here is safe.
+// Reset every mock before each test so tests are order-independent: call
+// logs, queued `mockResolvedValueOnce` entries, AND base implementations.
+// `resetAllMocks` (not `clearAllMocks`, which resets call history only and
+// leaves once-queues intact) is what actually prevents the DEV-5325 failure
+// mode — a test under-consuming its once-queue leaking into a neighbor.
+// Every test below sets its own resolved values, so resetting here is safe.
 beforeEach(() => {
-	vi.clearAllMocks();
+	vi.resetAllMocks();
 });
 
 describe("LinearService", () => {
