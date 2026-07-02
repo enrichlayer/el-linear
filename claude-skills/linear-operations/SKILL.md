@@ -143,8 +143,8 @@ For tools that aren't `el-linear` (e.g. `gh`, `glab`, `kubectl`), prefer `jq` fo
 
 `--format summary` is implemented for:
 
-- **Single resources:** `issues read`, `comments read`, `projects read`, `cycles read`, `project-milestones read`, `documents read`, `templates read`, releases (`graphql` query results), `users read`
-- **Lists:** `issues list`, `issues search`, `projects list`, `comments list`, `cycles list`, `project-milestones list`, `labels list`, `teams list`, `users list`, `documents list`, `templates list`, `attachments list`, `releases list`, and the cross-resource `search` command
+- **Single resources:** `issues read`, `comments read`, `projects read`, `cycles read`, `project-milestones read`, `project-updates read`, `documents read`, `templates read`, releases (`graphql` query results), `users read`
+- **Lists:** `issues list`, `issues search`, `projects list`, `comments list`, `cycles list`, `project-milestones list`, `project-updates list`, `labels list`, `teams list`, `users list`, `documents list`, `templates list`, `attachments list`, `releases list`, and the cross-resource `search` command
 
 Commands without a dedicated formatter (e.g. `config show`, custom `graphql` queries) fall back to a generic key/value rendering of their JSON payload.
 
@@ -516,6 +516,25 @@ el-linear projects add-team "Project Name" ENG 2>&1
 ```
 
 **Never use raw `projectUpdate` with `teamIds`** — it replaces the entire team list. Always use `projects add-team` / `remove-team`.
+
+### Project Updates (status posts) — mind the naming collision
+
+Linear has two unrelated things spelled almost the same:
+
+- `projectUpdate(id, input)` — the mutation that **edits a project** (the one warned about just above). Surfaced by the `projects` command.
+- `ProjectUpdate` — a **status post** in a project's Updates feed (progress + a health color). Surfaced by the dedicated `project-updates` command:
+
+```bash
+# Post a status update to a project (appears in the Updates feed)
+el-linear project-updates create --project "Auth Refactor" \
+  --body "Shipped the session-store migration; rollout at 60%." \
+  --health onTrack   # onTrack | atRisk | offTrack — omit to leave unset
+
+el-linear project-updates list --project "Auth Refactor"
+el-linear project-updates read <updateId>
+```
+
+`--body` / `--body-file` are mutually exclusive (one required); `--body-file` avoids shell-quoting for markdown/tables. `--health` is validated against the enum before the API call. `-q/--quiet` prints `<health>  <url>`. A status update is not the same as a project **document** (`documents create --project`) — use a document for durable reference content, a project update for point-in-time progress.
 
 ### Discovery Before Creation
 
