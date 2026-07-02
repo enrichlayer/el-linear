@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockTeams = vi.fn();
 const mockTeam = vi.fn();
@@ -29,6 +29,16 @@ vi.mock("@linear/sdk", () => ({
 }));
 
 const { LinearService } = await import("./linear-service.js");
+
+// Reset every mock before each test so tests are order-independent: call
+// logs, queued `mockResolvedValueOnce` entries, AND base implementations.
+// `resetAllMocks` (not `clearAllMocks`, which resets call history only and
+// leaves once-queues intact) is what actually prevents the DEV-5325 failure
+// mode — a test under-consuming its once-queue leaking into a neighbor.
+// Every test below sets its own resolved values, so resetting here is safe.
+beforeEach(() => {
+	vi.resetAllMocks();
+});
 
 describe("LinearService", () => {
 	describe("resolveIssueId", () => {
@@ -348,20 +358,18 @@ describe("LinearService", () => {
 	describe("normalizeProjectInput", () => {
 		it("passes UUIDs through unchanged without an API call", async () => {
 			const service = new LinearService({ apiKey: "token" });
-			const before = mockProjects.mock.calls.length;
 			const result = await service.normalizeProjectInput(
 				"f47ac10b-58cc-4372-a567-0e02b2c3d479",
 			);
 			expect(result).toBe("f47ac10b-58cc-4372-a567-0e02b2c3d479");
-			expect(mockProjects.mock.calls.length).toBe(before);
+			expect(mockProjects).not.toHaveBeenCalled();
 		});
 
 		it("passes plain names through unchanged without an API call", async () => {
 			const service = new LinearService({ apiKey: "token" });
-			const before = mockProjects.mock.calls.length;
 			const result = await service.normalizeProjectInput("Customer API");
 			expect(result).toBe("Customer API");
-			expect(mockProjects.mock.calls.length).toBe(before);
+			expect(mockProjects).not.toHaveBeenCalled();
 		});
 
 		it("resolves URL inputs to a UUID via slugId", async () => {
