@@ -986,6 +986,256 @@ describe("issues commands", () => {
 		});
 	});
 
+	describe("issues create — SOP-label parent gate (DEV-5378)", () => {
+		// Field validation is ON so the create path runs; the dup gate is
+		// neutralized by returning no search candidates. Every call carries an
+		// SOP label unless a test overrides it.
+		const sopArgs = [
+			"--team",
+			"DEV",
+			"--labels",
+			"feature,SOP",
+			"--description",
+			"A sufficiently long description that passes the length check.",
+			"--assignee",
+			"bob",
+			"--project",
+			"Infrastructure",
+		];
+		// Gate OPT-IN + active.
+		const gateConfig = {
+			...baseConfig,
+			validation: { enabled: true, sopLabelParentGate: true },
+		};
+
+		function labeledIssue(identifier: string, labelNames: string[]) {
+			return {
+				id: `id-${identifier}`,
+				identifier,
+				title: `Issue ${identifier}`,
+				labels: labelNames.map((name) => ({ id: `l-${name}`, name })),
+				priority: 0,
+				createdAt: "2026-01-01T00:00:00.000Z",
+				updatedAt: "2026-01-01T00:00:00.000Z",
+				url: `https://linear.app/x/issue/${identifier}`,
+			};
+		}
+
+		beforeEach(() => {
+			// Neutralize the dup gate so only the SOP gate is under test.
+			mockSearchIssues.mockResolvedValue([]);
+			mockCreateIssue.mockResolvedValue({ id: "x", identifier: "DEV-999" });
+		});
+
+		it("passes when --parent resolves to an SOP-labeled issue", async () => {
+			mockLoadConfig.mockReturnValue(gateConfig);
+			mockGetIssueById.mockResolvedValue(labeledIssue("DEV-100", ["SOP"]));
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Add onboarding SOP",
+				...sopArgs,
+				"--parent",
+				"DEV-100",
+			]);
+
+			expect(mockGetIssueById).toHaveBeenCalledWith("DEV-100");
+			expect(mockCreateIssue).toHaveBeenCalled();
+			expect(process.exit).not.toHaveBeenCalledWith(1);
+		});
+
+		it("passes when --related-to resolves to an SOP-labeled issue", async () => {
+			mockLoadConfig.mockReturnValue(gateConfig);
+			mockGetIssueById.mockResolvedValue(labeledIssue("DEV-100", ["SOP"]));
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Add onboarding SOP",
+				...sopArgs,
+				"--related-to",
+				"DEV-100",
+			]);
+
+			expect(mockGetIssueById).toHaveBeenCalledWith("DEV-100");
+			expect(mockCreateIssue).toHaveBeenCalled();
+		});
+
+		it("blocks when the parent is not SOP-labeled", async () => {
+			mockLoadConfig.mockReturnValue(gateConfig);
+			mockGetIssueById.mockResolvedValue(labeledIssue("DEV-100", ["feature"]));
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Add onboarding SOP",
+				...sopArgs,
+				"--parent",
+				"DEV-100",
+			]);
+
+			expect(mockCreateIssue).not.toHaveBeenCalled();
+			expect(process.exit).toHaveBeenCalledWith(1);
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("carry an SOP label"),
+			);
+			expect(mockEmitGateEvent).toHaveBeenCalledWith(
+				"el-linear",
+				"issues create",
+				expect.objectContaining({
+					gate: "issues-create-sop-parent",
+					outcome: "blocked",
+				}),
+			);
+		});
+
+		it("blocks when an SOP-labeled issue has no parent or related", async () => {
+			mockLoadConfig.mockReturnValue(gateConfig);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Add onboarding SOP",
+				...sopArgs,
+			]);
+
+			// Deterministic block — no fetch needed.
+			expect(mockGetIssueById).not.toHaveBeenCalled();
+			expect(mockCreateIssue).not.toHaveBeenCalled();
+			expect(process.exit).toHaveBeenCalledWith(1);
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("has no --parent or --related-to"),
+			);
+			expect(mockEmitGateEvent).toHaveBeenCalledWith(
+				"el-linear",
+				"issues create",
+				expect.objectContaining({
+					gate: "issues-create-sop-parent",
+					outcome: "blocked",
+				}),
+			);
+		});
+
+		it("leaves a non-SOP issue untouched (no parent fetch, creates)", async () => {
+			mockLoadConfig.mockReturnValue(gateConfig);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Add a normal feature",
+				"--team",
+				"DEV",
+				"--labels",
+				"feature",
+				"--description",
+				"A sufficiently long description that passes the length check.",
+				"--assignee",
+				"bob",
+				"--project",
+				"Infrastructure",
+			]);
+
+			expect(mockGetIssueById).not.toHaveBeenCalled();
+			expect(mockCreateIssue).toHaveBeenCalled();
+		});
+
+		it("is dormant when the gate is not opted in (default off)", async () => {
+			// validation.enabled is true but sopLabelParentGate is absent → gate off.
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				validation: { enabled: true },
+			});
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Add onboarding SOP",
+				...sopArgs,
+			]);
+
+			// SOP label + no parent, but the gate is off → creation proceeds.
+			expect(mockGetIssueById).not.toHaveBeenCalled();
+			expect(mockEmitGateEvent).not.toHaveBeenCalled();
+			expect(mockCreateIssue).toHaveBeenCalled();
+		});
+
+		it("--allow-unparented-sop records an override and creates", async () => {
+			mockLoadConfig.mockReturnValue(gateConfig);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Add onboarding SOP",
+				...sopArgs,
+				"--allow-unparented-sop",
+			]);
+
+			expect(mockEmitGateEvent).toHaveBeenCalledWith(
+				"el-linear",
+				"issues create",
+				expect.objectContaining({
+					gate: "issues-create-sop-parent",
+					outcome: "overridden",
+				}),
+			);
+			expect(mockCreateIssue).toHaveBeenCalled();
+		});
+
+		it("--skip-validation bypasses the gate and emits nothing", async () => {
+			mockLoadConfig.mockReturnValue(gateConfig);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Add onboarding SOP",
+				...sopArgs,
+				"--skip-validation",
+			]);
+
+			expect(mockGetIssueById).not.toHaveBeenCalled();
+			expect(mockEmitGateEvent).not.toHaveBeenCalled();
+			expect(mockCreateIssue).toHaveBeenCalled();
+		});
+
+		it("fails open (proceeds) when the parent cannot be resolved", async () => {
+			mockLoadConfig.mockReturnValue(gateConfig);
+			mockGetIssueById.mockRejectedValue(new Error("not found"));
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Add onboarding SOP",
+				...sopArgs,
+				"--parent",
+				"DEV-404",
+			]);
+
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringContaining("could not resolve"),
+			);
+			expect(mockCreateIssue).toHaveBeenCalled();
+		});
+	});
+
 	// DEV-4293: `create --checkout` must record branch.<branch>.linearIssue.
 	// Runs against a real temp git repo (the checkout + git config writes are
 	// real); chdir is restored in afterEach so it can't leak into other tests.

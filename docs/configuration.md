@@ -189,10 +189,49 @@ intended flow for the CLI.
     "duplicateDetection": true,
     // Jaccard title-similarity threshold (0–1) above which an existing issue
     // counts as a duplicate. Default 0.35. Lower = more aggressive.
-    "duplicateThreshold": 0.35
+    "duplicateThreshold": 0.35,
+    // OPT-IN SOP-label parent gate (default: off). When true, `issues create`
+    // requires an issue carrying an SOP-type label (see `sopLabels`) to point
+    // at a parent SOP via `--parent` or `--related-to`, and blocks otherwise.
+    // Bypass a single create with `--allow-unparented-sop`. Left off for the
+    // open-source audience — "SOP" is a workspace-specific label taxonomy.
+    "sopLabelParentGate": false,
+    // Label names (matched case-insensitively) that mark an issue as an SOP
+    // for `sopLabelParentGate`. Default ["SOP"].
+    "sopLabels": ["SOP"]
   }
 }
 ```
+
+### SOP-label parent gate (`validation.sopLabelParentGate`)
+
+An **opt-in** create-time gate: when the issue being created carries an
+SOP-type label (any name in `sopLabels`, default `["SOP"]`, matched
+case-insensitively), `issues create` requires `--parent` or `--related-to` to
+resolve to **another SOP-labeled issue**, and blocks otherwise. The rationale is
+topological — an SOP with no parent SOP is unfindable by downstream SOP tooling
+and breaks the catalog tree — so the gate turns that "always give an SOP a
+parent SOP" convention into a deterministic refusal rather than a prose rule.
+
+It is **off by default** (unlike the duplicate-detection gate, which defaults
+on) because "SOP" is a workspace-specific label taxonomy, not something a fresh
+OSS install should be surprised by. Turn it on per workspace:
+
+```json
+{ "validation": { "enabled": true, "sopLabelParentGate": true } }
+```
+
+Escape hatches, in order of narrowness:
+
+- `--allow-unparented-sop` — create this one SOP issue without a parent SOP
+  (records an override for gate telemetry, mirroring `--allow-duplicate`).
+- `--skip-validation` — blanket bypass of all create validation, including this
+  gate.
+- `validation.sopLabelParentGate: false` (or omitting it) — disable the gate.
+
+The parent-label lookup is best-effort: if a referenced issue can't be resolved
+(network error / not found) the gate fails open with a warning rather than
+blocking creation, while a genuinely resolvable non-SOP parent still hard-blocks.
 
 A complete minimal config (token + defaultTeam only) is enough for most basic use:
 

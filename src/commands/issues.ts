@@ -15,6 +15,11 @@ import {
 	resolveMemberWithRegistry,
 	resolveTeam,
 } from "../config/resolver.js";
+import {
+	formatSopParentBlock,
+	getSopLabelGateConfig,
+	hasSopLabel,
+} from "../config/sop-label-validation.js";
 import { resolveDefaultStatus } from "../config/status-defaults.js";
 import { enforceTerms } from "../config/term-enforcer.js";
 import {
@@ -764,6 +769,123 @@ async function enforceNoDuplicateIssue(
 	throw new Error(`Issue creation blocked: ${formatDuplicateBlock(matches)}`);
 }
 
+/**
+ * DEV-5378: create-time SOP-label parent gate. When the issue being created
+ * carries an SOP-type label, require that `--parent` or `--related-to` resolves
+ * to another SOP-labeled issue, and throw otherwise — the deterministic form of
+ * the kaizen skill's Stage-4 rule (parent ALL-1028). An SOP with no parent SOP
+ * is unfindable by `el-sop landscape` and breaks the catalog topology.
+ *
+ * OPT-IN: dormant unless `validation.sopLabelParentGate: true` (see
+ * {@link getSopLabelGateConfig}) — el-linear is MIT/open-source and "SOP" is an
+ * Enrich-Layer-specific taxonomy. Bypassed by `--skip-validation` (blanket) and
+ * the narrow `--allow-unparented-sop` (which records an `overridden` gate event,
+ * mirroring `--allow-duplicate`). The parent-label fetch is best-effort: when a
+ * referenced issue can't be resolved (network / not-found) the gate fails open
+ * with a warning rather than blocking legitimate creation on infra trouble — a
+ * genuinely resolvable non-SOP parent still hard-blocks.
+ */
+async function enforceSopLabelParent(
+	labels: string[],
+	options: OptionValues,
+	issuesService: GraphQLIssuesService,
+): Promise<void> {
+	if (options.skipValidation) {
+		return;
+	}
+	const { enabled, sopLabels } = getSopLabelGateConfig();
+	if (!enabled) {
+		return;
+	}
+	if (!hasSopLabel(labels, sopLabels)) {
+		return;
+	}
+
+	const parentRefs = [
+		...(typeof options.parentTicket === "string" && options.parentTicket
+			? [options.parentTicket]
+			: []),
+		...(options.relatedTo ? splitList(options.relatedTo) : []),
+	];
+
+	// Record the decision so `el-telemetry gates` can compute override-rate,
+	// mirroring the dup gate (DEV-4834): `overridden` when the caller passed
+	// --allow-unparented-sop and we proceed, `blocked` when we stop creation.
+	const decide = async (
+		reason: "no-parent" | "non-sop-parent",
+	): Promise<void> => {
+		const gateEvent = { gate: "issues-create-sop-parent" } as const;
+		if (options.allowUnparentedSop) {
+			await emitGateEvent("el-linear", "issues create", {
+				...gateEvent,
+				outcome: "overridden",
+			});
+			return;
+		}
+		await emitGateEvent("el-linear", "issues create", {
+			...gateEvent,
+			outcome: "blocked",
+		});
+		throw new Error(
+			`Issue creation blocked: ${formatSopParentBlock({ sopLabels, reason, parentRefs })}`,
+		);
+	};
+
+	// No parent/related at all → deterministic block (no fetch needed).
+	if (parentRefs.length === 0) {
+		await decide("no-parent");
+		return;
+	}
+
+	// A referenced issue that resolves AND carries an SOP label satisfies the
+	// gate. Fetch per-ref (not batched) so one unresolvable ref doesn't sink a
+	// sibling that would have passed.
+	let anyResolved = false;
+	let anyErrored = false;
+	for (const ref of parentRefs) {
+		try {
+			const issue = await issuesService.getIssueById(ref);
+			anyResolved = true;
+			if (
+				hasSopLabel(
+					issue.labels.map((l) => l.name),
+					sopLabels,
+				)
+			) {
+				return; // valid SOP parent — pass
+			}
+		} catch {
+			anyErrored = true;
+		}
+	}
+
+	// Couldn't resolve any reference → best-effort fail-open (like the dup gate
+	// on a search failure): warn and proceed rather than block on infra trouble.
+	if (!anyResolved) {
+		outputWarning(
+			`SOP-parent check could not resolve any of: ${parentRefs.join(", ")}; proceeding without the check.${
+				options.allowUnparentedSop
+					? ""
+					: " Pass --allow-unparented-sop to silence."
+			}`,
+		);
+		return;
+	}
+
+	// At least one ref resolved and none were SOP-labeled, but some refs errored
+	// — one of those *might* be the SOP parent, so fail open with a warning
+	// rather than a false-positive block.
+	if (anyErrored) {
+		outputWarning(
+			`SOP-parent check: none of the resolved references carry an SOP label, but some could not be resolved (${parentRefs.join(", ")}); proceeding without blocking.`,
+		);
+		return;
+	}
+
+	// Every ref resolved and none carries an SOP label → block.
+	await decide("non-sop-parent");
+}
+
 async function handleCreateIssue(
 	title: string | undefined,
 	options: OptionValues,
@@ -814,6 +936,20 @@ async function handleCreateIssue(
 	if (title) {
 		await enforceNoDuplicateIssue(title, options, issuesService);
 	}
+
+	// DEV-5378: deterministic SOP-label parent gate. Opt-in (dormant unless
+	// validation.sopLabelParentGate). Runs on the post-normalization labels
+	// (resolveCreateInputs rewrote options.labels to the canonical set) and,
+	// when the issue is SOP-labeled, blocks unless --parent/--related-to points
+	// at another SOP-labeled issue. Independent of title, so it runs even on the
+	// --from-template path — though a template that supplies labels server-side
+	// leaves options.labels undefined here, in which case the gate sees no SOP
+	// label and no-ops (same client-side-visibility gap as the dup gate).
+	await enforceSopLabelParent(
+		options.labels ? splitList(options.labels) : [],
+		options,
+		issuesService,
+	);
 
 	// Wrap valid issue identifiers as markdown links before creating, so the description
 	// saved on Linear has clickable refs from the start. Self-reference can't apply here
@@ -1646,11 +1782,15 @@ export function setupIssuesCommands(program: Command): void {
 		)
 		.option(
 			"--skip-validation",
-			"skip all validation (labels, description, assignee, project, duplicate detection)",
+			"skip all validation (labels, description, assignee, project, duplicate detection, SOP-parent gate)",
 		)
 		.option(
 			"--allow-duplicate",
 			"skip the duplicate-detection gate and create even if a similar issue already exists",
+		)
+		.option(
+			"--allow-unparented-sop",
+			"skip the SOP-label parent gate and create an SOP-labeled issue without a parent SOP",
 		)
 		.option(
 			"--no-auto-link",

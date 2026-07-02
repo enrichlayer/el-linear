@@ -115,6 +115,21 @@ export interface ElLinearConfig {
 		 * `DEFAULT_DUPLICATE_THRESHOLD` (0.35). Lower = more aggressive.
 		 */
 		duplicateThreshold?: number;
+		/**
+		 * OPT-IN SOP-label parent gate (DEV-5378). When `true`, `issues create`
+		 * requires an issue carrying an SOP-type label (see `sopLabels`) to point
+		 * at a parent SOP via `--parent` or `--related-to`, blocking otherwise.
+		 * Defaults to `false` (dormant) — el-linear is MIT/open-source and "SOP"
+		 * is an Enrich-Layer-specific taxonomy, so a fresh install stays silent
+		 * until a workspace opts in (the EL shared team config flips it on).
+		 * Bypass a single create with `--allow-unparented-sop`.
+		 */
+		sopLabelParentGate?: boolean;
+		/**
+		 * Label names (matched case-insensitively) that mark an issue as an SOP
+		 * for the `sopLabelParentGate` check. Defaults to `["SOP"]`.
+		 */
+		sopLabels?: string[];
 	};
 	/**
 	 * Optional override for the Linear workspace URL key (the part after

@@ -56,7 +56,9 @@
 	],
 	"validation": {
 		"enabled": true,
-		"typeLabels": ["bug", "feature", "chore", "refactor", "spike"]
+		"typeLabels": ["bug", "feature", "chore", "refactor", "spike"],
+		"sopLabelParentGate": false,
+		"sopLabels": ["SOP"]
 	},
 	"workspaceUrlKey": "acme"
 }
