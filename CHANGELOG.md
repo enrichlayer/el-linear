@@ -4,6 +4,14 @@ All notable changes to `@enrichlayer/el-linear` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.34.1](https://github.com/enrichlayer/el-linear/compare/v1.34.0...v1.34.1) (2026-07-02)
+
+
+### Bug Fixes
+
+* **output:** --fields resolves dotted paths, envelope object data, and fails visible on unresolved fields ([#207](https://github.com/enrichlayer/el-linear/issues/207)) ([522d761](https://github.com/enrichlayer/el-linear/commit/522d76124e63de915d17319c995b0ad110e40f6b))
+* **projects:** route --team scoping through Team.projects (ProjectFilter has no teams filter) ([#209](https://github.com/enrichlayer/el-linear/issues/209)) ([65dea99](https://github.com/enrichlayer/el-linear/commit/65dea9919ba45c8f503e470c73998152ee7d137d))
+
 ## [1.34.0](https://github.com/enrichlayer/el-linear/compare/v1.33.0...v1.34.0) (2026-07-01)
 
 
