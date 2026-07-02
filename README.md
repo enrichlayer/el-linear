@@ -445,6 +445,7 @@ el-linear <command> --help       # detailed help for one command
 | Comments | `comments {list, read, create, update, delete}` |
 | Labels | `labels {list, create, retire, restore}` |
 | Projects | `projects {list, add-team, remove-team}` |
+| Project updates | `project-updates {create, list, read}` (post a status update to a project's Updates feed) |
 | Cycles | `cycles {list, read}` |
 | Documents | `documents {list, read, create, update, delete}` |
 | Releases | `releases {list, read, create, pipelines}` |
@@ -578,7 +579,7 @@ el-linear projects list --format summary --fields name,state,progress,lead,teams
 # ...
 ```
 
-Unrecognized field names are reported as a `_warnings:` line appended after the summary block (`fields_unprojectable: --format summary on issues list does not project foo, bar; ...`) — same signal scripts get on the JSON path. Resources whose summary formatter doesn't yet wire `--fields` (cycles, milestones, comments, teams, labels, users, documents, templates, attachments, releases, search results) emit the same warning and render their default summary.
+Unrecognized field names are reported as a `_warnings:` line appended after the summary block (`fields_unprojectable: --format summary on issues list does not project foo, bar; ...`) — same signal scripts get on the JSON path. Resources whose summary formatter doesn't yet wire `--fields` (cycles, milestones, project updates, comments, teams, labels, users, documents, templates, attachments, releases, search results) emit the same warning and render their default summary.
 
 ### Windowed metadata (`WindowedMeta`)
 

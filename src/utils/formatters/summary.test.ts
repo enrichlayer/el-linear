@@ -19,6 +19,8 @@ import {
 	formatMilestoneSummary,
 	formatProjectList,
 	formatProjectSummary,
+	formatProjectUpdateList,
+	formatProjectUpdateSummary,
 	formatRelationList,
 	formatReleaseList,
 	formatReleaseSummary,
@@ -411,6 +413,82 @@ describe("formatMilestoneSummary / formatMilestoneList", () => {
 		]);
 		expect(out).toMatch(/NAME\s+TARGET/);
 		expect(out.endsWith("2 milestones")).toBe(true);
+	});
+});
+
+describe("formatProjectUpdateSummary / formatProjectUpdateList", () => {
+	const update = {
+		id: "u1",
+		body: "Shipped the v3 person endpoint this week.",
+		health: "onTrack",
+		url: "https://linear.app/x/project-update/u1",
+		createdAt: "2026-07-01T10:00:00.000Z",
+		user: { name: "Nico", displayName: "Nico" },
+		project: { id: "p1", name: "Process" },
+	};
+
+	it("renders health, project, author, and body in the summary", () => {
+		const out = formatProjectUpdateSummary(update);
+		expect(out).toContain("project-update u1");
+		expect(out).toContain("onTrack");
+		expect(out).toContain("Process");
+		expect(out).toContain("Nico");
+		expect(out).toContain("Shipped the v3 person endpoint");
+	});
+
+	it("renders a table with a health column and a footer", () => {
+		const out = formatProjectUpdateList([update, { ...update, id: "u2" }]);
+		expect(out).toContain("HEALTH");
+		expect(out).toContain("onTrack");
+		expect(out).toContain("2 project updates");
+	});
+
+	it("renders an empty list marker", () => {
+		expect(formatProjectUpdateList([])).toBe("(no project updates)");
+	});
+});
+
+describe("project-update vs comment inference (health disambiguates)", () => {
+	it("classifies a body+createdAt+user payload WITH health as project-update", () => {
+		expect(
+			inferKindFromPayload({
+				id: "u1",
+				body: "weekly",
+				createdAt: "t",
+				user: { name: "a" },
+				health: "atRisk",
+			}),
+		).toBe("project-update");
+	});
+
+	it("still classifies a health-less body+createdAt+user payload as comment", () => {
+		expect(
+			inferKindFromPayload({ body: "hi", createdAt: "t", user: { name: "a" } }),
+		).toBe("comment");
+	});
+
+	it("classifies a list of health-bearing rows as project-update-list", () => {
+		expect(
+			inferKindFromPayload({
+				data: [{ body: "x", createdAt: "t", health: "onTrack" }],
+			}),
+		).toBe("project-update-list");
+	});
+
+	it("dispatch routes project-update through its summary formatter", () => {
+		const out = dispatch("project-update", {
+			id: "u1",
+			body: "b",
+			health: "offTrack",
+			url: "https://x",
+		});
+		expect(out).toContain("offTrack");
+	});
+
+	it("formatLine renders health + url for a --quiet project-update", () => {
+		expect(
+			formatLine({ id: "u1", body: "b", health: "onTrack", url: "https://x" }),
+		).toBe("onTrack  https://x");
 	});
 });
 
