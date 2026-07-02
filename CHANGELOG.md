@@ -4,6 +4,20 @@ All notable changes to `@enrichlayer/el-linear` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.35.0](https://github.com/enrichlayer/el-linear/compare/v1.34.1...v1.35.0) (2026-07-02)
+
+
+### Features
+
+* add project-updates command group (create/list/read) ([#210](https://github.com/enrichlayer/el-linear/issues/210)) ([82e3bef](https://github.com/enrichlayer/el-linear/commit/82e3bef25a1d3ea09bf80d05d6d1207ff945723a))
+* add project-updates command group (create/list/read) ([#210](https://github.com/enrichlayer/el-linear/issues/210)) ([82e3bef](https://github.com/enrichlayer/el-linear/commit/82e3bef25a1d3ea09bf80d05d6d1207ff945723a))
+
+
+### Bug Fixes
+
+* **issue-id:** accept the feat/ branch prefix (DEV-5342) ([#211](https://github.com/enrichlayer/el-linear/issues/211)) ([ec5a698](https://github.com/enrichlayer/el-linear/commit/ec5a6986929b0d4ce7852a2ceae3422bc2f0fe8d))
+* **output:** surface warnings on bare-array and --raw output ([#214](https://github.com/enrichlayer/el-linear/issues/214)) ([07ada3c](https://github.com/enrichlayer/el-linear/commit/07ada3c394773dca1a24abefa6c596d73622aa61))
+
 ## [1.34.1](https://github.com/enrichlayer/el-linear/compare/v1.34.0...v1.34.1) (2026-07-02)
 
 
