@@ -52,7 +52,7 @@ import { CREATE_LABEL_MUTATION } from "../queries/labels.js";
 import type { CreateLabelResponse } from "../queries/labels-types.js";
 import type { LinearIssue, LinearPriority } from "../types/linear.js";
 import { TERMINAL_STATE_TYPES } from "../types/linear.js";
-import { toISOStringOrNow } from "./date-format.js";
+import { toISOStringOrNow, toISOStringOrUndefined } from "./date-format.js";
 import { extractEmbeds } from "./embed-parser.js";
 import { multipleMatchesError, notFoundError } from "./error-messages.js";
 import type { GraphQLService } from "./graphql-service.js";
@@ -1945,6 +1945,9 @@ export class GraphQLIssuesService {
 					: [],
 			createdAt: toISOStringOrNow(issue.createdAt),
 			updatedAt: toISOStringOrNow(issue.updatedAt),
+			// Nullable, not `-OrNow`: an open issue has no completion, so it must
+			// stay `undefined` rather than be fabricated as the current time.
+			completedAt: toISOStringOrUndefined(issue.completedAt),
 		};
 	}
 

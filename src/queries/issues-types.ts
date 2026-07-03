@@ -117,6 +117,7 @@ export interface IssueNode {
 	url: string;
 	createdAt: string;
 	updatedAt: string;
+	completedAt: string | null;
 	state: IdNameRef | null;
 	assignee: AssigneeNode | null;
 	delegate: AssigneeNode | null;

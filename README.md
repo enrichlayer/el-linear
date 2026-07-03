@@ -556,9 +556,9 @@ Currently wired through:
 
 | Resource | Defaults | Extras you can request |
 |----------|----------|------------------------|
-| `issues list` | `id, title, state, assignee` | `project, cycle, milestone, labels, url, priority, estimate, createdAt, updatedAt, team` |
+| `issues list` | `id, title, state, assignee` | `project, cycle, milestone, labels, url, priority, estimate, createdAt, updatedAt, completedAt, team` |
 | `projects list` | `name, state, progress, lead` | `teams, target, url, updatedAt` |
-| `issues read` (single) | `state, assignee, project, cycle, milestone, labels, url` | `priority, estimate, created, updated` |
+| `issues read` (single) | `state, assignee, project, cycle, milestone, labels, url` | `priority, estimate, created, updated, completed` |
 | `projects read` (single) | `state, lead, teams, target, progress, url` | (filter only — no extras) |
 
 `identifier`, `id`, `title` and `name` are headline-only on single-resource summaries and are filtered out of the labelled block (they remain on the title line above). `status` is accepted as a synonym for `state`, `owner` for `assignee`, `targetDate` for `target`.

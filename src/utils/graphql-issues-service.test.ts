@@ -364,6 +364,38 @@ describe("GraphQLIssuesService", () => {
 			expect(result.team).toBeUndefined();
 		});
 
+		it("maps completedAt through when the issue is completed (DEV-5454)", () => {
+			const service = createService();
+			const result = service.transformIssueData({
+				id: "issue-1",
+				identifier: "DEV-100",
+				title: "Done issue",
+				priority: 1,
+				labels: { nodes: [] },
+				createdAt: "2026-01-01T00:00:00.000Z",
+				updatedAt: "2026-01-03T00:00:00.000Z",
+				completedAt: "2026-01-02T00:00:00.000Z",
+			});
+
+			expect(result.completedAt).toBe("2026-01-02T00:00:00.000Z");
+		});
+
+		it("leaves completedAt undefined for an open issue, not fabricated as now (DEV-5454)", () => {
+			const service = createService();
+			const result = service.transformIssueData({
+				id: "issue-1",
+				identifier: "DEV-100",
+				title: "Open issue",
+				priority: 1,
+				labels: { nodes: [] },
+				createdAt: "2026-01-01T00:00:00.000Z",
+				updatedAt: "2026-01-01T00:00:00.000Z",
+				completedAt: null,
+			});
+
+			expect(result.completedAt).toBeUndefined();
+		});
+
 		it("transforms issue with state, assignee, and team", () => {
 			const service = createService();
 			const result = service.transformIssueData({

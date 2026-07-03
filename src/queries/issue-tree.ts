@@ -25,6 +25,10 @@ export const DEFAULT_TREE_DEPTH = 3;
 // Field set per tree node — kept minimal so the depth-N query stays small.
 // `state.type` is required client-side for `--no-include-closed` pruning;
 // `state.name` for the [Done]/[Canceled] suffix on terminal nodes.
+// `completedAt` is the moment a node reached a terminal state (null while
+// open) — consumers that reason about how long a subtree has been finished
+// (e.g. el-sop health's completed-children grace period, DEV-5454) need the
+// per-child timestamp, which no other field carries.
 // `priority` was intentionally dropped after cycle-1: the ASCII formatter
 // doesn't render it and including it inflates the query string by ~N nodes.
 const TREE_NODE_FIELDS = `
@@ -33,6 +37,7 @@ const TREE_NODE_FIELDS = `
 	title
 	state { id name type }
 	assignee { id name }
+	completedAt
 `;
 
 /**
@@ -85,6 +90,8 @@ export interface IssueTreeNode {
 	title: string;
 	state: { id: string; name: string; type: string } | null;
 	assignee: { id: string; name: string } | null;
+	/** ISO timestamp the node reached a terminal state; null while open. */
+	completedAt?: string | null;
 	children?: { nodes: IssueTreeNode[] };
 }
 
