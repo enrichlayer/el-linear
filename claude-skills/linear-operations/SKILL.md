@@ -534,7 +534,7 @@ el-linear project-updates list --project "Auth Refactor"
 el-linear project-updates read <updateId>
 ```
 
-`--body` / `--body-file` are mutually exclusive (one required); `--body-file` avoids shell-quoting for markdown/tables. `--health` is validated against the enum before the API call. `-q/--quiet` prints `<health>  <url>`. A status update is not the same as a project **document** (`documents create --project`) — use a document for durable reference content, a project update for point-in-time progress.
+`--body` / `--body-file` are mutually exclusive (one required); `--body-file` avoids shell-quoting for markdown/tables. `--health` is validated against the enum before the API call. `--diff-hidden` hides the auto-generated progress diff on the update. `-q/--quiet` prints `<health>  <url>`. A status update is not the same as a project **document** (`documents create --project`) — use a document for durable reference content, a project update for point-in-time progress.
 
 ### Discovery Before Creation
 
