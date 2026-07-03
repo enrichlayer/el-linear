@@ -366,6 +366,29 @@ describe("loadConfig — auto-discovery via ~/.config/el-tools-root (DEV-4258)",
 		const config = loadConfig();
 		expect(config.defaultTeam).toBe("FROM_PERSONAL");
 	});
+
+	it('teamConfigPath: "" disables the team layer AND marker discovery (multi-account opt-out)', async () => {
+		// The marker-discovered shared config carries workspace-specific member
+		// UUIDs; a profile pointed at a different Linear workspace must be able
+		// to opt out or `--assignee <name>` resolves to a foreign UUID the API
+		// rejects. An empty teamConfigPath is that opt-out: defined (skips
+		// marker discovery) and falsy (loads no team layer).
+		fsFiles.set(MARKER_PATH, "/fake-tools");
+		fsFiles.set(
+			MARKER_SHARED_FILE,
+			JSON.stringify({
+				defaultTeam: "FROM_MARKER",
+				members: { aliases: { someone: "Some One" } },
+			}),
+		);
+		defaultExistsReturn = true;
+		defaultReadReturn = JSON.stringify({ teamConfigPath: "" });
+
+		const { loadConfig } = await import("./config.js");
+		const config = loadConfig();
+		expect(config.defaultTeam).toBe("");
+		expect(config.members.aliases).toEqual({});
+	});
 });
 
 describe("getActiveTeamConfigInfo (DEV-4258)", () => {
@@ -418,6 +441,22 @@ describe("getActiveTeamConfigInfo (DEV-4258)", () => {
 		expect(getActiveTeamConfigInfo()).toEqual({
 			path: undefined,
 			source: null,
+		});
+	});
+
+	it('reports source: "disabled" for teamConfigPath: "" even when the marker is set', async () => {
+		// Pre-fix this fell through to the marker and reported it as active —
+		// contradicting loadConfig, which skips marker discovery for a
+		// defined-but-empty path. `config team show` must reflect what loads.
+		fsFiles.set(MARKER_PATH, "/fake-tools");
+		fsFiles.set(MARKER_SHARED_FILE, "{}");
+		defaultExistsReturn = true;
+		defaultReadReturn = JSON.stringify({ teamConfigPath: "" });
+
+		const { getActiveTeamConfigInfo } = await import("./config.js");
+		expect(getActiveTeamConfigInfo()).toEqual({
+			path: undefined,
+			source: "disabled",
 		});
 	});
 
