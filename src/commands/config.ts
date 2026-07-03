@@ -53,6 +53,8 @@ function sourceLabel(source: TeamConfigSource): string | null {
 			return "teamConfigPath in personal config";
 		case "marker":
 			return "auto-discovered via ~/.config/el-tools-root";
+		case "disabled":
+			return 'disabled for this profile via teamConfigPath: "" in personal config';
 		case null:
 			return null;
 	}

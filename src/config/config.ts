@@ -31,9 +31,16 @@ function elToolsRootMarkerPath(): string {
  * - `env`: `EL_LINEAR_TEAM_CONFIG` is set in the environment (highest).
  * - `personal`: `teamConfigPath` field in personal `config.json`.
  * - `marker`: auto-discovered via `~/.config/el-tools-root` (DEV-4258).
+ * - `disabled`: explicitly opted out via `teamConfigPath: ""` in personal
+ *   config — the layer is off even when the marker would otherwise apply.
  * - `null`: no team layer active.
  */
-export type TeamConfigSource = "env" | "personal" | "marker" | null;
+export type TeamConfigSource =
+	| "env"
+	| "personal"
+	| "marker"
+	| "disabled"
+	| null;
 
 /**
  * Resolve the shared team config path by reading the `~/.config/el-tools-root`
@@ -190,6 +197,15 @@ export interface ElLinearConfig {
 	 * maps, and term rules across a team by checking the file into a shared
 	 * repository. Override at runtime with the `EL_LINEAR_TEAM_CONFIG` env var
 	 * (env var takes precedence over this field).
+	 *
+	 * Set to the empty string (`""`) to explicitly DISABLE the team layer for
+	 * this profile, including `~/.config/el-tools-root` marker auto-discovery.
+	 * This is the multi-account escape hatch: a marker-discovered team config
+	 * carries workspace-specific member/label UUIDs, and applying it to a
+	 * profile pointed at a different Linear workspace makes `--assignee <name>`
+	 * resolve to a foreign UUID that the API rejects with an opaque
+	 * "Entity not found in validateAccess" error. Profiles for secondary
+	 * workspaces should set `"teamConfigPath": ""`.
 	 */
 	teamConfigPath?: string;
 }
@@ -310,6 +326,10 @@ export function loadConfig(): ElLinearConfig {
 		// The marker is the opt-in consent signal — only developers who ran
 		// `link-project.sh` get the auto-discovery; OSS users hit the silent
 		// no-op path. DEV-4258 / ALL-964.
+		//
+		// An EMPTY string is a deliberate per-profile opt-out (see the
+		// `teamConfigPath` JSDoc): it is defined, so marker discovery is
+		// skipped, and falsy, so no team layer is loaded below.
 		personalRaw = readRawPersonalConfig(active);
 		teamConfigPath = personalRaw.teamConfigPath as string | undefined;
 		if (teamConfigPath === undefined) {
@@ -394,7 +414,14 @@ export function getActiveTeamConfigInfo(): {
 	}
 	const personalRaw = readRawPersonalConfig(resolveActiveProfile());
 	const personalPath = personalRaw.teamConfigPath as string | undefined;
-	if (personalPath !== undefined && personalPath !== "") {
+	if (personalPath === "") {
+		// Explicit per-profile opt-out — must be attributed as such, and must
+		// NOT fall through to the marker: loadConfig skips marker discovery
+		// for a defined-but-empty path, so reporting "marker" here would
+		// contradict what actually loads.
+		return { path: undefined, source: "disabled" };
+	}
+	if (personalPath !== undefined) {
 		return { path: personalPath, source: "personal" };
 	}
 	const markerPath = discoverTeamConfigViaMarker();
