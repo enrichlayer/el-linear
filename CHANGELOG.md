@@ -4,6 +4,13 @@ All notable changes to `@enrichlayer/el-linear` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.37.0](https://github.com/enrichlayer/el-linear/compare/v1.36.0...v1.37.0) (2026-07-03)
+
+
+### Features
+
+* expose completedAt on issue reads, lists, search, and tree nodes ([#218](https://github.com/enrichlayer/el-linear/issues/218)) ([a49acbc](https://github.com/enrichlayer/el-linear/commit/a49acbcdc1f13e9ed7e91c395a6e5dba271fc1cc))
+
 ## [1.36.0](https://github.com/enrichlayer/el-linear/compare/v1.35.0...v1.36.0) (2026-07-02)
 
 
