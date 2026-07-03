@@ -138,6 +138,7 @@ export interface LinearIssue {
 	assignee?: UserRef;
 	branchName?: string;
 	comments?: LinearComment[];
+	completedAt?: string;
 	createdAt: string;
 	cycle?: CycleRef;
 	delegate?: UserRef;

@@ -11,6 +11,7 @@ const ISSUE_CORE_FIELDS = `
   url
   createdAt
   updatedAt
+  completedAt
 `;
 
 const ISSUE_STATE_FRAGMENT = `

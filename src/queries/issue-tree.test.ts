@@ -36,6 +36,15 @@ describe("buildIssueTreeQuery", () => {
 		expect(q).toMatch(/state\s*{\s*id\s+name\s+type\s*}/);
 	});
 
+	it("requests completedAt at every node level (DEV-5454)", () => {
+		// Consumers such as el-sop health's completed-children grace check read
+		// each child's completion timestamp off the tree; it must be selected at
+		// every depth, once per node (root + one per `children` block).
+		const q = buildIssueTreeQuery(3);
+		const nodeLevels = (q.match(/identifier/g) ?? []).length;
+		expect((q.match(/completedAt/g) ?? []).length).toBe(nodeLevels);
+	});
+
 	it("rejects sub-minimum depth", () => {
 		expect(() => buildIssueTreeQuery(0)).toThrow(/integer in \[1, 5\]/);
 		expect(() => buildIssueTreeQuery(-1)).toThrow(/integer in \[1, 5\]/);

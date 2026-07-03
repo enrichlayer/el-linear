@@ -198,6 +198,23 @@ describe("formatIssueSummary", () => {
 		const out = formatIssueSummary({ ...baseIssue, description: undefined });
 		expect(out).not.toContain("--format json for full body");
 	});
+
+	it("renders a Completed row when the field is explicitly requested (DEV-5454)", () => {
+		const out = formatIssueSummary(
+			{ ...baseIssue, completedAt: "2026-06-01T00:00:00.000Z" },
+			["state", "completedat"],
+		);
+		expect(out).toContain("Completed:");
+		expect(out).toContain("2026-06-01T00:00:00.000Z");
+	});
+
+	it("omits Completed from the default summary view, like Created/Updated (DEV-5454)", () => {
+		const out = formatIssueSummary({
+			...baseIssue,
+			completedAt: "2026-06-01T00:00:00.000Z",
+		});
+		expect(out).not.toContain("Completed:");
+	});
 });
 
 describe("formatIssueList", () => {

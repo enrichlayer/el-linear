@@ -380,6 +380,7 @@ const ISSUE_SUMMARY_SYNONYMS: Record<string, string> = {
 	owner: "assignee",
 	createdat: "created",
 	updatedat: "updated",
+	completedat: "completed",
 	prioritylabel: "priority",
 	projectmilestone: "milestone",
 };
@@ -396,6 +397,7 @@ function buildIssueHeaderFields(issue: Record<string, unknown>): HeaderField[] {
 		{ label: "Estimate", value: s(issue.estimate) },
 		{ label: "Created", value: s(issue.createdAt) },
 		{ label: "Updated", value: s(issue.updatedAt) },
+		{ label: "Completed", value: s(issue.completedAt) },
 		{ label: "URL", value: s(issue.url) },
 	];
 }
@@ -516,6 +518,11 @@ const ISSUE_LIST_EXTRAS: Record<string, ColumnDef<Record<string, unknown>>> = {
 		header: "UPDATED",
 		minWidth: 7,
 		extract: (i) => s(i.updatedAt).slice(0, 10),
+	},
+	completedat: {
+		header: "COMPLETED",
+		minWidth: 9,
+		extract: (i) => s(i.completedAt).slice(0, 10),
 	},
 	team: {
 		header: "TEAM",

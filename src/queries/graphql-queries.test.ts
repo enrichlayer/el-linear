@@ -364,6 +364,7 @@ describe("common.ts — fragment composition", () => {
 			"url",
 			"createdAt",
 			"updatedAt",
+			"completedAt",
 			"branchName",
 		];
 		for (const field of coreFields) {
