@@ -4,6 +4,13 @@ All notable changes to `@enrichlayer/el-linear` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.36.0](https://github.com/enrichlayer/el-linear/compare/v1.35.0...v1.36.0) (2026-07-02)
+
+
+### Features
+
+* **issues:** add opt-in SOP-label parent gate to issues create (DEV-5378) ([#215](https://github.com/enrichlayer/el-linear/issues/215)) ([5442d99](https://github.com/enrichlayer/el-linear/commit/5442d998facf7e8a28c6cefe782420e581a79949))
+
 ## [1.35.0](https://github.com/enrichlayer/el-linear/compare/v1.34.1...v1.35.0) (2026-07-02)
 
 
