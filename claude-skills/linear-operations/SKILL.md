@@ -241,11 +241,10 @@ el-linear issues search "keywords from proposed title" --include-closed 2>&1
 
 The dup-check above guards against duplicating an *issue*. This guards against duplicating *reality*: before filing an issue to **add** a flag / guard / command / subcommand, confirm it doesn't **already exist**.
 
-- `<cli> <subcommand> --help` (the flag may be a global option absent from the subcommand's help — check `<cli> --help` too).
-- `el-catalog commands --search "<intent>"` / `el-catalog clis --search` (the snapshot likely already lists it).
-- For a hook/guard, grep the source — e.g. `cli/el-hook/src/checks`.
+- **`el-catalog commands --search "<intent>"`** / `el-catalog clis --search` — the **authoritative** check for a command/subcommand; it deterministically indexes every `<cli> <subcommand>`. Confirm with `<cli> <subcommand> --help` (and `<cli> --help` — a flag may be a global option absent from the subcommand's help).
+- For a hook/guard, grep the source (e.g. `cli/el-hook/src/checks`) — but **empty grep output is inconclusive, not proof of absence**. A mis-quoted glob or bad flag makes grep exit silently with zero matches (`grep --include=*.ts …` errors under zsh, returning nothing for a symbol that exists). Never read a raw grep's silence as "doesn't exist" for the command check — that is exactly what `el-catalog` is for.
 
-Skipping it cost two needless branch+MR cycles in one session: a "feature" issue to add a hook guard that already existed and was firing, and one to add `--jq`/`--fields` flags that already worked — both premises only caught at implementation.
+Skipping it cost real rework across sessions: a hook guard and `--jq`/`--fields` flags filed as "features" though both already existed and worked, and a near-duplicate `el-git` subcommand built after a raw grep silently misfired (the `el-catalog` search would have found the existing one) — every premise caught only at implementation.
 
 When `el-linear issues search` (or the cross-resource `search`) returns rows
 carrying issue identifiers, the JSON envelope embeds a `_warnings` line
