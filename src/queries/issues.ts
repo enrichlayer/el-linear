@@ -49,6 +49,46 @@ export const FILTERED_SEARCH_ISSUES_QUERY = `
 `;
 
 /**
+ * Team-scoped variant of `FILTERED_SEARCH_ISSUES_QUERY` (DEV-5578).
+ *
+ * When a `--team` filter is present, the team boundary is applied
+ * *structurally* — the `issues` connection is rooted at the `Team` node
+ * (`team(id: $teamId).issues(...)`) rather than passed as a top-level
+ * `issues(filter: { team: { id: { eq } } })` relation filter.
+ *
+ * The top-level relation-filter form is unreliable at scale: Linear's API
+ * silently leaks issues from *other* teams once `$first` grows past a small
+ * page (~20), so `issues list --team DEV --limit 100` returned issues from
+ * EMW/INF/FE too. This is the same class of bug DEV-5325 fixed for
+ * `projects list --team` (`ProjectFilter` had no working `teams` relation, so
+ * project scoping moved to `Team.projects`). Rooting at the team node keeps
+ * the team boundary server-side and exact. The remaining `$filter`
+ * (state / labels / assignee / priority / project) is applied on top of the
+ * already-team-scoped connection.
+ */
+export const TEAM_SCOPED_FILTERED_ISSUES_QUERY = `
+  query TeamScopedFilteredIssues(
+    $teamId: String!
+    $first: Int!
+    $filter: IssueFilter
+    $orderBy: PaginationOrderBy
+  ) {
+    team(id: $teamId) {
+      issues(
+        first: $first
+        filter: $filter
+        orderBy: $orderBy
+        includeArchived: false
+      ) {
+        nodes {
+          ${COMPLETE_ISSUE_FRAGMENT}
+        }
+      }
+    }
+  }
+`;
+
+/**
  * Batch-resolves a search's team/project/assignee/delegate filter inputs.
  *
  * The `projects` block is `@include`-gated: Linear treats a null filter

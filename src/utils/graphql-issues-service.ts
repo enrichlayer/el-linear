@@ -20,6 +20,7 @@ import {
 	GET_ISSUE_TEAM_QUERY,
 	GET_ISSUES_QUERY,
 	SEARCH_ISSUES_QUERY,
+	TEAM_SCOPED_FILTERED_ISSUES_QUERY,
 	TEAM_STARTED_STATUSES_QUERY,
 	UPDATE_ISSUE_MUTATION,
 } from "../queries/issues.js";
@@ -45,6 +46,7 @@ import type {
 	IssueWithCommentsNode,
 	ResolveLabelsByNameResponse,
 	SearchIssuesResponse,
+	TeamScopedFilteredIssuesResponse,
 	TeamStartedStatusesResponse,
 	UpdateIssueResponse,
 } from "../queries/issues-types.js";
@@ -1000,8 +1002,14 @@ export class GraphQLIssuesService {
 				priority: args.priority,
 			});
 		}
+		// DEV-5578: the team boundary is NOT put in the IssueFilter. Linear's
+		// top-level `issues(filter: { team: { id: { eq } } })` relation filter
+		// leaks other teams' issues once `first` grows past a small page (~20),
+		// so `--team` was silently contaminated on paginated (`--limit > ~20`)
+		// results. When a team is present we scope structurally through the
+		// `Team.issues` connection below (same class of fix as DEV-5325's
+		// `Team.projects`); the rest of the filter rides on top of it.
 		const filter = this.buildSearchFilter({
-			teamId: finalTeamId,
 			assigneeId: finalAssigneeId,
 			delegateId: finalDelegateId,
 			project: projectFilter,
@@ -1010,13 +1018,34 @@ export class GraphQLIssuesService {
 			labelNames: args.labelNames,
 			priority: args.priority,
 		});
+		const filterArg = Object.keys(filter).length > 0 ? filter : undefined;
+		const orderBy = args.orderBy ?? "updatedAt";
+
+		if (finalTeamId) {
+			const teamScoped =
+				await this.graphQLService.rawRequest<TeamScopedFilteredIssuesResponse>(
+					TEAM_SCOPED_FILTERED_ISSUES_QUERY,
+					{
+						teamId: finalTeamId,
+						first: limit,
+						filter: filterArg,
+						orderBy,
+					},
+				);
+			const nodes = teamScoped.team?.issues?.nodes;
+			if (!nodes?.length) {
+				return [];
+			}
+			return nodes.map((issue) => this.transformIssueData(issue));
+		}
+
 		const searchResult =
 			await this.graphQLService.rawRequest<GetIssuesResponse>(
 				FILTERED_SEARCH_ISSUES_QUERY,
 				{
 					first: limit,
-					filter: Object.keys(filter).length > 0 ? filter : undefined,
-					orderBy: args.orderBy ?? "updatedAt",
+					filter: filterArg,
+					orderBy,
 				},
 			);
 		const filteredIssues = searchResult.issues;
@@ -1614,8 +1643,11 @@ export class GraphQLIssuesService {
 		return filtered;
 	}
 
+	// DEV-5578: `teamId` is intentionally NOT a member — the team boundary is
+	// applied structurally via `TEAM_SCOPED_FILTERED_ISSUES_QUERY`, never as a
+	// top-level `team` relation filter (which Linear leaks past ~20 rows). Do
+	// not reintroduce a `filter.team = …` branch here.
 	private buildSearchFilter(filters: {
-		teamId?: string;
 		assigneeId?: string;
 		delegateId?: string;
 		project?: SearchIssueProject;
@@ -1625,9 +1657,6 @@ export class GraphQLIssuesService {
 		priority?: LinearPriority[];
 	}): Record<string, unknown> {
 		const filter: Record<string, unknown> = {};
-		if (filters.teamId) {
-			filter.team = { id: { eq: filters.teamId } };
-		}
 		if (filters.assigneeId) {
 			filter.assignee = { id: { eq: filters.assigneeId } };
 		}
