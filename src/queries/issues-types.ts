@@ -158,6 +158,14 @@ export interface GetIssuesResponse {
 	issues: { nodes: IssueNode[] };
 }
 
+/**
+ * Response shape for `TEAM_SCOPED_FILTERED_ISSUES_QUERY` (DEV-5578).
+ * `team` is null when the resolved team UUID does not exist.
+ */
+export interface TeamScopedFilteredIssuesResponse {
+	team: { issues: { nodes: IssueNode[] } } | null;
+}
+
 /** Response shape for `SEARCH_ISSUES_QUERY` (full-text). */
 export interface SearchIssuesResponse {
 	searchIssues: { nodes: IssueNode[] };

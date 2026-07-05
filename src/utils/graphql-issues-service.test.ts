@@ -1147,6 +1147,166 @@ describe("GraphQLIssuesService", () => {
 		});
 	});
 
+	describe("searchIssues team scoping (DEV-5578)", () => {
+		const TEAM_UUID = "aaaaaaaa-1111-4111-8111-111111111111";
+
+		// Minimal COMPLETE_ISSUE_FRAGMENT-shaped node carrying a team.
+		function issueNode(seq: number, teamKey: string): Record<string, unknown> {
+			return {
+				id: `issue-${teamKey}-${seq}`,
+				identifier: `${teamKey}-${seq}`,
+				title: `issue ${seq}`,
+				priority: 1,
+				labels: { nodes: [] },
+				state: { id: "state-todo", name: "Todo", type: "unstarted" },
+				team: {
+					id: teamKey === "DEV" ? TEAM_UUID : `${teamKey}-uuid`,
+					key: teamKey,
+					name: teamKey,
+				},
+				createdAt: "2026-01-01T00:00:00.000Z",
+				updatedAt: "2026-01-02T00:00:00.000Z",
+			};
+		}
+
+		it("routes a --team list through the Team.issues connection with team removed from the IssueFilter", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValue({ team: { issues: { nodes: [] } } });
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			await service.searchIssues({
+				teamId: TEAM_UUID,
+				status: ["Todo"],
+				limit: 100,
+			});
+
+			// Exactly one request: the team-scoped query (a UUID teamId needs no
+			// batch resolve). It must be TeamScopedFilteredIssues, not the leaky
+			// top-level FilteredSearchIssues.
+			expect(rawRequest).toHaveBeenCalledTimes(1);
+			const [query, vars] = rawRequest.mock.calls[0] as [
+				string,
+				{ teamId?: string; filter?: Record<string, unknown> },
+			];
+			expect(String(query)).toContain("TeamScopedFilteredIssues");
+			expect(String(query)).toContain("team(id: $teamId)");
+			// The team boundary is structural — it must NOT be a top-level
+			// `team` relation filter (the shape Linear leaks past ~20 rows).
+			expect(vars.teamId).toBe(TEAM_UUID);
+			expect(vars.filter?.team).toBeUndefined();
+			// Sibling filters still ride on the team-scoped connection.
+			expect(vars.filter?.state).toEqual({ name: { in: ["Todo"] } });
+		});
+
+		it("returns 100% matching-team rows across a paginated (limit > one page) result set — never falls through to the leaky top-level path", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			// 100-row (multi-page) DEV-only set for the team-scoped query.
+			const devNodes = Array.from({ length: 100 }, (_, i) =>
+				issueNode(i, "DEV"),
+			);
+			// If the code ever routes --team back through the top-level
+			// FilteredSearchIssues query, this contaminated set (other teams
+			// leaking in — the DEV-5578 bug) would surface and the assertion fails.
+			const contaminated = [
+				issueNode(1, "DEV"),
+				issueNode(2, "EMW"),
+				issueNode(3, "INF"),
+				issueNode(4, "FE"),
+			];
+			vi.spyOn(graphQLService, "rawRequest").mockImplementation((async (
+				q: string,
+			) => {
+				if (String(q).includes("TeamScopedFilteredIssues")) {
+					return { team: { issues: { nodes: devNodes } } };
+				}
+				return { issues: { nodes: contaminated } };
+			}) as never);
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			const result = await service.searchIssues({
+				teamId: TEAM_UUID,
+				status: ["Todo"],
+				limit: 100,
+			});
+
+			expect(result).toHaveLength(100);
+			expect(result.every((issue) => issue.team?.key === "DEV")).toBe(true);
+		});
+
+		it("returns an empty list when the team-scoped connection yields no nodes", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			vi.spyOn(graphQLService, "rawRequest").mockResolvedValue({
+				team: { issues: { nodes: [] } },
+			});
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			const result = await service.searchIssues({
+				teamId: TEAM_UUID,
+				status: ["Todo"],
+				limit: 50,
+			});
+
+			expect(result).toEqual([]);
+		});
+
+		it("uses the top-level FilteredSearchIssues query when no team is supplied", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValue({ issues: { nodes: [] } });
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			await service.searchIssues({
+				teamId: undefined,
+				status: ["Todo"],
+				limit: 5,
+			});
+
+			const [query, vars] = rawRequest.mock.calls[0] as [
+				string,
+				{ teamId?: string; filter?: Record<string, unknown> },
+			];
+			expect(String(query)).toContain("FilteredSearchIssues");
+			expect(String(query)).not.toContain("TeamScopedFilteredIssues");
+			expect(vars.teamId).toBeUndefined();
+			expect(vars.filter?.state).toEqual({ name: { in: ["Todo"] } });
+		});
+
+		it("issues search --team filters full-text results to the team client-side (shares no leaky server path)", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			// Full-text search returns a global, cross-team result set; the team
+			// filter is applied in-memory by applySearchFilters (unaffected by the
+			// server-side relation-filter leak, but must still drop other teams).
+			vi.spyOn(graphQLService, "rawRequest").mockResolvedValue({
+				searchIssues: {
+					nodes: [
+						issueNode(1, "DEV"),
+						issueNode(2, "EMW"),
+						issueNode(3, "DEV"),
+						issueNode(4, "INF"),
+					],
+				},
+			});
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			const result = await service.searchIssues({
+				query: "widget",
+				teamId: TEAM_UUID,
+				limit: 30,
+			});
+
+			expect(result.every((issue) => issue.team?.key === "DEV")).toBe(true);
+			expect(result).toHaveLength(2);
+		});
+	});
+
 	describe("searchIssues terminal-state exclusion (DEV-4879)", () => {
 		it("excludes completed, canceled AND duplicate states by default", async () => {
 			const graphQLService = new GraphQLService({ apiKey: "token" });
