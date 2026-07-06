@@ -492,6 +492,47 @@ describe("--fields filter", () => {
 		const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
 		expect(parsed).toEqual({ identifier: "DEV-1", title: "Bug", priority: 2 });
 	});
+
+	it("resolves the status/updated column aliases when the literal key is absent (DEV-5376)", () => {
+		setFieldsFilter(["identifier", "status", "updated"]);
+		outputSuccess({
+			data: [
+				{
+					identifier: "DEV-1",
+					state: { name: "In Progress", type: "started" },
+					updatedAt: "2026-07-02T15:46:36.117Z",
+				},
+			],
+			meta: { count: 1 },
+		});
+		const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+		expect(parsed.data).toEqual([
+			{
+				identifier: "DEV-1",
+				status: "In Progress",
+				updated: "2026-07-02T15:46:36.117Z",
+			},
+		]);
+		expect(parsed._warnings).toBeUndefined();
+	});
+
+	it("a literal status key wins over the alias", () => {
+		setFieldsFilter(["status"]);
+		outputSuccess({
+			status: "raw-status",
+			state: { name: "In Progress" },
+		});
+		const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+		expect(parsed).toEqual({ status: "raw-status" });
+	});
+
+	it("an alias whose target is missing still nulls + warns", () => {
+		setFieldsFilter(["identifier", "status"]);
+		outputSuccess({ identifier: "cfg-1", scope: "workspace" });
+		const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+		expect(parsed.status).toBeNull();
+		expect(parsed._warnings.join(" ")).toContain("fields_unresolved: status");
+	});
 });
 
 describe("handleAsyncCommand", () => {

@@ -330,6 +330,80 @@ describe("issues commands", () => {
 				}),
 			);
 		});
+
+		describe("--format/--fields colliding with root registrations (DEV-5376)", () => {
+			// Replicates main.ts: --format/--fields exist on the root program
+			// too, and commander 15 hands the CLI token to the root
+			// registration — the subcommand's own option stays at its default.
+			function createCollidingProgram() {
+				const program = createTestProgram();
+				program.option("--format <kind>", "global format", "json");
+				program.option("--fields <fields>", "global fields filter");
+				return program;
+			}
+
+			const issueFixture = {
+				identifier: "DEV-1",
+				url: "https://linear.app/acme/issue/DEV-1",
+				title: "Fix the thing",
+				priority: 2,
+				state: { name: "In Progress" },
+				assignee: { name: "Alice" },
+				labels: [],
+				updatedAt: "2026-07-02T15:46:36.117Z",
+			};
+
+			it("--format table --fields renders the table, not the JSON envelope", async () => {
+				mockSearchIssues.mockResolvedValue([issueFixture]);
+				const program = createCollidingProgram();
+				setupIssuesCommands(program);
+				await runCommand(program, [
+					"issues",
+					"list",
+					"--format",
+					"table",
+					"--fields",
+					"identifier,status,updated",
+				]);
+
+				expect(mockOutputSuccess).not.toHaveBeenCalled();
+				const written = stdoutSpy.mock.calls.map((c) => c[0]).join("");
+				expect(written).toContain("Status");
+				expect(written).toContain("In Progress");
+				expect(written).toContain("2026-07-02");
+			});
+
+			it("--format csv --fields renders CSV with the requested columns", async () => {
+				mockSearchIssues.mockResolvedValue([issueFixture]);
+				const program = createCollidingProgram();
+				setupIssuesCommands(program);
+				await runCommand(program, [
+					"issues",
+					"list",
+					"--format",
+					"csv",
+					"--fields",
+					"identifier,status,updated",
+				]);
+
+				expect(mockOutputSuccess).not.toHaveBeenCalled();
+				const written = stdoutSpy.mock.calls.map((c) => c[0]).join("");
+				expect(written).toContain("ID,Status,Updated");
+				expect(written).toContain("DEV-1,In Progress,2026-07-02");
+			});
+
+			it("no --format still emits the JSON envelope", async () => {
+				mockSearchIssues.mockResolvedValue([issueFixture]);
+				const program = createCollidingProgram();
+				setupIssuesCommands(program);
+				await runCommand(program, ["issues", "list"]);
+
+				expect(mockOutputSuccess).toHaveBeenCalledWith({
+					data: [issueFixture],
+					meta: { count: 1 },
+				});
+			});
+		});
 	});
 
 	describe("issues read", () => {

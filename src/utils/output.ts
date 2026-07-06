@@ -76,12 +76,28 @@ function getNestedPath(obj: unknown, path: string): unknown {
 }
 
 /**
+ * Aliases for the table/csv column names that don't exist as literal keys
+ * on the JSON payload (DEV-5376). Tried only after the literal key and the
+ * dot-path both miss, and only kept when the alias target actually
+ * resolves — so a resource that genuinely lacks `state`/`updatedAt` still
+ * gets the explicit-null + `fields_unresolved` treatment. The requested
+ * name stays the output key (`{"status": "Todo"}`), matching the
+ * "consumers read exactly what they asked for" contract.
+ */
+const FIELD_ALIASES: Record<string, string> = {
+	status: "state.name",
+	updated: "updatedAt",
+};
+
+/**
  * Project `obj` down to the requested fields.
  *
  * - Top-level keys copy through as before.
  * - Dot-separated paths (DEV-5323) resolve nested values; the requested path
  *   string becomes a flat output key (`{"pipeline.status": "success"}`), so
  *   consumers read exactly what they asked for.
+ * - Documented column aliases resolve when the literal key is absent
+ *   (`status` → `state.name`, `updated` → `updatedAt`; DEV-5376).
  * - A field that resolves nowhere is emitted as an explicit `null` AND
  *   reported via `unresolved` — never silently omitted. Silent omission made
  *   a typo'd field indistinguishable from an empty value (DEV-5323).
@@ -134,6 +150,13 @@ function filterFields(
 				: undefined;
 			if (nested !== undefined) {
 				result[field] = nested;
+				continue;
+			}
+			const alias = FIELD_ALIASES[field];
+			const aliased =
+				alias !== undefined ? getNestedPath(source, alias) : undefined;
+			if (aliased !== undefined) {
+				result[field] = aliased;
 				continue;
 			}
 			result[field] = null;

@@ -70,7 +70,7 @@ import {
 	warnIfTruncated,
 } from "../utils/output.js";
 import { buildRelationCandidatePrompt } from "../utils/relation-candidate-prompt.js";
-import { getRootOpts } from "../utils/root-opts.js";
+import { effectiveOption, getRootOpts } from "../utils/root-opts.js";
 import {
 	formatCsv,
 	formatMarkdown,
@@ -228,12 +228,21 @@ function buildUpdateArgs(
 	};
 }
 
+/**
+ * `--format` / `--fields` are registered on both the root program and the
+ * list/search subcommands, and commander 15 assigns the CLI token to the
+ * root registration — so the values must be resolved via
+ * {@link effectiveOption} rather than read off the subcommand's own
+ * options (DEV-5376: `--format table --fields …` silently fell through to
+ * the JSON envelope because `options.format` stayed at its default).
+ */
 function outputIssues(
 	issues: LinearIssue[],
-	format: string | undefined,
-	fields: string | undefined,
+	command: Command,
 	meta: Record<string, unknown>,
 ): void {
+	const format = effectiveOption(command, "format");
+	const fields = effectiveOption(command, "fields");
 	const fieldList = fields ? splitList(fields) : undefined;
 	if (format === "table") {
 		logger.info(formatTable(issues, fieldList));
@@ -356,7 +365,7 @@ async function handleListIssues(
 			);
 		}
 		warnIfTruncated(result.length, limit);
-		outputIssues(result, options.format, options.fields, {
+		outputIssues(result, command, {
 			team: options.team,
 		});
 	} else {
@@ -365,7 +374,7 @@ async function handleListIssues(
 			options.sort,
 		);
 		warnIfTruncated(result.length, limit);
-		outputIssues(result, options.format, options.fields, {});
+		outputIssues(result, command, {});
 	}
 }
 
@@ -424,7 +433,7 @@ async function handleSearchIssues(
 	if (relationPrompt) {
 		outputWarning(relationPrompt);
 	}
-	outputIssues(result, options.format, options.fields, { query });
+	outputIssues(result, command, { query });
 }
 
 /**
