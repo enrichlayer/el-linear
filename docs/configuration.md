@@ -188,8 +188,15 @@ intended flow for the CLI.
     // is enabled). Blocks creation when a similar existing issue is found.
     "duplicateDetection": true,
     // Jaccard title-similarity threshold (0–1) above which an existing issue
-    // counts as a duplicate. Default 0.35. Lower = more aggressive.
+    // is surfaced as a possible duplicate (advisory — see below). Default
+    // 0.35. Lower = more aggressive.
     "duplicateThreshold": 0.35,
+    // Jaccard title-similarity threshold (0–1) above which a candidate HARD
+    // blocks creation (throws; requires --allow-duplicate). Below this (but
+    // at/above duplicateThreshold) is advisory only — printed, creation
+    // proceeds. Default 0.6. See docs/telemetry.md (DEV-5590) for why the
+    // gate is two-tier.
+    "duplicateHardBlockThreshold": 0.6,
     // OPT-IN SOP-label parent gate (default: off). When true, `issues create`
     // requires an issue carrying an SOP-type label (see `sopLabels`) to point
     // at a parent SOP via `--parent` or `--related-to`, and blocks otherwise.

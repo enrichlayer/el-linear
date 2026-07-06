@@ -39,6 +39,7 @@ import type {
 } from "../types/linear.js";
 import {
 	DEFAULT_DUPLICATE_THRESHOLD,
+	DEFAULT_HARD_BLOCK_THRESHOLD,
 	formatDuplicateBlock,
 	scoreDuplicateCandidates,
 	tokenizeTitle,
@@ -683,18 +684,28 @@ function buildDescriptionWithAttachments(
 /**
  * DEV-4823: create-time duplicate-detection gate. Searches the title's
  * salient keywords (including closed issues), scores candidates by Jaccard
- * title-overlap, and throws — listing the matches — when one is at/above the
- * configured similarity threshold.
+ * title-overlap, and — for a candidate at/above the hard-block threshold —
+ * throws, listing the matches.
+ *
+ * DEV-5590: two-tier since the single-threshold gate measured a 52.2%
+ * override rate (score alone didn't separate genuine duplicates from
+ * legitimate distinct issues — see {@link DEFAULT_HARD_BLOCK_THRESHOLD} for
+ * the data). A candidate at/above `duplicateThreshold` (detection floor) but
+ * below `duplicateHardBlockThreshold` (hard-block floor) is ADVISORY: printed
+ * as a warning, creation proceeds, and the fire is recorded as `advisory` —
+ * excluded from the override-rate denominator (only `blocked`/`overridden`
+ * count). At/above the hard-block floor, behavior is unchanged from DEV-4823.
  *
  * Bypassed by `--skip-validation` and
  * `config.validation.duplicateDetection: false` / `validation.enabled: false`.
  * `--allow-duplicate` does NOT skip the search — the gate still runs and, on a
- * would-fire, records an `overridden` telemetry event (DEV-4834) before
- * proceeding, so `el-telemetry gates` can measure the override-rate. (A blocked
- * fire records `blocked`.) `--skip-validation` is a blanket bypass and emits
- * nothing — it's not a gate-specific override, so counting it would dilute the
- * signal. The search itself is best-effort: a network/API failure warns and
- * proceeds rather than blocking legitimate issue creation on infra trouble.
+ * would-hard-block, records an `overridden` telemetry event (DEV-4834) before
+ * proceeding, so `el-telemetry gates` can measure the override-rate. (A
+ * hard-blocked fire records `blocked`.) `--skip-validation` is a blanket
+ * bypass and emits nothing — it's not a gate-specific override, so counting
+ * it would dilute the signal. The search itself is best-effort: a network/API
+ * failure warns and proceeds rather than blocking legitimate issue creation
+ * on infra trouble.
  */
 async function enforceNoDuplicateIssue(
 	title: string,
@@ -723,6 +734,10 @@ async function enforceNoDuplicateIssue(
 		typeof validation?.duplicateThreshold === "number"
 			? validation.duplicateThreshold
 			: DEFAULT_DUPLICATE_THRESHOLD;
+	const hardBlockThreshold =
+		typeof validation?.duplicateHardBlockThreshold === "number"
+			? validation.duplicateHardBlockThreshold
+			: DEFAULT_HARD_BLOCK_THRESHOLD;
 
 	let candidates: Awaited<ReturnType<typeof issuesService.searchIssues>>;
 	try {
@@ -762,15 +777,27 @@ async function enforceNoDuplicateIssue(
 		return;
 	}
 
-	// The gate would fire. Record the decision so `el-telemetry gates` can
-	// compute override-rate (DEV-4834): `overridden` when the user passed
-	// --allow-duplicate and we proceed anyway, `blocked` when we stop creation.
 	const gateEvent = {
 		gate: "issues-create-dup",
 		topScore: matches[0].score,
 		candidateCount: matches.length,
 	} as const;
 
+	// DEV-5590: below the hard-block floor, warn and proceed — never forces a
+	// stop, so there's nothing to "override". Recorded as `advisory` (visible
+	// in the raw ledger, excluded from the override-rate metric).
+	if (matches[0].score < hardBlockThreshold) {
+		await emitGateEvent("el-linear", "issues create", {
+			...gateEvent,
+			outcome: "advisory",
+		});
+		outputWarning(formatDuplicateBlock(matches, "advisory"));
+		return;
+	}
+
+	// The gate would hard-block. Record the decision so `el-telemetry gates`
+	// can compute override-rate (DEV-4834): `overridden` when the user passed
+	// --allow-duplicate and we proceed anyway, `blocked` when we stop creation.
 	if (options.allowDuplicate) {
 		await emitGateEvent("el-linear", "issues create", {
 			...gateEvent,
@@ -1815,7 +1842,7 @@ export function setupIssuesCommands(program: Command): void {
 		)
 		.option(
 			"--allow-duplicate",
-			"skip the duplicate-detection gate and create even if a similar issue already exists",
+			"silence the duplicate-detection hard block and create even if a near-identical issue already exists (DEV-5590: only matters at/above the hard-block threshold — below it the gate is advisory-only and never blocks)",
 		)
 		.option(
 			"--allow-unparented-sop",

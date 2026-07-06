@@ -85,9 +85,15 @@ export interface GateEvent {
 	 * `blocked` — the gate stopped creation. `overridden` — a gate-specific
 	 * override flag let a would-block proceed. `fail-open` — the gate could not
 	 * evaluate (infra/service error) and let creation proceed rather than block
-	 * on trouble; tracked so degradation is measurable (DEV-5378).
+	 * on trouble; tracked so degradation is measurable (DEV-5378). `advisory` —
+	 * the gate fired below its hard-block threshold: printed, but never forced
+	 * a stop (DEV-5590). Like `fail-open`, the tools-repo reader
+	 * (`el-telemetry gates`) only recognizes `blocked`/`overridden` for the
+	 * override-rate denominator — an unrecognized outcome is skipped rather
+	 * than counted, so `advisory` fires are visible in the raw ledger but
+	 * intentionally excluded from the metric.
 	 */
-	outcome: "blocked" | "overridden" | "fail-open";
+	outcome: "blocked" | "overridden" | "fail-open" | "advisory";
 	/** Highest candidate similarity that triggered the gate (0–1). */
 	topScore?: number;
 	/** How many candidates crossed the threshold. */

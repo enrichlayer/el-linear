@@ -123,6 +123,17 @@ export interface ElLinearConfig {
 		 */
 		duplicateThreshold?: number;
 		/**
+		 * Jaccard title-similarity threshold (0-1) above which a duplicate
+		 * candidate HARD blocks creation (throws, requires `--allow-duplicate`).
+		 * A candidate scoring at/above `duplicateThreshold` but below this is
+		 * advisory only — printed, creation proceeds. Defaults to
+		 * `DEFAULT_HARD_BLOCK_THRESHOLD` (0.6). See DEV-5590 for why the gate
+		 * is two-tier: single-threshold override-rate telemetry showed score
+		 * alone doesn't separate genuine duplicates from legitimate distinct
+		 * issues in the 0.35-0.6 range.
+		 */
+		duplicateHardBlockThreshold?: number;
+		/**
 		 * OPT-IN SOP-label parent gate (DEV-5378). When `true`, `issues create`
 		 * requires an issue carrying an SOP-type label (see `sopLabels`) to point
 		 * at a parent SOP via `--parent` or `--related-to`, blocking otherwise.
