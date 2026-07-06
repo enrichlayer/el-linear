@@ -31,6 +31,13 @@ binary via named **profiles**. A profile is a directory under
 The legacy fallback means existing single-profile users see no
 behavior change — multi-profile is purely opt-in.
 
+`~/.config/el-linear/active-profile` is a single, **machine-global** marker —
+`profile use`/`profile add` mutate it for every concurrent invocation on the
+machine (DEV-5610). Prefer `--profile`/`$EL_LINEAR_PROFILE` (non-mutating,
+per-invocation) for automation or when running alongside other sessions;
+`runProfileUse` warns via `outputWarning` on an actual switch so the blast
+radius isn't silent.
+
 **Touch points** (single source of truth: `src/config/paths.ts`):
 
 - `resolveActiveProfile(env, fsOps) → ProfilePaths` — pure resolution.

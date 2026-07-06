@@ -173,8 +173,21 @@ export async function runProfileUse(name: string): Promise<void> {
 			`Profile name "${trimmed}" must contain only [a-z0-9_-]. Pick a different name.`,
 		);
 	}
+	// DEV-5610: `active-profile` is a single, machine-global marker — every
+	// el-linear invocation anywhere on this machine that doesn't set
+	// --profile/$EL_LINEAR_PROFILE resolves through it. Warn loudly on an
+	// actual switch so the blast radius is visible instead of silently
+	// redirecting some other concurrent session/tool to a different
+	// workspace. `--profile`/$EL_LINEAR_PROFILE remain the correct,
+	// non-mutating choice for automation and concurrent sessions.
+	const previous = resolveActiveProfile().name;
 	await fsp.mkdir(CONFIG_DIR, { recursive: true, mode: 0o700 });
 	await fsp.writeFile(ACTIVE_PROFILE_FILE, `${trimmed}\n`, { mode: 0o644 });
+	if (previous !== trimmed) {
+		outputWarning(
+			`Switched the GLOBAL active profile to "${trimmed}" (${ACTIVE_PROFILE_FILE}). This affects every other el-linear invocation on this machine that doesn't set --profile/$EL_LINEAR_PROFILE explicitly — concurrent sessions/tools relying on a different profile will silently start hitting the wrong workspace.`,
+		);
+	}
 }
 
 export async function runProfileAdd(name: string): Promise<void> {

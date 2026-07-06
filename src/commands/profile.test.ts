@@ -61,6 +61,7 @@ import {
 	setActiveProfileForSession,
 	TOKEN_PATH,
 } from "../config/paths.js";
+import { outputWarning } from "../utils/output.js";
 import {
 	runProfileAdd,
 	runProfileList,
@@ -73,6 +74,7 @@ beforeEach(async () => {
 	await fs.mkdir(CONFIG_DIR, { recursive: true });
 	setActiveProfileForSession(null);
 	vi.mocked(confirm).mockReset();
+	vi.mocked(outputWarning).mockReset();
 });
 
 afterEach(async () => {
@@ -208,6 +210,30 @@ describe("runProfileUse", () => {
 	it("rejects names longer than 64 characters", async () => {
 		const tooLong = `a${"x".repeat(64)}`; // 65 chars
 		await expect(runProfileUse(tooLong)).rejects.toThrow(/[a-z0-9_-]/);
+	});
+
+	// DEV-5610: active-profile is a single, machine-global marker — every
+	// concurrent el-linear invocation without an explicit --profile/
+	// $EL_LINEAR_PROFILE override resolves through it. A switch must warn
+	// loudly so the blast radius is visible instead of silent.
+	it("warns loudly when switching to a different profile", async () => {
+		await runProfileUse("work"); // no prior profile (legacy/default) → still a real switch, warns
+		expect(outputWarning).toHaveBeenCalledTimes(1);
+		vi.mocked(outputWarning).mockClear();
+
+		await runProfileUse("personal"); // now switching away from "work"
+		expect(outputWarning).toHaveBeenCalledTimes(1);
+		const [message] = vi.mocked(outputWarning).mock.calls[0];
+		expect(message).toContain('"personal"');
+		expect(message).toContain(ACTIVE_PROFILE_FILE);
+		expect(message).toContain("GLOBAL");
+	});
+
+	it("does not warn when re-activating the already-active profile", async () => {
+		await runProfileUse("work");
+		vi.mocked(outputWarning).mockClear();
+		await runProfileUse("work"); // no-op switch
+		expect(outputWarning).not.toHaveBeenCalled();
 	});
 });
 
