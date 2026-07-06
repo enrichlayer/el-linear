@@ -160,6 +160,18 @@ The active profile is selected by, in priority:
 The legacy fallback means **existing single-profile users see no
 behavior change** — profiles are purely opt-in.
 
+**Automation and concurrent sessions: prefer `--profile`/`$EL_LINEAR_PROFILE`
+over `profile use`.** `~/.config/el-linear/active-profile` is a single,
+machine-global marker file — `profile use <name>` mutates it for *every*
+el-linear invocation on the machine, including other terminals, scripts, and
+agent sessions that don't set an explicit override. Two processes wanting
+different workspaces at the same time will silently clobber each other. The
+flag and env var are per-invocation and never touch the marker file, so they
+compose safely with any number of concurrent sessions each pinned to their
+own workspace. Reserve `profile use` for a human's own interactive default
+switch; `profile use`/`profile add` print a loud warning when they change the
+global marker so the blast radius is visible instead of silent.
+
 ## Migrating from v1.0–1.3
 
 Versions 1.0–1.3 stored everything in the single-file layout

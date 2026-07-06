@@ -61,6 +61,7 @@ import {
 	setActiveProfileForSession,
 	TOKEN_PATH,
 } from "../config/paths.js";
+import { outputWarning } from "../utils/output.js";
 import {
 	runProfileAdd,
 	runProfileList,
@@ -73,6 +74,7 @@ beforeEach(async () => {
 	await fs.mkdir(CONFIG_DIR, { recursive: true });
 	setActiveProfileForSession(null);
 	vi.mocked(confirm).mockReset();
+	vi.mocked(outputWarning).mockReset();
 });
 
 afterEach(async () => {
@@ -209,6 +211,45 @@ describe("runProfileUse", () => {
 		const tooLong = `a${"x".repeat(64)}`; // 65 chars
 		await expect(runProfileUse(tooLong)).rejects.toThrow(/[a-z0-9_-]/);
 	});
+
+	// DEV-5610: active-profile is a single, machine-global marker — every
+	// concurrent el-linear invocation without an explicit --profile/
+	// $EL_LINEAR_PROFILE override resolves through it. A switch must warn
+	// loudly so the blast radius is visible instead of silent.
+	it("warns loudly when switching to a different profile", async () => {
+		await runProfileUse("work"); // no prior profile (legacy/default) → still a real switch, warns
+		expect(outputWarning).toHaveBeenCalledTimes(1);
+		vi.mocked(outputWarning).mockClear();
+
+		await runProfileUse("personal"); // now switching away from "work"
+		expect(outputWarning).toHaveBeenCalledTimes(1);
+		const [message] = vi.mocked(outputWarning).mock.calls[0];
+		expect(message).toContain('"personal"');
+		expect(message).toContain(ACTIVE_PROFILE_FILE);
+		expect(message).toContain("GLOBAL");
+	});
+
+	it("does not warn when re-activating the already-active profile", async () => {
+		await runProfileUse("work");
+		vi.mocked(outputWarning).mockClear();
+		await runProfileUse("work"); // no-op switch
+		expect(outputWarning).not.toHaveBeenCalled();
+	});
+
+	// Cycle-1 review finding on PR #229: the "previous" comparison must read
+	// the raw marker file, not resolveActiveProfile().name — the latter
+	// resolves through --profile/$EL_LINEAR_PROFILE too, so a concurrent
+	// session-level override in place while `profile use` runs would report
+	// the wrong "previous" value.
+	it("still warns on a real marker change even when a session override is active", async () => {
+		await fs.writeFile(ACTIVE_PROFILE_FILE, "work\n"); // marker already "work"
+		setActiveProfileForSession("personal"); // unrelated override in place
+		await runProfileUse("work"); // marker doesn't actually change
+		expect(outputWarning).not.toHaveBeenCalled(); // no false-positive
+
+		await runProfileUse("other"); // marker genuinely changes: work -> other
+		expect(outputWarning).toHaveBeenCalledTimes(1); // no false-negative
+	});
 });
 
 describe("runProfileAdd", () => {
@@ -237,6 +278,20 @@ describe("runProfileAdd", () => {
 
 		// No marker file written
 		await expect(fs.access(ACTIVE_PROFILE_FILE)).rejects.toThrow();
+	});
+
+	// DEV-5610: `add` mutates the same global marker `use` does (via the
+	// internal runProfileUse call), so it deserves the same loud warning on
+	// a genuine switch — reading the raw marker (not resolveActiveProfile(),
+	// which would resolve through the session override `add` itself just
+	// set) is what makes this fire correctly instead of being suppressed.
+	it("warns when adding a profile changes the marker away from an existing one", async () => {
+		await fs.writeFile(ACTIVE_PROFILE_FILE, "old-profile\n");
+		vi.mocked(outputWarning).mockClear();
+		await runProfileAdd("new-profile");
+		expect(outputWarning).toHaveBeenCalledWith(
+			expect.stringContaining('"new-profile"'),
+		);
 	});
 });
 

@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { resolveActiveProfile } from "../config/paths.js";
 import {
 	dispatch as dispatchSummary,
 	drainSummaryFieldWarnings,
@@ -535,8 +536,25 @@ function outputError(error: Error): void {
 	// `lin_oauth_…` / `Bearer <payload>` in error text can't leak a token
 	// into stdout, shell history, or CI logs. The wizard already sanitizes
 	// its own log paths; this is the central error path on every command.
+	//
+	// `activeProfile` is included so a "not found" error is distinguishable
+	// from "wrong workspace" without manually inspecting
+	// ~/.config/el-linear/active-profile (DEV-5610) — the active profile can
+	// change between commands (an explicit `profile use`, a different
+	// $EL_LINEAR_PROFILE, or another process on the machine switching the
+	// shared marker file), and a bare "X not found" reads as data loss or an
+	// API outage when the real cause is often just the wrong workspace.
+	// Guarded: resolveActiveProfile() throws on an invalid $EL_LINEAR_PROFILE
+	// value (a real, separate user error) — outputError is the last-resort
+	// error path, so this addition must not itself throw uncaught.
+	let activeProfile = "<unknown>";
+	try {
+		activeProfile = resolveActiveProfile().name ?? "<legacy default>";
+	} catch {
+		// leave activeProfile as "<unknown>"
+	}
 	const payload = JSON.stringify(
-		{ error: sanitizeForLog(error.message) },
+		{ error: sanitizeForLog(error.message), activeProfile },
 		null,
 		2,
 	);

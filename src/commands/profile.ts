@@ -33,6 +33,7 @@ import {
 	isSafeProfileName as isSafeName,
 	PROFILES_DIR,
 	profilePaths,
+	readActiveProfileMarker,
 	resolveActiveProfile,
 	setActiveProfileForSession,
 	TOKEN_PATH,
@@ -173,8 +174,29 @@ export async function runProfileUse(name: string): Promise<void> {
 			`Profile name "${trimmed}" must contain only [a-z0-9_-]. Pick a different name.`,
 		);
 	}
+	// DEV-5610: `active-profile` is a single, machine-global marker — every
+	// el-linear invocation anywhere on this machine that doesn't set
+	// --profile/$EL_LINEAR_PROFILE resolves through it. Warn loudly on an
+	// actual switch so the blast radius is visible instead of silently
+	// redirecting some other concurrent session/tool to a different
+	// workspace. `--profile`/$EL_LINEAR_PROFILE remain the correct,
+	// non-mutating choice for automation and concurrent sessions.
+	//
+	// Read the raw marker (readActiveProfileMarker), not
+	// resolveActiveProfile().name — the latter resolves through the
+	// --profile/$EL_LINEAR_PROFILE precedence layers too, so a concurrent
+	// override in place while `profile use` runs would make it report the
+	// wrong "previous" value (a false-positive warning when the marker
+	// didn't actually change, or a false-negative when it did) — cycle-1
+	// review finding on PR #229.
+	const previous = readActiveProfileMarker();
 	await fsp.mkdir(CONFIG_DIR, { recursive: true, mode: 0o700 });
 	await fsp.writeFile(ACTIVE_PROFILE_FILE, `${trimmed}\n`, { mode: 0o644 });
+	if (previous !== trimmed) {
+		outputWarning(
+			`Switched the GLOBAL active profile to "${trimmed}" (${ACTIVE_PROFILE_FILE}). This affects every other el-linear invocation on this machine that doesn't set --profile/$EL_LINEAR_PROFILE explicitly — concurrent sessions/tools relying on a different profile will silently start hitting the wrong workspace.`,
+		);
+	}
 }
 
 export async function runProfileAdd(name: string): Promise<void> {

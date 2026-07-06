@@ -570,8 +570,13 @@ describe("handleAsyncCommand", () => {
 		const fn = vi.fn().mockRejectedValue(new Error("test failure"));
 		const wrapped = handleAsyncCommand(fn);
 		await wrapped();
-		const errorJson = `${JSON.stringify({ error: "test failure" }, null, 2)}\n`;
-		expect(stdoutSpy).toHaveBeenCalledWith(errorJson);
+		// activeProfile (DEV-5610) reflects whatever profile is active on the
+		// machine running this test, so assert its shape rather than a fixed
+		// value — the exact-string form this replaced hardcoded the full
+		// envelope and broke the moment that field was added.
+		const parsed = JSON.parse(stdoutSpy.mock.calls[0]?.[0] as string);
+		expect(parsed.error).toBe("test failure");
+		expect(parsed.activeProfile).toEqual(expect.any(String));
 		expect(exitSpy).toHaveBeenCalledWith(1);
 	});
 
@@ -579,8 +584,9 @@ describe("handleAsyncCommand", () => {
 		const fn = vi.fn().mockRejectedValue("string error");
 		const wrapped = handleAsyncCommand(fn);
 		await wrapped();
-		const errorJson = `${JSON.stringify({ error: "string error" }, null, 2)}\n`;
-		expect(stdoutSpy).toHaveBeenCalledWith(errorJson);
+		const parsed = JSON.parse(stdoutSpy.mock.calls[0]?.[0] as string);
+		expect(parsed.error).toBe("string error");
+		expect(parsed.activeProfile).toEqual(expect.any(String));
 		expect(exitSpy).toHaveBeenCalledWith(1);
 	});
 
