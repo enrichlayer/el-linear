@@ -252,6 +252,13 @@ function outputIssues(
 	} else if (format === "csv") {
 		logger.info(formatCsv(issues, fieldList));
 	} else {
+		// JSON path: the `--fields` projection is applied by the global
+		// `fieldsFilter` inside `outputSuccess` (set in main.ts's preAction),
+		// NOT by `fieldList` here — `fieldList` only feeds the tabular
+		// formatters above. Keeping the projection in one place is what
+		// prevents double-application; a future refactor that routes
+		// table/csv/md through `outputSuccess` would need to drop the global
+		// filter or it would project twice.
 		outputSuccess({ data: issues, meta: { count: issues.length, ...meta } });
 	}
 }

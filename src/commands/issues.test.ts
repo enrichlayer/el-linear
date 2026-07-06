@@ -403,6 +403,27 @@ describe("issues commands", () => {
 					meta: { count: 1 },
 				});
 			});
+
+			it("issues search --format table --fields also renders the table (shares outputIssues)", async () => {
+				mockSearchIssues.mockResolvedValue([issueFixture]);
+				const program = createCollidingProgram();
+				setupIssuesCommands(program);
+				await runCommand(program, [
+					"issues",
+					"search",
+					"thing",
+					"--format",
+					"table",
+					"--fields",
+					"identifier,status,updated",
+				]);
+
+				expect(mockOutputSuccess).not.toHaveBeenCalled();
+				const written = stdoutSpy.mock.calls.map((c) => c[0]).join("");
+				expect(written).toContain("Status");
+				expect(written).toContain("In Progress");
+				expect(written).toContain("2026-07-02");
+			});
 		});
 	});
 
