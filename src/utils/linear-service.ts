@@ -144,6 +144,25 @@ export class LinearService {
 		throw notFoundError("User", nameOrEmailOrId);
 	}
 
+	/**
+	 * Single-user lookup by UUID, email, or name (DEV-5612) — the natural
+	 * complement to `getUsers`/`users list`, so identifying one actor (e.g. an
+	 * unrecognized member surfaced by the alias wizard) doesn't require
+	 * dumping the whole workspace. Resolution/ambiguity semantics match every
+	 * other `--assignee`-style lookup in the CLI via {@link resolveUserId}.
+	 */
+	async getUser(nameOrEmailOrId: string): Promise<LinearUser> {
+		const id = await this.resolveUserId(nameOrEmailOrId);
+		const user = await this.client.user(id);
+		return {
+			id: user.id,
+			name: user.name,
+			displayName: user.displayName,
+			email: user.email,
+			active: user.active,
+		};
+	}
+
 	async getUsers(
 		activeOnly?: boolean,
 		limit = 100,

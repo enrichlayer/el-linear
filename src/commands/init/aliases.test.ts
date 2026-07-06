@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
 	type AliasUpdate,
+	applyMemberAliasUpdate,
 	findDisplayNameCollisions,
+	isLinearSystemActor,
 	mergeAliasesIntoConfig,
 	parseCsv,
 	type User,
@@ -166,6 +168,96 @@ describe("mergeAliasesIntoConfig", () => {
 		const result = mergeAliasesIntoConfig(config, updates);
 		expect(result.members?.aliases).toEqual(config.members?.aliases);
 		expect(result.members?.handles).toEqual(config.members?.handles);
+	});
+});
+
+describe("isLinearSystemActor (DEV-5612)", () => {
+	it("flags a user with a @linear.linear.app email", () => {
+		expect(
+			isLinearSystemActor(
+				u("bot-id", "linear", "linear-abc123@linear.linear.app"),
+			),
+		).toBe(true);
+	});
+
+	it("is case-insensitive on the domain", () => {
+		expect(
+			isLinearSystemActor(
+				u("bot-id", "linear", "linear-abc123@Linear.Linear.App"),
+			),
+		).toBe(true);
+	});
+
+	it("does not flag a real user", () => {
+		expect(
+			isLinearSystemActor(u("id-1", "Alice Anderson", "alice@example.com")),
+		).toBe(false);
+	});
+
+	it("does not flag a user with no email", () => {
+		expect(isLinearSystemActor(u("id-1", "Alice Anderson", null))).toBe(false);
+	});
+});
+
+describe("applyMemberAliasUpdate (DEV-5612)", () => {
+	it("clear removes all aliases and handles for the named member only", () => {
+		const result = applyMemberAliasUpdate(baseConfig(), "Alice Anderson", {
+			mode: "clear",
+			aliases: [],
+			github: { kind: "clear" },
+			gitlab: { kind: "clear" },
+		});
+		expect(result.members?.aliases).toEqual({ bob: "Bob Brown" });
+		expect(result.members?.handles?.github).toEqual({});
+		expect(result.members?.handles?.gitlab).toEqual({});
+	});
+
+	it("set (edit mode) replaces aliases without touching other members", () => {
+		const result = applyMemberAliasUpdate(baseConfig(), "Alice Anderson", {
+			mode: "edit",
+			aliases: ["alex"],
+			github: { kind: "keep" },
+			gitlab: { kind: "keep" },
+		});
+		expect(result.members?.aliases).toEqual({
+			alex: "Alice Anderson",
+			bob: "Bob Brown",
+		});
+	});
+
+	it("does not touch the uuids/fullNames maps (no UUID to record)", () => {
+		const config = baseConfig();
+		const result = applyMemberAliasUpdate(config, "Alice Anderson", {
+			mode: "clear",
+			aliases: [],
+			github: { kind: "clear" },
+			gitlab: { kind: "clear" },
+		});
+		expect(result.members?.uuids).toEqual(config.members?.uuids);
+		expect(result.members?.fullNames).toEqual(config.members?.fullNames);
+	});
+
+	it("preserves unrelated config keys", () => {
+		const result = applyMemberAliasUpdate(baseConfig(), "Alice Anderson", {
+			mode: "clear",
+			aliases: [],
+			github: { kind: "clear" },
+			gitlab: { kind: "clear" },
+		});
+		expect(result.defaultTeam).toBe("ENG");
+		expect(result.terms).toEqual([
+			{ canonical: "Enrich Layer", reject: ["EnrichLayer"] },
+		]);
+	});
+
+	it("works against an empty config (creates the members sub-tree)", () => {
+		const result = applyMemberAliasUpdate({}, "Someone New", {
+			mode: "edit",
+			aliases: ["someone"],
+			github: { kind: "keep" },
+			gitlab: { kind: "keep" },
+		});
+		expect(result.members?.aliases).toEqual({ someone: "Someone New" });
 	});
 });
 

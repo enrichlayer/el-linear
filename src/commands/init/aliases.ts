@@ -77,6 +77,20 @@ export async function fetchAllUsers(token: string): Promise<User[]> {
 }
 
 /**
+ * Detect the synthetic Linear-internal "system actor" surfaced by the Users
+ * API alongside real people — DEV-5612. Its email is a
+ * `<uuid>@linear.linear.app` address (the documented pattern for Linear's own
+ * automation account); it isn't a person and should never be offered as an
+ * assignable alias target. A user setting up the alias wizard for the first
+ * time mistook it for themselves (`linear <linear-…@linear.linear.app>`
+ * presented as an ordinary numbered member) and typed their own nicknames as
+ * its aliases.
+ */
+export function isLinearSystemActor(user: User): boolean {
+	return Boolean(user.email && /@linear\.linear\.app$/i.test(user.email));
+}
+
+/**
  * Find groups of users sharing the same display name. The current alias
  * config keys aliases by display name, so colliding users would silently
  * overwrite each other's entries. Detection is exported so the wizard can
@@ -113,6 +127,59 @@ function applyHandleAction(
 	}
 }
 
+/** The alias/handle-mutation slice of {@link AliasUpdate}, without the user
+ * identity fields — shared by the UUID-keyed wizard merge and the by-name
+ * direct-edit path (DEV-5612), which has no UUID to record. */
+export type MemberAliasMutation = Pick<
+	AliasUpdate,
+	"mode" | "aliases" | "github" | "gitlab"
+>;
+
+/**
+ * Apply one member's alias/handle mutation into `next` (mutated in place).
+ * Ensures the `members.aliases`/`members.handles.{github,gitlab}` sub-trees
+ * exist first. Pure with respect to `fullName`/`update` — the only side
+ * effect is on `next`.
+ */
+function applyAliasMutation(
+	next: WizardConfig,
+	fullName: string,
+	update: MemberAliasMutation,
+): void {
+	next.members = next.members ?? {};
+	next.members.aliases = next.members.aliases ?? {};
+	next.members.handles = next.members.handles ?? {};
+	next.members.handles.github = next.members.handles.github ?? {};
+	next.members.handles.gitlab = next.members.handles.gitlab ?? {};
+
+	// Aliases: replace this user's entries based on the update mode.
+	// We track aliases as { aliasKey: fullName }, so removing means deleting
+	// any keys whose value is this fullName.
+	const currentAliasKeys = Object.entries(next.members.aliases)
+		.filter(([_, v]) => v === fullName)
+		.map(([k]) => k);
+
+	if (update.mode === "clear") {
+		for (const k of currentAliasKeys) delete next.members.aliases[k];
+	} else if (update.mode === "edit") {
+		for (const k of currentAliasKeys) delete next.members.aliases[k];
+		for (const a of update.aliases) next.members.aliases[a] = fullName;
+	} else if (update.mode === "append") {
+		for (const a of update.aliases) next.members.aliases[a] = fullName;
+	}
+	// "keep" → no changes.
+
+	// GitHub / GitLab handles use the same edit/append/clear semantics,
+	// driven by the discriminated HandleAction per platform.
+	for (const platform of HANDLE_PLATFORMS) {
+		applyHandleAction(
+			next.members.handles[platform] as Record<string, string>,
+			fullName,
+			update[platform],
+		);
+	}
+}
+
 /**
  * Merge new alias entries into existing config without dropping unrelated
  * fields. Pure function — no I/O. Exported for testing.
@@ -123,45 +190,38 @@ export function mergeAliasesIntoConfig(
 ): WizardConfig {
 	const next: WizardConfig = JSON.parse(JSON.stringify(existing));
 	next.members = next.members ?? {};
-	next.members.aliases = next.members.aliases ?? {};
 	next.members.fullNames = next.members.fullNames ?? {};
-	next.members.handles = next.members.handles ?? {};
 	next.members.uuids = next.members.uuids ?? {};
-	next.members.handles.github = next.members.handles.github ?? {};
-	next.members.handles.gitlab = next.members.handles.gitlab ?? {};
 
 	for (const [userId, update] of updates) {
 		const fullName = update.displayName;
 		next.members.uuids[fullName] = userId;
 		next.members.fullNames[userId] = fullName;
-
-		// Aliases: replace this user's entries based on the update mode.
-		// We track aliases as { aliasKey: fullName }, so removing means deleting
-		// any keys whose value is this fullName.
-		const currentAliasKeys = Object.entries(next.members.aliases)
-			.filter(([_, v]) => v === fullName)
-			.map(([k]) => k);
-
-		if (update.mode === "clear") {
-			for (const k of currentAliasKeys) delete next.members.aliases[k];
-		} else if (update.mode === "edit") {
-			for (const k of currentAliasKeys) delete next.members.aliases[k];
-			for (const a of update.aliases) next.members.aliases[a] = fullName;
-		} else if (update.mode === "append") {
-			for (const a of update.aliases) next.members.aliases[a] = fullName;
-		}
-		// "keep" → no changes.
-
-		// GitHub / GitLab handles use the same edit/append/clear semantics,
-		// driven by the discriminated HandleAction per platform.
-		for (const platform of HANDLE_PLATFORMS) {
-			applyHandleAction(
-				next.members.handles[platform] as Record<string, string>,
-				fullName,
-				update[platform],
-			);
-		}
+		applyAliasMutation(next, fullName, update);
 	}
+	return next;
+}
+
+/**
+ * Apply a single member alias/handle mutation directly by display name — the
+ * non-interactive counterpart to the `init aliases` walk (DEV-5612). Used by
+ * `el-linear profile members clear <name>` / `members set <name>` so a
+ * mistaken or unwanted entry (e.g. the Linear system actor, or a stale
+ * alias) can be fixed without hand-editing config.json or re-walking every
+ * user interactively.
+ *
+ * Unlike {@link mergeAliasesIntoConfig} (keyed by Linear user UUID, populated
+ * by the `init aliases` walk against the live Users API), this operates
+ * purely on the on-disk config by display name — the `uuids`/`fullNames`
+ * maps are left untouched since there's no fresh UUID to record here.
+ */
+export function applyMemberAliasUpdate(
+	existing: WizardConfig,
+	displayName: string,
+	update: MemberAliasMutation,
+): WizardConfig {
+	const next: WizardConfig = JSON.parse(JSON.stringify(existing));
+	applyAliasMutation(next, displayName, update);
 	return next;
 }
 
@@ -238,9 +298,25 @@ export async function runAliasesStep(
 		return new Map();
 	}
 
-	const allUsers = await fetchAllUsers(token);
-	if (allUsers.length === 0) {
+	const fetchedUsers = await fetchAllUsers(token);
+	if (fetchedUsers.length === 0) {
 		console.log("  No active users visible to this token.");
+		return new Map();
+	}
+
+	// Skip the Linear system actor(s) — not real people, never alias targets
+	// (DEV-5612). Filtered before collision detection so it can't spuriously
+	// collide with (or mask) a real display-name collision.
+	const systemActors = fetchedUsers.filter(isLinearSystemActor);
+	if (systemActors.length > 0) {
+		console.log(
+			`  Skipping ${systemActors.length} Linear system actor(s) — not real people, never alias targets: ` +
+				`${systemActors.map((u) => u.email ?? u.id).join(", ")}`,
+		);
+	}
+	const allUsers = fetchedUsers.filter((u) => !isLinearSystemActor(u));
+	if (allUsers.length === 0) {
+		console.log("  No human users remain after filtering system actors.");
 		return new Map();
 	}
 

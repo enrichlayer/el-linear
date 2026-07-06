@@ -145,6 +145,16 @@ EL_LINEAR_PROFILE=forage el-linear teams list
 el-linear profile remove old-profile
 ```
 
+Fix or clean up a single member's aliases/handles without hand-editing
+`config.json` — `profile members` operates directly on the active profile's
+on-disk config (no Linear API round-trip):
+
+```bash
+el-linear profile members list                              # show configured members
+el-linear profile members clear "linear"                     # remove a mistaken/stale entry
+el-linear profile members set "Alice Anderson" --aliases ali,al,alex
+```
+
 Each profile lives at `~/.config/el-linear/profiles/<name>/` and owns:
 
 - `token` — its Linear API token (mode 0600)
@@ -466,7 +476,7 @@ el-linear <command> --help       # detailed help for one command
 | Search | `search <query>` (semantic, cross-resource) |
 | Refs | `refs wrap` (rewrite issue identifiers in arbitrary text as links) |
 | Escape hatch | `graphql [query]` (with `--introspect`) |
-| Config | `config show`, `users list`, `teams list`, `templates list` |
+| Config | `config show`, `users {list, read}`, `teams list`, `templates list` |
 
 All `list` subcommands support `-l, --limit <n>`. All commands accept the
 top-level filters: `--format <json|summary>`, `--raw`, `--jq <expr>`, `--fields <list>`.
