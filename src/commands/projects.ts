@@ -34,7 +34,7 @@ import {
 	outputSuccess,
 	outputWarning,
 } from "../utils/output.js";
-import { getRootOpts } from "../utils/root-opts.js";
+import { effectiveOption, getRootOpts } from "../utils/root-opts.js";
 import {
 	type ColumnDef,
 	type MarkdownColumnDef,
@@ -765,7 +765,11 @@ export function setupProjectsCommands(program: Command): void {
 				// ahead of completed/canceled in every format, so the active
 				// set always fits within `--limit`. DEV-4175.
 				const sorted = sortActiveFirst(result);
-				const format = options.format as string;
+				// Resolved via effectiveOption because commander 15 hands the
+				// CLI token to the root program's same-named --format/--fields
+				// registration, leaving the subcommand's option at its default
+				// (DEV-5376).
+				const format = effectiveOption(command, "format") ?? "json";
 				const isTabular =
 					format === "table" ||
 					format === "md" ||
@@ -782,9 +786,8 @@ export function setupProjectsCommands(program: Command): void {
 				}
 
 				if (isTabular) {
-					const fieldList = options.fields
-						? splitList(options.fields)
-						: undefined;
+					const fields = effectiveOption(command, "fields");
+					const fieldList = fields ? splitList(fields) : undefined;
 					formatProjectsOutput(sorted, format, fieldList);
 					if (format === "table") {
 						logger.info(`\n${sorted.length} projects`);

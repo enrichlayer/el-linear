@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	createTestProgram,
 	runCommand,
@@ -223,6 +223,69 @@ describe("projects commands", () => {
 					{ id: "x1", name: "Killed", state: "canceled" },
 				],
 				meta: { count: 4 },
+			});
+		});
+
+		describe("--format/--fields colliding with root registrations (DEV-5376)", () => {
+			// main.ts registers --format/--fields on the root program too, and
+			// commander 15 hands the CLI token to the root registration even
+			// when it appears after the subcommand — the same collision fixed
+			// on `issues list`. This proves the `projects list` half renders the
+			// table instead of silently falling through to the JSON envelope.
+			function createCollidingProgram() {
+				const program = createTestProgram();
+				program.option("--format <kind>", "global format", "json");
+				program.option("--fields <fields>", "global fields filter");
+				return program;
+			}
+
+			let stdoutSpy: ReturnType<typeof vi.spyOn>;
+
+			beforeEach(() => {
+				stdoutSpy = vi
+					.spyOn(process.stdout, "write")
+					.mockImplementation(() => true);
+			});
+
+			afterEach(() => {
+				stdoutSpy.mockRestore();
+			});
+
+			it("--format table --fields renders the table, not the JSON envelope", async () => {
+				mockGetProjects.mockResolvedValue([
+					{ id: "s1", name: "Live work", state: "started" },
+				]);
+				const program = createCollidingProgram();
+				setupProjectsCommands(program);
+				await runCommand(program, [
+					"projects",
+					"list",
+					"--format",
+					"table",
+					"--fields",
+					"name,state",
+				]);
+
+				expect(mockOutputSuccess).not.toHaveBeenCalled();
+				const written = stdoutSpy.mock.calls.map((c) => c[0]).join("");
+				expect(written).toContain("Name");
+				expect(written).toContain("State");
+				expect(written).toContain("Live work");
+				expect(written).toContain("started");
+			});
+
+			it("no --format still emits the JSON envelope", async () => {
+				mockGetProjects.mockResolvedValue([
+					{ id: "s1", name: "Live work", state: "started" },
+				]);
+				const program = createCollidingProgram();
+				setupProjectsCommands(program);
+				await runCommand(program, ["projects", "list"]);
+
+				expect(mockOutputSuccess).toHaveBeenCalledWith({
+					data: [{ id: "s1", name: "Live work", state: "started" }],
+					meta: { count: 1 },
+				});
 			});
 		});
 	});

@@ -100,7 +100,9 @@ program
 	.option("--jq <filter>", "apply a jq filter to the JSON output")
 	.option(
 		"--fields <fields>",
-		"filter output to specific fields (comma-separated). Unresolved fields are " +
+		"filter output to specific fields (comma-separated). Dot-paths resolve nested " +
+			"values; the column aliases status (state.name) and updated (updatedAt) " +
+			"resolve too. Unresolved fields are " +
 			"emitted as null plus a `fields_unresolved:` warning — in the JSON " +
 			"envelope's `_warnings`, or on stderr when output is a bare array (with --raw)",
 	)
