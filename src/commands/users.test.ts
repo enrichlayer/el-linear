@@ -6,7 +6,8 @@ import {
 } from "../__tests__/test-helpers.js";
 
 const mockGetUsers = vi.fn().mockResolvedValue({ users: [] });
-const mockService = { getUsers: mockGetUsers };
+const mockGetUser = vi.fn();
+const mockService = { getUsers: mockGetUsers, getUser: mockGetUser };
 const mockCreateLinearService = vi.fn().mockReturnValue(mockService);
 const mockOutputSuccess = vi.fn();
 
@@ -75,6 +76,31 @@ describe("users commands", () => {
 				data: usersData,
 				meta: { count: 1 },
 			});
+		});
+	});
+
+	// DEV-5612: single-user lookup, the natural complement to `users list`.
+	describe("users read", () => {
+		it("resolves the id and outputs the single user", async () => {
+			const user = { id: "u1", displayName: "Alice", email: "a@x.com" };
+			mockGetUser.mockResolvedValue(user);
+
+			const program = createTestProgram();
+			setupUsersCommands(program);
+			await runCommand(program, ["users", "read", "alice@x.com"]);
+
+			expect(mockGetUser).toHaveBeenCalledWith("alice@x.com");
+			expect(mockOutputSuccess).toHaveBeenCalledWith({ data: user });
+		});
+
+		it("propagates a not-found error", async () => {
+			mockGetUser.mockRejectedValue(new Error('User "nobody" not found.'));
+
+			const program = createTestProgram();
+			setupUsersCommands(program);
+			await runCommand(program, ["users", "read", "nobody"]);
+
+			expect(process.exit).toHaveBeenCalledWith(1);
 		});
 	});
 });

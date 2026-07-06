@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mockTeams = vi.fn();
 const mockTeam = vi.fn();
 const mockUsers = vi.fn();
+const mockUser = vi.fn();
 const mockIssues = vi.fn();
 const mockWorkflowStates = vi.fn();
 const mockCycles = vi.fn();
@@ -17,6 +18,7 @@ vi.mock("@linear/sdk", () => ({
 		teams = mockTeams;
 		team = mockTeam;
 		users = mockUsers;
+		user = mockUser;
 		issues = mockIssues;
 		workflowStates = mockWorkflowStates;
 		cycles = mockCycles;
@@ -421,6 +423,93 @@ describe("LinearService", () => {
 			const result = await service.getUsers();
 			expect(result[0].name).toBe("Alice");
 			expect(result[1].name).toBe("Zara");
+		});
+	});
+
+	// DEV-5612: single-user lookup by UUID, email, or name — the complement
+	// to getUsers/`users list`.
+	describe("getUser", () => {
+		it("resolves a bare UUID directly, then fetches that user", async () => {
+			mockUser.mockResolvedValue({
+				id: "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+				name: "Alice",
+				displayName: "Alice",
+				email: "a@test.com",
+				active: true,
+			});
+			const service = new LinearService({ apiKey: "token" });
+			const result = await service.getUser(
+				"f47ac10b-58cc-4372-a567-0e02b2c3d479",
+			);
+			expect(mockUsers).not.toHaveBeenCalled();
+			expect(mockUser).toHaveBeenCalledWith(
+				"f47ac10b-58cc-4372-a567-0e02b2c3d479",
+			);
+			expect(result).toEqual({
+				id: "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+				name: "Alice",
+				displayName: "Alice",
+				email: "a@test.com",
+				active: true,
+			});
+		});
+
+		it("resolves by email, then fetches that user", async () => {
+			mockUsers.mockResolvedValue({
+				nodes: [{ id: "alice-id", displayName: "Alice", email: "a@test.com" }],
+			});
+			mockUser.mockResolvedValue({
+				id: "alice-id",
+				name: "Alice",
+				displayName: "Alice",
+				email: "a@test.com",
+				active: true,
+			});
+			const service = new LinearService({ apiKey: "token" });
+			const result = await service.getUser("a@test.com");
+			expect(mockUsers).toHaveBeenCalledWith(
+				expect.objectContaining({
+					filter: { email: { eq: "a@test.com" } },
+				}),
+			);
+			expect(mockUser).toHaveBeenCalledWith("alice-id");
+			expect(result.id).toBe("alice-id");
+		});
+
+		it("resolves by unambiguous display name", async () => {
+			mockUsers.mockResolvedValueOnce({
+				nodes: [{ id: "alice-id", displayName: "Alice", email: "a@test.com" }],
+			});
+			mockUser.mockResolvedValue({
+				id: "alice-id",
+				name: "Alice",
+				displayName: "Alice",
+				email: "a@test.com",
+				active: true,
+			});
+			const service = new LinearService({ apiKey: "token" });
+			const result = await service.getUser("Alice");
+			expect(mockUser).toHaveBeenCalledWith("alice-id");
+			expect(result.id).toBe("alice-id");
+		});
+
+		it("throws a not-found error when nothing matches", async () => {
+			mockUsers.mockResolvedValue({ nodes: [] });
+			const service = new LinearService({ apiKey: "token" });
+			await expect(service.getUser("nobody")).rejects.toThrow(/not found/i);
+			expect(mockUser).not.toHaveBeenCalled();
+		});
+
+		it("throws a multiple-matches error on an ambiguous name", async () => {
+			mockUsers.mockResolvedValueOnce({
+				nodes: [
+					{ id: "a1", displayName: "Alex", email: "a1@test.com" },
+					{ id: "a2", displayName: "Alex", email: "a2@test.com" },
+				],
+			});
+			const service = new LinearService({ apiKey: "token" });
+			await expect(service.getUser("Alex")).rejects.toThrow(/multiple/i);
+			expect(mockUser).not.toHaveBeenCalled();
 		});
 	});
 });

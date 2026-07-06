@@ -40,6 +40,7 @@ import {
 } from "../config/paths.js";
 import { outputSuccess, outputWarning } from "../utils/output.js";
 import { runFullWizard } from "./init/index.js";
+import { registerMembersCommands } from "./profile/members.js";
 import { registerMigrateLegacy } from "./profile/migrate-legacy.js";
 
 export function setupProfileCommands(program: Command): void {
@@ -110,6 +111,10 @@ export function setupProfileCommands(program: Command): void {
 	// self-contained and unit-testable without dragging in the full
 	// profile-management surface.
 	registerMigrateLegacy(profile);
+
+	// `el-linear profile members {list,clear,set}` — DEV-5612: direct,
+	// non-interactive alias/handle edits without hand-editing config.json.
+	registerMembersCommands(profile);
 }
 
 // ---- Implementations ----------------------------------------------------

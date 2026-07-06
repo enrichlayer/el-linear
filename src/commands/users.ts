@@ -13,6 +13,22 @@ export function setupUsersCommands(program: Command): void {
 	users.action(() => users.help());
 
 	users
+		.command("read <id>")
+		.description(
+			"Look up a single user by UUID, email, or name (resolves ambiguity the same way as other --assignee-style lookups).",
+		)
+		.action(
+			handleAsyncCommand(
+				async (id: string, _options: OptionValues, command: Command) => {
+					const rootOpts = getRootOpts(command);
+					const service = await createLinearService(rootOpts);
+					const result = await service.getUser(id);
+					outputSuccess({ data: result });
+				},
+			),
+		);
+
+	users
 		.command("list")
 		.description("List all users")
 		.option("--active", "Only show active users")

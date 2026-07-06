@@ -468,6 +468,40 @@ describe("runAliasesStep", () => {
 		expect(vi.mocked(select)).toHaveBeenCalledTimes(1);
 	});
 
+	// DEV-5612: the Linear system actor (`@linear.linear.app` email) must never
+	// be offered as an alias target — a user mistook it for themselves and
+	// typed their own nicknames as its aliases.
+	it("skips the Linear system actor entirely — not offered as an alias target", async () => {
+		mockRawRequest.mockResolvedValueOnce({
+			users: {
+				pageInfo: { endCursor: null, hasNextPage: false },
+				nodes: [
+					{
+						id: "bot-id",
+						name: "Linear",
+						email: "linear-abc123@linear.linear.app",
+						displayName: "linear",
+						active: true,
+					},
+					{
+						id: "user-alice",
+						name: "Alice Anderson",
+						email: "alice@x.com",
+						displayName: "Alice Anderson",
+						active: true,
+					},
+				],
+			},
+		});
+		vi.mocked(confirm).mockResolvedValueOnce(true); // proceed
+		vi.mocked(select).mockResolvedValueOnce("keep"); // only Alice is prompted
+
+		const result = await runAliasesStep("token", {});
+		expect(result.size).toBe(0);
+		// Only one select() call — the bot never reached promptForUser.
+		expect(vi.mocked(select)).toHaveBeenCalledTimes(1);
+	});
+
 	it("paginates user fetch across multiple pages", async () => {
 		mockRawRequest
 			.mockResolvedValueOnce({
