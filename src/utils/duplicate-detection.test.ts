@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { LinearIssue } from "../types/linear.js";
 import {
 	DEFAULT_DUPLICATE_THRESHOLD,
+	DEFAULT_HARD_BLOCK_THRESHOLD,
 	formatDuplicateBlock,
 	jaccardSimilarity,
 	scoreDuplicateCandidates,
@@ -265,5 +266,36 @@ describe("formatDuplicateBlock", () => {
 		]);
 		expect(one).toContain("Possible duplicate issue found");
 		expect(two).toContain("Possible duplicate issues found");
+	});
+
+	// DEV-5590: the advisory-tier message never blocks, so it must not say
+	// "re-run" (there's nothing to re-run — creation already proceeded).
+	it("defaults to block mode", () => {
+		const block = formatDuplicateBlock([
+			{ identifier: "A", title: "t", state: "s", assignee: "a", score: 0.7 },
+		]);
+		expect(block).toContain("re-run with --allow-duplicate to proceed");
+	});
+
+	it("advisory mode explains creation already proceeded", () => {
+		const block = formatDuplicateBlock(
+			[{ identifier: "A", title: "t", state: "s", assignee: "a", score: 0.4 }],
+			"advisory",
+		);
+		expect(block).toContain("advisory only");
+		expect(block).toContain("creation is proceeding");
+		expect(block).not.toContain("re-run with --allow-duplicate to proceed");
+		expect(block).toContain("--allow-duplicate");
+	});
+});
+
+// DEV-5590: the hard-block threshold gates whether a fire is advisory-only
+// (proceeds) or a real stop. Pinned above the detection floor and above the
+// entire observed override-rate corpus (see the constant's docstring).
+describe("DEFAULT_HARD_BLOCK_THRESHOLD", () => {
+	it("sits strictly above the detection threshold", () => {
+		expect(DEFAULT_HARD_BLOCK_THRESHOLD).toBeGreaterThan(
+			DEFAULT_DUPLICATE_THRESHOLD,
+		);
 	});
 });

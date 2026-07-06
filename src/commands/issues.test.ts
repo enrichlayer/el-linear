@@ -899,10 +899,22 @@ describe("issues commands", () => {
 			state: { id: "s", name: "Todo" },
 			assignee: { id: "u", name: "Yury" },
 		};
+		// DEV-5590: near-verbatim title overlap (Jaccard ~0.86, well above the
+		// 0.6 hard-block threshold) — the tier that still hard-blocks.
+		const hardBlockCandidate = {
+			id: "hard-dup-id",
+			identifier: "DEV-9001",
+			title:
+				"Rewrite the onboarding email sequence for new enterprise customers",
+			state: { id: "s", name: "Todo" },
+			assignee: { id: "u", name: "Yury" },
+		};
+		const hardBlockTitle =
+			"Rewrite the onboarding email sequence for new customers";
 
-		it("blocks creation when a high-similarity issue exists", async () => {
+		it("hard-blocks creation when a near-verbatim issue exists (DEV-5590)", async () => {
 			mockLoadConfig.mockReturnValue(enabledConfig);
-			mockSearchIssues.mockResolvedValue([dupeCandidate]);
+			mockSearchIssues.mockResolvedValue([hardBlockCandidate]);
 			mockCreateIssue.mockResolvedValue({ id: "x" });
 
 			const program = createTestProgram();
@@ -910,7 +922,7 @@ describe("issues commands", () => {
 			await runCommand(program, [
 				"issues",
 				"create",
-				"Migrate remaining scripts/*.mjs to TypeScript (52 files)",
+				hardBlockTitle,
 				...validArgs,
 			]);
 
@@ -922,7 +934,7 @@ describe("issues commands", () => {
 			expect(mockCreateIssue).not.toHaveBeenCalled();
 			expect(process.exit).toHaveBeenCalledWith(1);
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
-				expect.stringContaining("DEV-4818"),
+				expect.stringContaining("DEV-9001"),
 			);
 			// DEV-4834: the blocked decision is recorded for override-rate telemetry.
 			expect(mockEmitGateEvent).toHaveBeenCalledWith(
@@ -938,7 +950,7 @@ describe("issues commands", () => {
 
 		it("--allow-duplicate runs the gate, records an override, and creates", async () => {
 			mockLoadConfig.mockReturnValue(enabledConfig);
-			mockSearchIssues.mockResolvedValue([dupeCandidate]);
+			mockSearchIssues.mockResolvedValue([hardBlockCandidate]);
 			mockCreateIssue.mockResolvedValue({ id: "x", identifier: "DEV-999" });
 
 			const program = createTestProgram();
@@ -946,7 +958,7 @@ describe("issues commands", () => {
 			await runCommand(program, [
 				"issues",
 				"create",
-				"Migrate remaining scripts/*.mjs to TypeScript (52 files)",
+				hardBlockTitle,
 				...validArgs,
 				"--allow-duplicate",
 			]);
@@ -963,6 +975,45 @@ describe("issues commands", () => {
 				}),
 			);
 			expect(mockCreateIssue).toHaveBeenCalled();
+		});
+
+		// DEV-5590: below the hard-block threshold (0.6) but at/above the
+		// detection floor (0.35) — the real DEV-4816<->DEV-4818 pair (Jaccard
+		// 0.40) that originally motivated the gate. It now surfaces as an
+		// advisory warning instead of a hard stop: creation proceeds, and the
+		// fire is recorded as `advisory` (excluded from the override-rate
+		// metric a plain `overridden` would have counted against).
+		it("fires below the hard-block threshold as advisory-only and still creates", async () => {
+			mockLoadConfig.mockReturnValue(enabledConfig);
+			mockSearchIssues.mockResolvedValue([dupeCandidate]);
+			mockCreateIssue.mockResolvedValue({ id: "x", identifier: "DEV-999" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Migrate remaining scripts/*.mjs to TypeScript (52 files)",
+				...validArgs,
+			]);
+
+			expect(mockCreateIssue).toHaveBeenCalled();
+			expect(process.exit).not.toHaveBeenCalledWith(1);
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringContaining("DEV-4818"),
+			);
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringContaining("advisory only"),
+			);
+			expect(mockEmitGateEvent).toHaveBeenCalledWith(
+				"el-linear",
+				"issues create",
+				expect.objectContaining({
+					gate: "issues-create-dup",
+					outcome: "advisory",
+					candidateCount: 1,
+				}),
+			);
 		});
 
 		it("--allow-duplicate with no real match records nothing and creates", async () => {

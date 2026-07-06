@@ -1,21 +1,36 @@
 # Gate telemetry (optional, opt-in)
 
 `el-linear issues create` runs a **duplicate-detection gate**: before creating
-an issue it searches for a similar existing one and blocks (listing the
-candidates) when the title overlap crosses a threshold. `--allow-duplicate`
-proceeds anyway. See `config.validation.duplicateThreshold` in
-[configuration.md](./configuration.md).
+an issue it searches for a similar existing one and scores the title overlap.
+The gate is two-tier (DEV-5590):
 
-To let you tell whether that gate is **noisy** — firing on too many legitimate
-issues — el-linear can record each decision to a small local file. The headline
-metric is the **override-rate**:
+- At/above `config.validation.duplicateThreshold` (detection floor, default
+  0.35) but below `config.validation.duplicateHardBlockThreshold` (hard-block
+  floor, default 0.6): **advisory** — the candidates are printed as a warning,
+  but creation proceeds. Nothing to override.
+- At/above the hard-block floor: **hard block** — creation refuses (listing
+  the candidates) unless `--allow-duplicate` is passed.
+
+See both thresholds in [configuration.md](./configuration.md).
+
+Why two tiers: a single low threshold measured a 52.2% override rate in real
+usage — score alone didn't reliably separate genuine duplicates from
+legitimate distinct issues, so forcing a stop on every fire was wrong about as
+often as it was right. See `DEFAULT_HARD_BLOCK_THRESHOLD`'s docstring in
+`src/utils/duplicate-detection.ts` for the analysis.
+
+To let you tell whether the hard-block tier is still **noisy** — stopping on
+too many legitimate issues — el-linear can record each decision to a small
+local file. The headline metric is the **override-rate**:
 
 ```
 override-rate = overridden / (blocked + overridden)
 ```
 
 Every `--allow-duplicate` is you telling the gate it was wrong; a high
-override-rate means the threshold should be retuned.
+override-rate means the hard-block threshold should be retuned. Advisory fires
+are recorded too (`outcome: "advisory"`) but excluded from this metric — they
+never forced a stop, so there's nothing to override.
 
 ## This is off by default
 
@@ -60,7 +75,7 @@ Each gate decision appends one JSON line to `gate-events.jsonl`:
 |-------|---------|
 | `ts` | ISO-8601 timestamp of the decision. |
 | `metadata.gate` | Stable gate id (`issues-create-dup`). |
-| `metadata.outcome` | `blocked` (gate stopped creation) or `overridden` (`--allow-duplicate` proceeded past a would-fire). |
+| `metadata.outcome` | `blocked` (hard-block tier, gate stopped creation), `overridden` (`--allow-duplicate` proceeded past a hard-block would-fire), or `advisory` (below the hard-block threshold — printed, never blocked; DEV-5590). `fail-open` also appears for other gates that degrade rather than block on infra trouble. |
 | `metadata.top_score` | Highest candidate similarity (0–1) that triggered the gate. |
 | `metadata.candidate_count` | How many candidates crossed the threshold. |
 

@@ -36,6 +36,45 @@ import type { LinearIssue } from "../types/linear.js";
 export const DEFAULT_DUPLICATE_THRESHOLD = 0.35;
 
 /**
+ * Threshold above which a candidate is a HARD block (creation refuses without
+ * `--allow-duplicate`). Below this (but at/above {@link DEFAULT_DUPLICATE_THRESHOLD})
+ * a candidate is ADVISORY ONLY — printed, but creation proceeds — DEV-5590.
+ *
+ * Why a second threshold instead of just retuning the first: `el-telemetry
+ * gates` measured a 52.2% override rate on the single-threshold (0.35) gate
+ * over 144 real fires. Analyzing the real ledger (`top_score` + `outcome` per
+ * fire, no title text is ever recorded — el-linear collects nothing by
+ * default) falsifies the obvious fix of "just raise the threshold": mean/
+ * median `top_score` for `blocked` fires (0.414 / 0.40) and `overridden`
+ * fires (0.421 / 0.40) are statistically indistinguishable, and simulating
+ * every cutoff from 0.35 to 0.56 against the real corpus held the override
+ * rate flat at 52–63% — *increasing* at some higher cutoffs. Score alone does
+ * not separate genuine duplicates from legitimate distinct issues in this
+ * workspace's real usage; no single threshold in the observed range is
+ * better than a coin flip.
+ *
+ * Given that, blocking hard on a weak signal is worse than not blocking at
+ * all: over half the stops were wrong. 0.6 sits above the entire analyzed
+ * range (only 1/144 historical fires scored this high) and is reserved for
+ * near-verbatim title overlap — at Jaccard >= 0.6, more than 6 of every 10
+ * combined salient tokens are shared, which is a qualitatively different
+ * (and much rarer) signal than the "shares a few topical words" fires that
+ * dominate the false-positive population. This preserves a real backstop for
+ * the obvious copy-paste case while no longer forcing a stop-and-override
+ * ritual on the ambiguous 0.35-0.6 band, where the data shows we're wrong
+ * about as often as we're right.
+ *
+ * Caveat for future tuning: this corpus has no title text, so it cannot
+ * validate a *tokenization* fix (further stopwording per DEV-4830) — only a
+ * threshold-shape fix. A real precision improvement (distinguishing WHICH
+ * 0.35-0.6 fires are genuine) needs the title corpus, which is intentionally
+ * not collected. Revisit if `el-telemetry gates` after this ships still shows
+ * an unhealthy override rate on the >=0.6 hard-block tier specifically.
+ * Overridable via `config.validation.duplicateHardBlockThreshold`.
+ */
+export const DEFAULT_HARD_BLOCK_THRESHOLD = 0.6;
+
+/**
  * Function words and issue-boilerplate tokens that carry no topical signal.
  * Dropping them keeps the Jaccard score driven by the distinctive nouns
  * (`scripts`, `mjs`, `typescript`) rather than by glue words every title
@@ -202,18 +241,36 @@ export function scoreDuplicateCandidates(
 /**
  * Render the human/agent-facing block listing duplicate candidates, matching
  * the shape of the validation "Suggestions:" blocks (id · title · state ·
- * assignee). Used as the body of the thrown error when the gate fires.
+ * assignee).
+ *
+ * `mode: "block"` (default) is the body of the thrown error when the gate
+ * hard-blocks (score >= the hard-block threshold — DEV-5590). `mode:
+ * "advisory"` is printed as a warning when the score is below the hard-block
+ * threshold: creation already proceeded, so the trailing hint differs (no
+ * "re-run" — there's nothing to re-run).
  */
-export function formatDuplicateBlock(candidates: DuplicateCandidate[]): string {
+export function formatDuplicateBlock(
+	candidates: DuplicateCandidate[],
+	mode: "block" | "advisory" = "block",
+): string {
 	const lines = candidates.map(
 		(c) =>
 			`    ${c.identifier} · ${c.title} · ${c.state} · ${c.assignee}  (similarity ${c.score})`,
 	);
-	return (
+	const header =
 		`Possible duplicate issue${candidates.length > 1 ? "s" : ""} found ` +
 		"(by title-keyword overlap):\n" +
 		`${lines.join("\n")}\n\n` +
-		"  If one of these is the same work, comment on it instead of creating a new issue.\n" +
+		"  If one of these is the same work, comment on it instead of creating a new issue.\n";
+	if (mode === "advisory") {
+		return (
+			header +
+			"  This is advisory only (DEV-5590) — creation is proceeding. Pass " +
+			"--allow-duplicate to silence this notice next time."
+		);
+	}
+	return (
+		header +
 		"  If this is genuinely distinct, re-run with --allow-duplicate to proceed " +
 		"(and consider --related-to to link the related issue)."
 	);
