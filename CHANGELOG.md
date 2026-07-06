@@ -4,6 +4,14 @@ All notable changes to `@enrichlayer/el-linear` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.37.2](https://github.com/enrichlayer/el-linear/compare/v1.37.1...v1.37.2) (2026-07-06)
+
+
+### Bug Fixes
+
+* **init:** skip the Linear system actor in the alias wizard + add direct member edit/clear and users read (DEV-5612) ([#228](https://github.com/enrichlayer/el-linear/issues/228)) ([ff98492](https://github.com/enrichlayer/el-linear/commit/ff984920b77e8305475a0c16050b1db70860c9a9))
+* **issues:** make the duplicate-detection gate two-tier to cut the override rate (DEV-5590) ([#227](https://github.com/enrichlayer/el-linear/issues/227)) ([0c506a4](https://github.com/enrichlayer/el-linear/commit/0c506a41e2bb55868d2f4b83741228229b5f48bf))
+
 ## [1.37.1](https://github.com/enrichlayer/el-linear/compare/v1.37.0...v1.37.1) (2026-07-06)
 
 
