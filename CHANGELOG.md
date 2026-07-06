@@ -4,6 +4,14 @@ All notable changes to `@enrichlayer/el-linear` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.37.1](https://github.com/enrichlayer/el-linear/compare/v1.37.0...v1.37.1) (2026-07-06)
+
+
+### Bug Fixes
+
+* honor --format table/csv with --fields and resolve status/updated aliases on list paths (DEV-5376) ([#224](https://github.com/enrichlayer/el-linear/issues/224)) ([a479985](https://github.com/enrichlayer/el-linear/commit/a479985ab35f93abbeb3df56a99a2c517a59e69f))
+* scope issues list --team through Team.issues so the team filter survives pagination (DEV-5578) ([#222](https://github.com/enrichlayer/el-linear/issues/222)) ([eeffa3f](https://github.com/enrichlayer/el-linear/commit/eeffa3f67c26255962445cc8602e09099c69fde2))
+
 ## [1.37.0](https://github.com/enrichlayer/el-linear/compare/v1.36.0...v1.37.0) (2026-07-03)
 
 
