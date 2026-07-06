@@ -167,7 +167,17 @@ export function profilePaths(name: string): ProfilePaths {
 	};
 }
 
-function readActiveProfileMarker(fsImpl: ProfileFsOps): string | null {
+/**
+ * Read the raw on-disk marker content, bypassing the `--profile`/
+ * `EL_LINEAR_PROFILE` precedence layers `resolveActiveProfile` applies.
+ * Exported (DEV-5610) so `profile use` can detect whether *the file itself*
+ * is about to change, independent of any per-invocation override that might
+ * otherwise make `resolveActiveProfile().name` report a different "previous"
+ * value than what's actually on disk.
+ */
+export function readActiveProfileMarker(
+	fsImpl: ProfileFsOps = DEFAULT_FS_OPS,
+): string | null {
 	if (!fsImpl.existsSync(ACTIVE_PROFILE_FILE)) return null;
 	try {
 		const value = fsImpl.readFileSync(ACTIVE_PROFILE_FILE).toString().trim();

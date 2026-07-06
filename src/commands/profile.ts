@@ -33,6 +33,7 @@ import {
 	isSafeProfileName as isSafeName,
 	PROFILES_DIR,
 	profilePaths,
+	readActiveProfileMarker,
 	resolveActiveProfile,
 	setActiveProfileForSession,
 	TOKEN_PATH,
@@ -180,7 +181,15 @@ export async function runProfileUse(name: string): Promise<void> {
 	// redirecting some other concurrent session/tool to a different
 	// workspace. `--profile`/$EL_LINEAR_PROFILE remain the correct,
 	// non-mutating choice for automation and concurrent sessions.
-	const previous = resolveActiveProfile().name;
+	//
+	// Read the raw marker (readActiveProfileMarker), not
+	// resolveActiveProfile().name — the latter resolves through the
+	// --profile/$EL_LINEAR_PROFILE precedence layers too, so a concurrent
+	// override in place while `profile use` runs would make it report the
+	// wrong "previous" value (a false-positive warning when the marker
+	// didn't actually change, or a false-negative when it did) — cycle-1
+	// review finding on PR #229.
+	const previous = readActiveProfileMarker();
 	await fsp.mkdir(CONFIG_DIR, { recursive: true, mode: 0o700 });
 	await fsp.writeFile(ACTIVE_PROFILE_FILE, `${trimmed}\n`, { mode: 0o644 });
 	if (previous !== trimmed) {
