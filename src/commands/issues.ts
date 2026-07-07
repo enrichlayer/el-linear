@@ -322,6 +322,10 @@ async function handleListIssues(
 	const { issuesService } = await createIssuesService(rootOpts);
 
 	const explicitStatus = options.status ? splitList(options.status) : undefined;
+	const query =
+		typeof options.search === "string" && options.search.length > 0
+			? options.search
+			: undefined;
 	// DEV-4478: default-exclude terminal states (Done/Canceled) unless the
 	// user passes --include-closed OR explicit --status. Explicit status
 	// wins because the user already named the workflow states they want.
@@ -335,7 +339,8 @@ async function handleListIssues(
 		options.delegate ||
 		options.project ||
 		options.project === false ||
-		options.priority;
+		options.priority ||
+		query;
 	const limit = parsePositiveInt(options.limit, "--limit");
 	// Route through searchIssues whenever the CLI needs to control the GraphQL
 	// state filter: any explicit filter, the default `excludeTerminalStates`,
@@ -346,6 +351,7 @@ async function handleListIssues(
 	// (DEV-4478 cycle-1.)
 	if (hasOtherFilters || excludeTerminalStates || options.includeClosed) {
 		const searchArgs: SearchIssueArgs = {
+			query,
 			teamId: options.team ? resolveTeam(options.team) : undefined,
 			assigneeId: options.assignee
 				? await resolveAssignee(options.assignee, rootOpts)
@@ -372,9 +378,16 @@ async function handleListIssues(
 				"excluded terminal states (Done / Canceled) by default; pass --include-closed to include them",
 			);
 		}
+		if (query) {
+			const relationPrompt = buildRelationCandidatePrompt(result);
+			if (relationPrompt) {
+				outputWarning(relationPrompt);
+			}
+		}
 		warnIfTruncated(result.length, limit);
 		outputIssues(result, command, {
 			team: options.team,
+			...(query ? { query } : {}),
 		});
 	} else {
 		const result = sortIssues(
@@ -1681,6 +1694,10 @@ export function setupIssuesCommands(program: Command): void {
 		.command("list")
 		.description("List issues.")
 		.option("-l, --limit <number>", "limit results", "25")
+		.option(
+			"--search <query>",
+			"free-text query; aliases `issues search <query>` while preserving list filters and output formats",
+		)
 		.option("--team <team>", "filter by team key (EL: resolves names)")
 		.option("--assignee <assignee>", "filter by assignee (name, alias, or ID)")
 		.option(

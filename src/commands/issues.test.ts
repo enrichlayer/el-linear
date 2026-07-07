@@ -262,6 +262,49 @@ describe("issues commands", () => {
 			);
 		});
 
+		it("routes --search through searchIssues while preserving list filters", async () => {
+			mockSearchIssues.mockResolvedValue([]);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"list",
+				"--search",
+				"el-hook",
+				"--status",
+				"Todo,Triage",
+				"--limit",
+				"50",
+			]);
+
+			expect(mockSearchIssues).toHaveBeenCalledWith(
+				expect.objectContaining({
+					query: "el-hook",
+					status: ["Todo", "Triage"],
+					excludeTerminalStates: false,
+					limit: 50,
+				}),
+			);
+			expect(mockGetIssues).not.toHaveBeenCalled();
+			expect(mockOutputSuccess).toHaveBeenCalledWith({
+				data: [],
+				meta: { count: 0, query: "el-hook" },
+			});
+		});
+
+		it("documents --search on issues list help", () => {
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			const issuesCommand = program.commands.find(
+				(cmd) => cmd.name() === "issues",
+			);
+			const listCommand = issuesCommand?.commands.find(
+				(cmd) => cmd.name() === "list",
+			);
+			expect(listCommand?.helpInformation()).toContain("--search <query>");
+		});
+
 		it("filters results by --team", async () => {
 			const filteredIssues = [
 				{ id: "1", team: { id: "team-id-DEV", key: "DEV" } },
@@ -418,6 +461,31 @@ describe("issues commands", () => {
 					"identifier,status,updated",
 				]);
 
+				expect(mockOutputSuccess).not.toHaveBeenCalled();
+				const written = stdoutSpy.mock.calls.map((c) => c[0]).join("");
+				expect(written).toContain("Status");
+				expect(written).toContain("In Progress");
+				expect(written).toContain("2026-07-02");
+			});
+
+			it("issues list --search --format table --fields renders the table through list output", async () => {
+				mockSearchIssues.mockResolvedValue([issueFixture]);
+				const program = createCollidingProgram();
+				setupIssuesCommands(program);
+				await runCommand(program, [
+					"issues",
+					"list",
+					"--search",
+					"thing",
+					"--format",
+					"table",
+					"--fields",
+					"identifier,status,updated",
+				]);
+
+				expect(mockSearchIssues).toHaveBeenCalledWith(
+					expect.objectContaining({ query: "thing" }),
+				);
 				expect(mockOutputSuccess).not.toHaveBeenCalled();
 				const written = stdoutSpy.mock.calls.map((c) => c[0]).join("");
 				expect(written).toContain("Status");
