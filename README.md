@@ -277,8 +277,9 @@ el-linear can record each gate's fire/override decision to a local JSONL file so
 you can measure its **override-rate** and tell whether it's too aggressive. It is
 **off by default** and writes nothing unless you opt in (e.g.
 `export EL_TELEMETRY_DIR=<path>`); there is no server or database, and
-`EL_TELEMETRY_DISABLED=1` forces it off. Full opt-in rules, the event schema, and
-a `jq` reader are in [docs/telemetry.md](./docs/telemetry.md).
+`EL_TELEMETRY_DISABLED=1` forces it off. The active ledger rotates to one `.old`
+backup before append when it exceeds 2 MiB. Full opt-in rules, the event schema,
+and a `jq` reader are in [docs/telemetry.md](./docs/telemetry.md).
 
 ### Networking (IPv4 preference)
 

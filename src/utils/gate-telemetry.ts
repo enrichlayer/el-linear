@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { appendFile, mkdir } from "node:fs/promises";
+import { appendFile, mkdir, rename, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -21,6 +21,9 @@ import { dirname, join } from "node:path";
  * `GATE_EVENTS_PATH`; keep the two in sync. Format + reader are documented in
  * `docs/telemetry.md`.
  */
+
+export const GATE_LEDGER_MAX_BYTES = 2 * 1024 * 1024;
+export const GATE_LEDGER_BACKUP_SUFFIX = ".old";
 
 /** The default ledger directory when `EL_TELEMETRY_DIR` is not set. */
 function defaultTelemetryDir(): string {
@@ -78,6 +81,26 @@ function gateLedgerIfEnabled(): string | null {
 	});
 }
 
+async function rotateGateLedgerIfOverLimit(path: string): Promise<void> {
+	let size = 0;
+	try {
+		const s = await stat(path);
+		if (!s.isFile()) return;
+		size = s.size;
+	} catch {
+		return;
+	}
+	if (size <= GATE_LEDGER_MAX_BYTES) return;
+
+	try {
+		const backupPath = `${path}${GATE_LEDGER_BACKUP_SUFFIX}`;
+		await rm(backupPath, { force: true });
+		await rename(path, backupPath);
+	} catch {
+		// best-effort — telemetry never blocks issue creation
+	}
+}
+
 export interface GateEvent {
 	/** Stable gate id, e.g. `issues-create-dup`. */
 	gate: string;
@@ -117,6 +140,7 @@ export async function emitGateEvent(
 	}
 	try {
 		await mkdir(dirname(path), { recursive: true });
+		await rotateGateLedgerIfOverLimit(path);
 		const record = {
 			ts: new Date().toISOString(),
 			kind: "gate",
