@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -690,6 +690,65 @@ describe("issues commands", () => {
 					labelIds: ["label-uuid-1", "label-uuid-2"],
 				}),
 			);
+		});
+
+		it("normalizes literal newline escapes in inline descriptions", async () => {
+			mockCreateIssue.mockResolvedValue({
+				id: "new-issue-id",
+				identifier: "DEV-999",
+			});
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Task",
+				"--team",
+				"DEV",
+				"--description",
+				"First line\\nSecond line\\r\\nThird line",
+				...requiredArgs,
+			]);
+
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({
+					description: "First line\nSecond line\nThird line",
+				}),
+			);
+		});
+
+		it("leaves description-file contents unchanged on create", async () => {
+			mockCreateIssue.mockResolvedValue({
+				id: "new-issue-id",
+				identifier: "DEV-999",
+			});
+			const tempDir = mkdtempSync(join(tmpdir(), "issues-test-"));
+			const filePath = join(tempDir, "desc.md");
+			try {
+				writeFileSync(filePath, "Literal \\n should remain literal");
+
+				const program = createTestProgram();
+				setupIssuesCommands(program);
+				await runCommand(program, [
+					"issues",
+					"create",
+					"Task",
+					"--team",
+					"DEV",
+					"--description-file",
+					filePath,
+					...requiredArgs,
+				]);
+
+				expect(mockCreateIssue).toHaveBeenCalledWith(
+					expect.objectContaining({
+						description: "Literal \\n should remain literal",
+					}),
+				);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
 		});
 
 		it("inlines image attachment in description", async () => {
@@ -2212,6 +2271,80 @@ describe("issues commands", () => {
 				}),
 				expect.anything(),
 			);
+		});
+
+		it("normalizes literal newline escapes in inline update descriptions", async () => {
+			mockUpdateIssue.mockResolvedValue({ id: "uuid", identifier: "DEV-1" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"update",
+				"DEV-1",
+				"--description",
+				"First line\\nSecond line",
+			]);
+
+			expect(mockUpdateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({
+					description: "First line\nSecond line",
+				}),
+				expect.anything(),
+			);
+		});
+
+		it("normalizes literal newline escapes in appended descriptions", async () => {
+			mockUpdateIssue.mockResolvedValue({ id: "uuid", identifier: "DEV-1" });
+			mockLinearService.resolveIssueId.mockResolvedValue("issue-uuid");
+			mockGraphQLService.rawRequest.mockResolvedValueOnce({
+				issue: { description: "Existing description" },
+			});
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"update",
+				"DEV-1",
+				"--append-description",
+				"First line\\nSecond line",
+			]);
+
+			expect(mockUpdateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({
+					description: "Existing description\nFirst line\nSecond line",
+				}),
+				expect.anything(),
+			);
+		});
+
+		it("leaves description-file contents unchanged on update", async () => {
+			mockUpdateIssue.mockResolvedValue({ id: "uuid", identifier: "DEV-1" });
+			const tempDir = mkdtempSync(join(tmpdir(), "issues-test-"));
+			const filePath = join(tempDir, "desc.md");
+			try {
+				writeFileSync(filePath, "Literal \\n should remain literal");
+
+				const program = createTestProgram();
+				setupIssuesCommands(program);
+				await runCommand(program, [
+					"issues",
+					"update",
+					"DEV-1",
+					"--description-file",
+					filePath,
+				]);
+
+				expect(mockUpdateIssue).toHaveBeenCalledWith(
+					expect.objectContaining({
+						description: "Literal \\n should remain literal",
+					}),
+					expect.anything(),
+				);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
 		});
 
 		it("errors when --project-milestone and --clear-project-milestone are both used", async () => {

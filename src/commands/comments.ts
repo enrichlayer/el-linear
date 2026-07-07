@@ -25,6 +25,7 @@ import {
 	createGraphQLService,
 	type GraphQLService,
 } from "../utils/graphql-service.js";
+import { normalizeInlineTextInput } from "../utils/inline-text-input.js";
 import { extractIssueReferences } from "../utils/issue-reference-extractor.js";
 import { wrapIssueReferencesAsLinks } from "../utils/issue-reference-wrapper.js";
 import {
@@ -139,7 +140,7 @@ function readBody(options: OptionValues): string {
 		return readFileSync(options.bodyFile, "utf-8");
 	}
 	if (options.body) {
-		return options.body;
+		return normalizeInlineTextInput(options.body);
 	}
 	throw new Error("Either --body or --body-file is required");
 }

@@ -105,6 +105,27 @@ describe("comments commands", () => {
 			);
 		});
 
+		it("normalizes literal newline escapes in inline body text", async () => {
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, [
+				"comments",
+				"create",
+				"ENG-123",
+				"--body",
+				"First line\\nSecond line\\r\\nThird line",
+			]);
+
+			expect(mockRawRequest).toHaveBeenCalledWith(
+				expect.stringContaining("commentCreate"),
+				expect.objectContaining({
+					input: expect.objectContaining({
+						body: "First line\nSecond line\nThird line",
+					}),
+				}),
+			);
+		});
+
 		it("outputs result via outputSuccess", async () => {
 			const program = createTestProgram();
 			setupCommentsCommands(program);
@@ -263,7 +284,7 @@ describe("comments commands", () => {
 		it("reads body from --body-file", async () => {
 			tmpDir = mkdtempSync(join(tmpdir(), "comments-test-"));
 			const filePath = join(tmpDir, "body.md");
-			writeFileSync(filePath, "Body from file");
+			writeFileSync(filePath, "Body from file with literal \\n");
 
 			const program = createTestProgram();
 			setupCommentsCommands(program);
@@ -279,7 +300,7 @@ describe("comments commands", () => {
 				expect.stringContaining("commentCreate"),
 				expect.objectContaining({
 					input: expect.objectContaining({
-						body: "Body from file",
+						body: "Body from file with literal \\n",
 					}),
 				}),
 			);
@@ -346,7 +367,7 @@ describe("comments commands", () => {
 		it("reads body from --body-file", async () => {
 			tmpDir = mkdtempSync(join(tmpdir(), "comments-test-"));
 			const filePath = join(tmpDir, "body.md");
-			writeFileSync(filePath, "Updated from file");
+			writeFileSync(filePath, "Updated from file with literal \\n");
 
 			const program = createTestProgram();
 			setupCommentsCommands(program);
@@ -362,7 +383,28 @@ describe("comments commands", () => {
 				expect.stringContaining("commentUpdate"),
 				expect.objectContaining({
 					input: expect.objectContaining({
-						body: "Updated from file",
+						body: "Updated from file with literal \\n",
+					}),
+				}),
+			);
+		});
+
+		it("normalizes literal newline escapes in inline update body text", async () => {
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, [
+				"comments",
+				"update",
+				"comment-uuid",
+				"--body",
+				"First line\\nSecond line",
+			]);
+
+			expect(mockRawRequest).toHaveBeenCalledWith(
+				expect.stringContaining("commentUpdate"),
+				expect.objectContaining({
+					input: expect.objectContaining({
+						body: "First line\nSecond line",
 					}),
 				}),
 			);
