@@ -1,0 +1,25 @@
+name: pr-title
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Validate release-safe PR title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
+          node bin/validate-pr-title.mjs --base FETCH_HEAD

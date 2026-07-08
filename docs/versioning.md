@@ -47,6 +47,26 @@ If your `feat:` change matches the additive-enhancement rules above and you want
 
 Two paths: automatic (default) and manual (bootstrap or hotfix).
 
+### PR title guard
+
+GitHub squash merges use the PR title as the commit subject. Because
+release-please reads conventional commit subjects on `main`, CI validates PR
+titles before merge:
+
+- Every PR title must start with a Conventional Commit type.
+- PRs touching published el-linear surface (`src/`, `claude-skills/`,
+  `README.md`, `LICENSE`, `package.json`, `pnpm-lock.yaml`, or release-please
+  metadata) must use a releaseable type: `fix:`, `feat:`, or a breaking-change
+  `!` marker.
+- CI/docs/test-only PRs can use non-release conventional types such as `ci:`,
+  `docs:`, or `test:`.
+- release-please release PRs titled like `chore(main): release 1.37.3` are
+  accepted.
+
+This is intentionally deterministic: a source change titled
+`DEV-1234 add a flag` fails before merge because it would land on `main` without
+opening a release PR.
+
 ### Automatic — release-please (default)
 
 1. PR with conventional commits merges to `main`.
