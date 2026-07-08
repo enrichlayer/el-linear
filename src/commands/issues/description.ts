@@ -27,6 +27,7 @@ import {
 	autoLinkReferences,
 } from "../../utils/auto-link-references.js";
 import type { GraphQLService } from "../../utils/graphql-service.js";
+import { normalizeInlineTextInput } from "../../utils/inline-text-input.js";
 import { extractIssueReferences } from "../../utils/issue-reference-extractor.js";
 import { wrapIssueReferencesAsLinks } from "../../utils/issue-reference-wrapper.js";
 import type { LinearService } from "../../utils/linear-service.js";
@@ -74,7 +75,7 @@ export function resolveDescription(options: OptionValues): string | undefined {
 		return readDescriptionFile(options.descriptionFile as string);
 	}
 	if (hasInline) {
-		return options.description as string;
+		return normalizeInlineTextInput(options.description as string);
 	}
 	if (hasTemplate) {
 		const templates = loadConfig().descriptionTemplates ?? {};

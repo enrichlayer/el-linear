@@ -58,6 +58,7 @@ import {
 	createGraphQLService,
 	type GraphQLService,
 } from "../utils/graphql-service.js";
+import { normalizeInlineTextInput } from "../utils/inline-text-input.js";
 import { createIssuesService } from "../utils/issues-service-bootstrap.js";
 import {
 	createLinearService,
@@ -1318,6 +1319,13 @@ async function handleUpdateIssue(
 	// Resolve --description-file before validation
 	if (options.descriptionFile) {
 		options.description = readDescriptionFile(options.descriptionFile);
+	} else if (typeof options.description === "string") {
+		options.description = normalizeInlineTextInput(options.description);
+	}
+	if (typeof options.appendDescription === "string") {
+		options.appendDescription = normalizeInlineTextInput(
+			options.appendDescription,
+		);
 	}
 	validateUpdateOptions(options);
 	const rootOpts = getRootOpts(command);
