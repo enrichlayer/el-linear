@@ -866,9 +866,15 @@ describe("runDefaultsStep — every config key", () => {
 		// Capture the `validate` callback inquirer received so we can exercise
 		// it directly. Each call to `input()` is given an options bag that
 		// includes the validate function (or undefined when none is wired).
-		let validate: ((value: string) => string | true) | undefined;
+		let validate:
+			| ((value: string) => string | boolean | Promise<string | boolean>)
+			| undefined;
 		vi.mocked(input).mockImplementationOnce(
-			async (opts: { validate?: (value: string) => string | true }) => {
+			async (opts: {
+				validate?: (
+					value: string,
+				) => string | boolean | Promise<string | boolean>;
+			}) => {
 				validate = opts.validate;
 				return "3600";
 			},

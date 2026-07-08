@@ -415,7 +415,9 @@ describe("issues commands", () => {
 				]);
 
 				expect(mockOutputSuccess).not.toHaveBeenCalled();
-				const written = stdoutSpy.mock.calls.map((c) => c[0]).join("");
+				const written = stdoutSpy.mock.calls
+					.map((c: unknown[]) => c[0])
+					.join("");
 				expect(written).toContain("Status");
 				expect(written).toContain("In Progress");
 				expect(written).toContain("2026-07-02");
@@ -435,7 +437,9 @@ describe("issues commands", () => {
 				]);
 
 				expect(mockOutputSuccess).not.toHaveBeenCalled();
-				const written = stdoutSpy.mock.calls.map((c) => c[0]).join("");
+				const written = stdoutSpy.mock.calls
+					.map((c: unknown[]) => c[0])
+					.join("");
 				expect(written).toContain("ID,Status,Updated");
 				expect(written).toContain("DEV-1,In Progress,2026-07-02");
 			});
@@ -467,7 +471,9 @@ describe("issues commands", () => {
 				]);
 
 				expect(mockOutputSuccess).not.toHaveBeenCalled();
-				const written = stdoutSpy.mock.calls.map((c) => c[0]).join("");
+				const written = stdoutSpy.mock.calls
+					.map((c: unknown[]) => c[0])
+					.join("");
 				expect(written).toContain("Status");
 				expect(written).toContain("In Progress");
 				expect(written).toContain("2026-07-02");

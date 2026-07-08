@@ -5,7 +5,9 @@ const mockGetIssueById = vi.fn();
 const mockGetIssuesByRefs = vi.fn();
 const mockOutputSuccess = vi.fn();
 const mockOutputWarning = vi.fn();
-const mockDownloadLinearUploads = vi.fn((issue: unknown) => issue);
+const mockDownloadLinearUploads = vi.fn(
+	(issue: unknown, _fileService: unknown) => issue,
+);
 const mockRawRequest = vi.fn();
 
 vi.mock("../utils/graphql-issues-service.js", () => ({
@@ -30,8 +32,8 @@ vi.mock("../utils/auth.js", () => ({
 }));
 
 vi.mock("../utils/download-uploads.js", () => ({
-	downloadLinearUploads: (...args: unknown[]) =>
-		mockDownloadLinearUploads(...args),
+	downloadLinearUploads: (issue: unknown, fileService: unknown) =>
+		mockDownloadLinearUploads(issue, fileService),
 }));
 
 vi.mock("../utils/output.js", () => ({

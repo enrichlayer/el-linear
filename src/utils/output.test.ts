@@ -10,6 +10,7 @@ import {
 import {
 	type CliListEnvelope,
 	handleAsyncCommand,
+	type ListMeta,
 	outputList,
 	outputSingle,
 	outputSuccess,
@@ -161,13 +162,15 @@ describe("warning buffer", () => {
 		expect(parsed).toEqual([1, 2, 3]);
 		// The warning is NOT silently dropped: it reaches the consumer on stderr
 		// prefixed `_warnings: ` (mirrors the summary path's line convention).
-		const allStderr = stderrSpy.mock.calls.map((c) => c[0] as string).join("");
+		const allStderr = stderrSpy.mock.calls
+			.map((c: unknown[]) => c[0] as string)
+			.join("");
 		expect(allStderr).toContain("_warnings: w1");
 	});
 
 	it("accumulates multiple warnings", () => {
 		outputWarning("w1");
-		outputWarning(["w2", "w3"], "term_enforcement");
+		outputWarning(["w2", "w3"]);
 		outputSuccess({ id: "x" });
 		const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
 		expect(parsed._warnings).toEqual(["w1", "w2", "w3"]);
@@ -198,7 +201,7 @@ describe("warning buffer", () => {
 		outputSuccess({ id: "z", identifier: "DEV-1" });
 		// Collect all stdout writes
 		const allStdout = stdoutSpy.mock.calls
-			.map((call) => call[0] as string)
+			.map((call: unknown[]) => call[0] as string)
 			.join("");
 		// Must parse as a single JSON value
 		expect(() => JSON.parse(allStdout)).not.toThrow();
@@ -310,7 +313,9 @@ describe("--raw mode", () => {
 		// so stdout stays a pure array...
 		expect(Array.isArray(parsed)).toBe(true);
 		// ...and the buffered warning is emitted to stderr instead of dropped.
-		const allStderr = stderrSpy.mock.calls.map((c) => c[0] as string).join("");
+		const allStderr = stderrSpy.mock.calls
+			.map((c: unknown[]) => c[0] as string)
+			.join("");
 		expect(allStderr).toContain("_warnings: watch out");
 	});
 
@@ -332,7 +337,9 @@ describe("--raw mode", () => {
 			{ identifier: "DEV-2", ghost: null },
 		]);
 		// the naming signal survives on stderr, prefixed `_warnings: `.
-		const allStderr = stderrSpy.mock.calls.map((c) => c[0] as string).join("");
+		const allStderr = stderrSpy.mock.calls
+			.map((c: unknown[]) => c[0] as string)
+			.join("");
 		expect(allStderr).toContain("_warnings: ");
 		expect(allStderr).toContain("fields_unresolved: ghost");
 	});
@@ -595,7 +602,7 @@ describe("handleAsyncCommand", () => {
 		const wrapped = handleAsyncCommand(fn);
 		await wrapped();
 		const allStdout = stdoutSpy.mock.calls
-			.map((call) => call[0] as string)
+			.map((call: unknown[]) => call[0] as string)
 			.join("");
 		expect(() => JSON.parse(allStdout)).not.toThrow();
 		expect(JSON.parse(allStdout).error).toBe("broken");
@@ -613,7 +620,7 @@ describe("handleAsyncCommand", () => {
 		const wrapped = handleAsyncCommand(fn);
 		await wrapped();
 		const allStdout = stdoutSpy.mock.calls
-			.map((call) => call[0] as string)
+			.map((call: unknown[]) => call[0] as string)
 			.join("");
 		const message = JSON.parse(allStdout).error as string;
 		expect(message).not.toContain("lin_api_abcdefghijklmnop1234567890");
@@ -629,7 +636,7 @@ describe("handleAsyncCommand", () => {
 		const wrapped = handleAsyncCommand(fn);
 		await wrapped();
 		const allStdout = stdoutSpy.mock.calls
-			.map((call) => call[0] as string)
+			.map((call: unknown[]) => call[0] as string)
 			.join("");
 		const message = JSON.parse(allStdout).error as string;
 		expect(message).not.toContain("lin_oauth_zyxwvutsrqponmlk0987654321");
@@ -649,7 +656,7 @@ describe("handleAsyncCommand", () => {
 			const wrapped = handleAsyncCommand(fn);
 			await wrapped();
 			const allStderr = stderrSpy.mock.calls
-				.map((call) => call[0] as string)
+				.map((call: unknown[]) => call[0] as string)
 				.join("");
 			expect(allStderr).not.toContain(
 				"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij01234567890+/=",
@@ -693,7 +700,9 @@ describe("--format summary", () => {
 			assignee: { name: "Alice" },
 			url: "https://linear.app/acme/issue/DEV-1",
 		});
-		const written = stdoutSpy.mock.calls.map((c) => c[0] as string).join("");
+		const written = stdoutSpy.mock.calls
+			.map((c: unknown[]) => c[0] as string)
+			.join("");
 		expect(written).toContain("DEV-1");
 		expect(written).toContain("Fix bug");
 		expect(written).toContain("Todo");
@@ -721,7 +730,9 @@ describe("--format summary", () => {
 			],
 			meta: { count: 2 },
 		});
-		const written = stdoutSpy.mock.calls.map((c) => c[0] as string).join("");
+		const written = stdoutSpy.mock.calls
+			.map((c: unknown[]) => c[0] as string)
+			.join("");
 		expect(written).toMatch(/ID\s+TITLE\s+STATE\s+ASSIGNEE/);
 		expect(written).toContain("2 issues");
 	});
@@ -740,7 +751,9 @@ describe("--format summary", () => {
 			],
 			meta: { count: 1 },
 		});
-		const written = stdoutSpy.mock.calls.map((c) => c[0] as string).join("");
+		const written = stdoutSpy.mock.calls
+			.map((c: unknown[]) => c[0] as string)
+			.join("");
 		expect(written).toContain("DEV-1");
 		expect(written).toContain("1 issue");
 	});
@@ -748,7 +761,9 @@ describe("--format summary", () => {
 	it("falls back to generic key/value rendering for unknown shapes", async () => {
 		const { outputSuccess } = await import("./output.js");
 		outputSuccess({ foo: "bar", baz: 123 });
-		const written = stdoutSpy.mock.calls.map((c) => c[0] as string).join("");
+		const written = stdoutSpy.mock.calls
+			.map((c: unknown[]) => c[0] as string)
+			.join("");
 		expect(written).toContain("foo:");
 		expect(written).toContain("bar");
 		expect(written).toContain("baz:");
@@ -757,7 +772,9 @@ describe("--format summary", () => {
 	it("includes a trailing newline", async () => {
 		const { outputSuccess } = await import("./output.js");
 		outputSuccess({ foo: "bar" });
-		const written = stdoutSpy.mock.calls.map((c) => c[0] as string).join("");
+		const written = stdoutSpy.mock.calls
+			.map((c: unknown[]) => c[0] as string)
+			.join("");
 		expect(written.endsWith("\n")).toBe(true);
 	});
 
@@ -776,7 +793,9 @@ describe("--format summary", () => {
 			assignee: { name: "Alice" },
 			url: "https://linear.app/acme/issue/DEV-1",
 		});
-		const written = stdoutSpy.mock.calls.map((c) => c[0] as string).join("");
+		const written = stdoutSpy.mock.calls
+			.map((c: unknown[]) => c[0] as string)
+			.join("");
 		// Issue formatter renders a header line with the identifier and title.
 		// If we'd fallen through to the generic formatter, we'd see
 		// `identifier:` as a key/value line.
@@ -806,7 +825,9 @@ describe("--format summary", () => {
 			],
 			meta: { count: 2 },
 		});
-		const written = stdoutSpy.mock.calls.map((c) => c[0] as string).join("");
+		const written = stdoutSpy.mock.calls
+			.map((c: unknown[]) => c[0] as string)
+			.join("");
 		// Issue-list table header — generic fallback would dump key/value pairs.
 		// Post-DEV-4750: --fields identifier means *only* the ID column renders.
 		expect(written).toMatch(/^ID\s*$/m);
@@ -833,7 +854,9 @@ describe("--format summary", () => {
 			],
 			meta: { count: 1 },
 		});
-		const written = stdoutSpy.mock.calls.map((c) => c[0] as string).join("");
+		const written = stdoutSpy.mock.calls
+			.map((c: unknown[]) => c[0] as string)
+			.join("");
 		expect(written).toMatch(/ID\s+TITLE\s+STATE\s+ASSIGNEE\s+PROJECT/);
 		expect(written).toContain("Auth Refactor");
 	});
@@ -858,7 +881,9 @@ describe("--format summary", () => {
 			],
 			meta: { count: 1 },
 		});
-		const written = stdoutSpy.mock.calls.map((c) => c[0] as string).join("");
+		const written = stdoutSpy.mock.calls
+			.map((c: unknown[]) => c[0] as string)
+			.join("");
 		expect(written).toMatch(/NAME\s+STATE\s+PROGRESS\s+LEAD\s+TEAMS/);
 		expect(written).toContain("DEV, FE");
 	});
@@ -880,7 +905,9 @@ describe("--format summary", () => {
 			],
 			meta: { count: 1 },
 		});
-		const written = stdoutSpy.mock.calls.map((c) => c[0] as string).join("");
+		const written = stdoutSpy.mock.calls
+			.map((c: unknown[]) => c[0] as string)
+			.join("");
 		expect(written).toContain("_warnings:");
 		expect(written).toContain("fields_unprojectable");
 		expect(written).toContain("doesnotexist");
@@ -970,7 +997,7 @@ describe("outputList / outputSingle (DEV-4068 T6)", () => {
 			.toEqualTypeOf<{ id: number }[]>();
 		expectTypeOf<CliListEnvelope<{ id: number }>>().toEqualTypeOf<{
 			data: { id: number }[];
-			meta: { count: number } & Record<string, unknown>;
+			meta: ListMeta;
 		}>();
 	});
 

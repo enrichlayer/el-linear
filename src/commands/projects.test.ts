@@ -267,7 +267,9 @@ describe("projects commands", () => {
 				]);
 
 				expect(mockOutputSuccess).not.toHaveBeenCalled();
-				const written = stdoutSpy.mock.calls.map((c) => c[0]).join("");
+				const written = stdoutSpy.mock.calls
+					.map((c: unknown[]) => c[0])
+					.join("");
 				expect(written).toContain("Name");
 				expect(written).toContain("State");
 				expect(written).toContain("Live work");

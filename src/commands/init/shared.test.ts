@@ -195,6 +195,7 @@ describe("writeToken security guarantees", () => {
 			resolveSpy.mockReturnValue({
 				name: "alternate",
 				configPath: switchedPath,
+				localConfigPath: path.join(path.dirname(switchedPath), "local.json"),
 				tokenPath: path.join(path.dirname(switchedPath), "token"),
 			});
 			return { ...current, defaultTeam: "OK" };
