@@ -166,7 +166,7 @@ describe("getApiToken: legacy migration hint integration", () => {
 
 		// stderr.write may be called multiple times under the hood (jest framework
 		// internals etc.) so we filter to just our hint signature.
-		const hintCalls = stderrSpy.mock.calls.filter((args) =>
+		const hintCalls = stderrSpy.mock.calls.filter((args: unknown[]) =>
 			String(args[0]).includes("el-linear profile migrate-legacy"),
 		);
 		expect(hintCalls.length).toBe(1);
@@ -179,7 +179,7 @@ describe("getApiToken: legacy migration hint integration", () => {
 		);
 
 		expect(() => getApiToken({})).toThrow(/No API token found/);
-		const hintCalls = stderrSpy.mock.calls.filter((args) =>
+		const hintCalls = stderrSpy.mock.calls.filter((args: unknown[]) =>
 			String(args[0]).includes("el-linear profile migrate-legacy"),
 		);
 		expect(hintCalls.length).toBe(0);
@@ -189,7 +189,7 @@ describe("getApiToken: legacy migration hint integration", () => {
 		// Nothing exists on disk — fresh install. Hint should stay silent.
 		existsSyncMock.mockReturnValue(false);
 		expect(() => getApiToken({})).toThrow(/No API token found/);
-		const hintCalls = stderrSpy.mock.calls.filter((args) =>
+		const hintCalls = stderrSpy.mock.calls.filter((args: unknown[]) =>
 			String(args[0]).includes("el-linear profile migrate-legacy"),
 		);
 		expect(hintCalls.length).toBe(0);

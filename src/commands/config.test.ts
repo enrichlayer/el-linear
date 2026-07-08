@@ -9,13 +9,13 @@ const mockGetActiveTeamConfigPath = vi.fn().mockReturnValue(undefined);
 const mockGetActiveTeamConfigInfo = vi
 	.fn()
 	.mockReturnValue({ path: undefined, source: null });
-const mockLoadLocalConfig = vi.fn(() => ({}));
+const mockLoadLocalConfig = vi.fn((..._args: unknown[]) => ({}));
 const mockOutputSuccess = vi.fn();
 const mockOutputWarning = vi.fn();
 const mockExistsSync = vi.fn();
 const mockReadFileSync = vi.fn();
 const mockUpdateConfig = vi.fn();
-const mockResolveActiveProfile = vi.fn(() => ({
+const mockResolveActiveProfile = vi.fn((..._args: unknown[]) => ({
 	name: null,
 	configPath: "/home/test/.config/el-linear/config.json",
 	tokenPath: "/home/test/.config/el-linear/token",

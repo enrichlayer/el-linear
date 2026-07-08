@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { IssueWithCommentsNode } from "../queries/issues-types.js";
 import { multipleMatchesError, notFoundError } from "./error-messages.js";
 
 vi.mock("@linear/sdk", () => ({
@@ -31,6 +32,38 @@ function createService() {
 	const graphQLService = new GraphQLService({ apiKey: "token" });
 	const linearService = new LinearService({ apiKey: "token" });
 	return new GraphQLIssuesService(graphQLService, linearService);
+}
+
+function makeIssueNode(
+	overrides: Partial<IssueWithCommentsNode> = {},
+): IssueWithCommentsNode {
+	return {
+		id: "issue-1",
+		identifier: "DEV-100",
+		title: "Test",
+		description: null,
+		summary: null,
+		branchName: "",
+		priority: 0,
+		estimate: null,
+		dueDate: null,
+		url: "https://linear.app/acme/issue/DEV-100/test-issue",
+		createdAt: "2026-01-01T00:00:00.000Z",
+		updatedAt: "2026-01-01T00:00:00.000Z",
+		completedAt: null,
+		state: null,
+		assignee: null,
+		delegate: null,
+		team: null,
+		project: null,
+		labels: { nodes: [] },
+		cycle: null,
+		projectMilestone: null,
+		parent: null,
+		children: { nodes: [] },
+		comments: { nodes: [] },
+		...overrides,
+	};
 }
 
 describe("GraphQLIssuesService", () => {
@@ -340,16 +373,18 @@ describe("GraphQLIssuesService", () => {
 	describe("transformIssueData", () => {
 		it("transforms a minimal issue", () => {
 			const service = createService();
-			const result = service.transformIssueData({
-				id: "issue-1",
-				identifier: "DEV-100",
-				url: "https://linear.app/acme/issue/DEV-100/test-issue",
-				title: "Test Issue",
-				priority: 2,
-				labels: { nodes: [] },
-				createdAt: "2026-01-01T00:00:00.000Z",
-				updatedAt: "2026-01-02T00:00:00.000Z",
-			});
+			const result = service.transformIssueData(
+				makeIssueNode({
+					id: "issue-1",
+					identifier: "DEV-100",
+					url: "https://linear.app/acme/issue/DEV-100/test-issue",
+					title: "Test Issue",
+					priority: 2,
+					labels: { nodes: [] },
+					createdAt: "2026-01-01T00:00:00.000Z",
+					updatedAt: "2026-01-02T00:00:00.000Z",
+				}),
+			);
 
 			expect(result.id).toBe("issue-1");
 			expect(result.identifier).toBe("DEV-100");
@@ -366,50 +401,56 @@ describe("GraphQLIssuesService", () => {
 
 		it("maps completedAt through when the issue is completed (DEV-5454)", () => {
 			const service = createService();
-			const result = service.transformIssueData({
-				id: "issue-1",
-				identifier: "DEV-100",
-				title: "Done issue",
-				priority: 1,
-				labels: { nodes: [] },
-				createdAt: "2026-01-01T00:00:00.000Z",
-				updatedAt: "2026-01-03T00:00:00.000Z",
-				completedAt: "2026-01-02T00:00:00.000Z",
-			});
+			const result = service.transformIssueData(
+				makeIssueNode({
+					id: "issue-1",
+					identifier: "DEV-100",
+					title: "Done issue",
+					priority: 1,
+					labels: { nodes: [] },
+					createdAt: "2026-01-01T00:00:00.000Z",
+					updatedAt: "2026-01-03T00:00:00.000Z",
+					completedAt: "2026-01-02T00:00:00.000Z",
+				}),
+			);
 
 			expect(result.completedAt).toBe("2026-01-02T00:00:00.000Z");
 		});
 
 		it("leaves completedAt undefined for an open issue, not fabricated as now (DEV-5454)", () => {
 			const service = createService();
-			const result = service.transformIssueData({
-				id: "issue-1",
-				identifier: "DEV-100",
-				title: "Open issue",
-				priority: 1,
-				labels: { nodes: [] },
-				createdAt: "2026-01-01T00:00:00.000Z",
-				updatedAt: "2026-01-01T00:00:00.000Z",
-				completedAt: null,
-			});
+			const result = service.transformIssueData(
+				makeIssueNode({
+					id: "issue-1",
+					identifier: "DEV-100",
+					title: "Open issue",
+					priority: 1,
+					labels: { nodes: [] },
+					createdAt: "2026-01-01T00:00:00.000Z",
+					updatedAt: "2026-01-01T00:00:00.000Z",
+					completedAt: null,
+				}),
+			);
 
 			expect(result.completedAt).toBeUndefined();
 		});
 
 		it("transforms issue with state, assignee, and team", () => {
 			const service = createService();
-			const result = service.transformIssueData({
-				id: "issue-1",
-				identifier: "DEV-100",
-				title: "Test",
-				priority: 1,
-				state: { id: "state-1", name: "In Progress" },
-				assignee: { id: "user-1", name: "Alice" },
-				team: { id: "team-1", key: "DEV", name: "Dev" },
-				labels: { nodes: [] },
-				createdAt: "2026-01-01T00:00:00.000Z",
-				updatedAt: "2026-01-01T00:00:00.000Z",
-			});
+			const result = service.transformIssueData(
+				makeIssueNode({
+					id: "issue-1",
+					identifier: "DEV-100",
+					title: "Test",
+					priority: 1,
+					state: { id: "state-1", name: "In Progress" },
+					assignee: { id: "user-1", name: "Alice" },
+					team: { id: "team-1", key: "DEV", name: "Dev" },
+					labels: { nodes: [] },
+					createdAt: "2026-01-01T00:00:00.000Z",
+					updatedAt: "2026-01-01T00:00:00.000Z",
+				}),
+			);
 
 			expect(result.state).toEqual({ id: "state-1", name: "In Progress" });
 			expect(result.assignee).toEqual({ id: "user-1", name: "Alice" });
@@ -418,36 +459,40 @@ describe("GraphQLIssuesService", () => {
 
 		it("transforms issue delegate", () => {
 			const service = createService();
-			const result = service.transformIssueData({
-				id: "issue-1",
-				identifier: "DEV-100",
-				title: "Test",
-				priority: 1,
-				delegate: { id: "agent-1", name: "Claude" },
-				labels: { nodes: [] },
-				createdAt: "2026-01-01T00:00:00.000Z",
-				updatedAt: "2026-01-01T00:00:00.000Z",
-			});
+			const result = service.transformIssueData(
+				makeIssueNode({
+					id: "issue-1",
+					identifier: "DEV-100",
+					title: "Test",
+					priority: 1,
+					delegate: { id: "agent-1", name: "Claude" },
+					labels: { nodes: [] },
+					createdAt: "2026-01-01T00:00:00.000Z",
+					updatedAt: "2026-01-01T00:00:00.000Z",
+				}),
+			);
 
 			expect(result.delegate).toEqual({ id: "agent-1", name: "Claude" });
 		});
 
 		it("transforms labels", () => {
 			const service = createService();
-			const result = service.transformIssueData({
-				id: "issue-1",
-				identifier: "DEV-100",
-				title: "Test",
-				priority: 0,
-				labels: {
-					nodes: [
-						{ id: "label-1", name: "bug" },
-						{ id: "label-2", name: "feature" },
-					],
-				},
-				createdAt: "2026-01-01T00:00:00.000Z",
-				updatedAt: "2026-01-01T00:00:00.000Z",
-			});
+			const result = service.transformIssueData(
+				makeIssueNode({
+					id: "issue-1",
+					identifier: "DEV-100",
+					title: "Test",
+					priority: 0,
+					labels: {
+						nodes: [
+							{ id: "label-1", name: "bug" },
+							{ id: "label-2", name: "feature" },
+						],
+					},
+					createdAt: "2026-01-01T00:00:00.000Z",
+					updatedAt: "2026-01-01T00:00:00.000Z",
+				}),
+			);
 
 			expect(result.labels).toEqual([
 				{ id: "label-1", name: "bug" },
@@ -457,22 +502,24 @@ describe("GraphQLIssuesService", () => {
 
 		it("transforms project, cycle, and milestone refs", () => {
 			const service = createService();
-			const result = service.transformIssueData({
-				id: "issue-1",
-				identifier: "DEV-100",
-				title: "Test",
-				priority: 0,
-				project: { id: "proj-1", name: "My Project" },
-				cycle: { id: "cycle-1", name: "Sprint 5", number: 5 },
-				projectMilestone: {
-					id: "ms-1",
-					name: "Beta",
-					targetDate: "2026-06-01",
-				},
-				labels: { nodes: [] },
-				createdAt: "2026-01-01T00:00:00.000Z",
-				updatedAt: "2026-01-01T00:00:00.000Z",
-			});
+			const result = service.transformIssueData(
+				makeIssueNode({
+					id: "issue-1",
+					identifier: "DEV-100",
+					title: "Test",
+					priority: 0,
+					project: { id: "proj-1", name: "My Project" },
+					cycle: { id: "cycle-1", name: "Sprint 5", number: 5 },
+					projectMilestone: {
+						id: "ms-1",
+						name: "Beta",
+						targetDate: "2026-06-01",
+					},
+					labels: { nodes: [] },
+					createdAt: "2026-01-01T00:00:00.000Z",
+					updatedAt: "2026-01-01T00:00:00.000Z",
+				}),
+			);
 
 			expect(result.project).toEqual({ id: "proj-1", name: "My Project" });
 			expect(result.cycle).toEqual({
@@ -489,19 +536,23 @@ describe("GraphQLIssuesService", () => {
 
 		it("transforms parent and sub-issues", () => {
 			const service = createService();
-			const result = service.transformIssueData({
-				id: "issue-1",
-				identifier: "DEV-100",
-				title: "Test",
-				priority: 0,
-				parent: { id: "parent-1", identifier: "DEV-50", title: "Parent" },
-				children: {
-					nodes: [{ id: "child-1", identifier: "DEV-101", title: "Sub-task" }],
-				},
-				labels: { nodes: [] },
-				createdAt: "2026-01-01T00:00:00.000Z",
-				updatedAt: "2026-01-01T00:00:00.000Z",
-			});
+			const result = service.transformIssueData(
+				makeIssueNode({
+					id: "issue-1",
+					identifier: "DEV-100",
+					title: "Test",
+					priority: 0,
+					parent: { id: "parent-1", identifier: "DEV-50", title: "Parent" },
+					children: {
+						nodes: [
+							{ id: "child-1", identifier: "DEV-101", title: "Sub-task" },
+						],
+					},
+					labels: { nodes: [] },
+					createdAt: "2026-01-01T00:00:00.000Z",
+					updatedAt: "2026-01-01T00:00:00.000Z",
+				}),
+			);
 
 			expect(result.parentIssue).toEqual({
 				id: "parent-1",
@@ -515,26 +566,28 @@ describe("GraphQLIssuesService", () => {
 
 		it("transforms comments with user", () => {
 			const service = createService();
-			const result = service.transformIssueData({
-				id: "issue-1",
-				identifier: "DEV-100",
-				title: "Test",
-				priority: 0,
-				comments: {
-					nodes: [
-						{
-							id: "comment-1",
-							body: "Looks good",
-							user: { id: "user-1", name: "Bob" },
-							createdAt: "2026-01-01T00:00:00.000Z",
-							updatedAt: "2026-01-01T00:00:00.000Z",
-						},
-					],
-				},
-				labels: { nodes: [] },
-				createdAt: "2026-01-01T00:00:00.000Z",
-				updatedAt: "2026-01-01T00:00:00.000Z",
-			});
+			const result = service.transformIssueData(
+				makeIssueNode({
+					id: "issue-1",
+					identifier: "DEV-100",
+					title: "Test",
+					priority: 0,
+					comments: {
+						nodes: [
+							{
+								id: "comment-1",
+								body: "Looks good",
+								user: { id: "user-1", name: "Bob" },
+								createdAt: "2026-01-01T00:00:00.000Z",
+								updatedAt: "2026-01-01T00:00:00.000Z",
+							},
+						],
+					},
+					labels: { nodes: [] },
+					createdAt: "2026-01-01T00:00:00.000Z",
+					updatedAt: "2026-01-01T00:00:00.000Z",
+				}),
+			);
 
 			expect(result.comments).toHaveLength(1);
 			expect(result.comments![0].body).toBe("Looks good");
@@ -543,40 +596,44 @@ describe("GraphQLIssuesService", () => {
 
 		it("extracts summary from completed generation", () => {
 			const service = createService();
-			const result = service.transformIssueData({
-				id: "issue-1",
-				identifier: "DEV-100",
-				title: "Test",
-				priority: 0,
-				summary: {
-					generationStatus: "completed",
-					content: {
-						content: [
-							{ text: "This issue addresses " },
-							{ text: "a bug fix." },
-						],
+			const result = service.transformIssueData(
+				makeIssueNode({
+					id: "issue-1",
+					identifier: "DEV-100",
+					title: "Test",
+					priority: 0,
+					summary: {
+						generationStatus: "completed",
+						content: {
+							content: [
+								{ text: "This issue addresses " },
+								{ text: "a bug fix." },
+							],
+						},
 					},
-				},
-				labels: { nodes: [] },
-				createdAt: "2026-01-01T00:00:00.000Z",
-				updatedAt: "2026-01-01T00:00:00.000Z",
-			});
+					labels: { nodes: [] },
+					createdAt: "2026-01-01T00:00:00.000Z",
+					updatedAt: "2026-01-01T00:00:00.000Z",
+				}),
+			);
 
 			expect(result.summary).toBe("This issue addresses a bug fix.");
 		});
 
 		it("returns undefined summary when generation not completed", () => {
 			const service = createService();
-			const result = service.transformIssueData({
-				id: "issue-1",
-				identifier: "DEV-100",
-				title: "Test",
-				priority: 0,
-				summary: { generationStatus: "pending" },
-				labels: { nodes: [] },
-				createdAt: "2026-01-01T00:00:00.000Z",
-				updatedAt: "2026-01-01T00:00:00.000Z",
-			});
+			const result = service.transformIssueData(
+				makeIssueNode({
+					id: "issue-1",
+					identifier: "DEV-100",
+					title: "Test",
+					priority: 0,
+					summary: { generationStatus: "pending", content: null },
+					labels: { nodes: [] },
+					createdAt: "2026-01-01T00:00:00.000Z",
+					updatedAt: "2026-01-01T00:00:00.000Z",
+				}),
+			);
 
 			expect(result.summary).toBeUndefined();
 		});
