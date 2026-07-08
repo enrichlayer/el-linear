@@ -262,6 +262,54 @@ describe("issues commands", () => {
 			);
 		});
 
+		it("passes --search through the list path and composes it with filters (DEV-5714)", async () => {
+			mockSearchIssues.mockResolvedValue([]);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"list",
+				"--search",
+				"el-hook",
+				"--status",
+				"Todo,Triage",
+				"--assignee",
+				"ytspar@example.com",
+				"--limit",
+				"50",
+			]);
+
+			expect(mockSearchIssues).toHaveBeenCalledWith(
+				expect.objectContaining({
+					query: "el-hook",
+					status: ["Todo", "Triage"],
+					assigneeId: "member-id-ytspar@example.com",
+					excludeTerminalStates: false,
+					limit: 50,
+				}),
+			);
+			expect(mockGetIssues).not.toHaveBeenCalled();
+		});
+
+		it("emits relation_candidates for issues list --search results (DEV-5714)", async () => {
+			mockSearchIssues.mockResolvedValue([
+				{ id: "i1", identifier: "DEV-2134", title: "a" },
+				{ id: "i2", identifier: "FIN-77", title: "b" },
+			]);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, ["issues", "list", "--search", "auth"]);
+
+			const relationCall = mockOutputWarning.mock.calls.find(
+				(c) =>
+					typeof c[0] === "string" && c[0].startsWith("relation_candidates:"),
+			);
+			expect(relationCall?.[0]).toContain("DEV-2134");
+			expect(relationCall?.[0]).toContain("FIN-77");
+		});
+
 		it("filters results by --team", async () => {
 			const filteredIssues = [
 				{ id: "1", team: { id: "team-id-DEV", key: "DEV" } },
