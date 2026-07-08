@@ -1,3 +1,5 @@
+allowBuilds:
+  esbuild: true
 # Defense-in-depth against fast-yank supply-chain attacks: pnpm refuses
 # to install any package version younger than this many minutes. This
 # protects `pnpm install` / `pnpm update` runs even when dependabot

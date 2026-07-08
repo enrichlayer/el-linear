@@ -427,4 +427,103 @@ describe("projects commands", () => {
 			expect(mockOutputSuccess).not.toHaveBeenCalled();
 		});
 	});
+
+	describe("projects update", () => {
+		it("resolves the project and updates name, description, and content", async () => {
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				projectUpdate: {
+					success: true,
+					project: {
+						id: "project-id-Launch",
+						name: "Launch v2",
+						description: "Short summary",
+						content: "# Full body",
+						teams: { nodes: [{ id: "t1", key: "DEV", name: "Dev" }] },
+					},
+				},
+			});
+
+			const program = createTestProgram();
+			setupProjectsCommands(program);
+			await runCommand(program, [
+				"projects",
+				"update",
+				"Launch",
+				"--name",
+				"Launch v2",
+				"--description",
+				"Short summary",
+				"--content",
+				"# Full body",
+			]);
+
+			expect(mockResolveProjectId).toHaveBeenCalledWith("Launch");
+			expect(mockGraphQLService.rawRequest).toHaveBeenCalledWith(
+				expect.stringContaining("projectUpdate"),
+				{
+					id: "project-id-Launch",
+					input: {
+						name: "Launch v2",
+						description: "Short summary",
+						content: "# Full body",
+					},
+				},
+			);
+			expect(mockOutputSuccess).toHaveBeenCalledWith({
+				id: "project-id-Launch",
+				name: "Launch v2",
+				description: "Short summary",
+				content: "# Full body",
+				teams: [{ id: "t1", key: "DEV", name: "Dev" }],
+			});
+		});
+
+		it("allows empty description/content values so callers can clear them", async () => {
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				projectUpdate: {
+					success: true,
+					project: {
+						id: "project-id-Launch",
+						name: "Launch",
+						description: "",
+						content: "",
+						teams: { nodes: [] },
+					},
+				},
+			});
+
+			const program = createTestProgram();
+			setupProjectsCommands(program);
+			await runCommand(program, [
+				"projects",
+				"update",
+				"Launch",
+				"--description",
+				"",
+				"--content",
+				"",
+			]);
+
+			expect(mockGraphQLService.rawRequest).toHaveBeenCalledWith(
+				expect.stringContaining("projectUpdate"),
+				{
+					id: "project-id-Launch",
+					input: {
+						description: "",
+						content: "",
+					},
+				},
+			);
+		});
+
+		it("does not call Linear when no update fields are supplied", async () => {
+			const program = createTestProgram();
+			setupProjectsCommands(program);
+			await runCommand(program, ["projects", "update", "Launch"]);
+
+			expect(mockResolveProjectId).not.toHaveBeenCalled();
+			expect(mockGraphQLService.rawRequest).not.toHaveBeenCalled();
+			expect(mockOutputSuccess).not.toHaveBeenCalled();
+		});
+	});
 });

@@ -137,6 +137,27 @@ export const UPDATE_PROJECT_MUTATION = `
   }
 `;
 
+export const UPDATE_PROJECT_FIELDS_MUTATION = `
+  mutation UpdateProjectFields($id: String!, $input: ProjectUpdateInput!) {
+    projectUpdate(id: $id, input: $input) {
+      success
+      project {
+        id
+        name
+        description
+        content
+        teams {
+          nodes {
+            id
+            key
+            name
+          }
+        }
+      }
+    }
+  }
+`;
+
 export const ARCHIVE_PROJECT_MUTATION = `
   mutation ArchiveProject($id: String!) {
     projectArchive(id: $id) {

@@ -74,6 +74,7 @@ import {
 	PROJECT_READ_QUERY,
 	SEARCH_PROJECTS_BY_NAME_QUERY,
 	TEAM_LOOKUP_QUERY,
+	UPDATE_PROJECT_FIELDS_MUTATION,
 	UPDATE_PROJECT_MUTATION,
 } from "./projects.js";
 import {
@@ -204,6 +205,7 @@ const ALL_QUERIES: [string, string][] = [
 	["GET_PROJECT_QUERY", GET_PROJECT_QUERY],
 	["GET_PROJECT_TEAM_ISSUES_QUERY", GET_PROJECT_TEAM_ISSUES_QUERY],
 	["UPDATE_PROJECT_MUTATION", UPDATE_PROJECT_MUTATION],
+	["UPDATE_PROJECT_FIELDS_MUTATION", UPDATE_PROJECT_FIELDS_MUTATION],
 	["ARCHIVE_PROJECT_MUTATION", ARCHIVE_PROJECT_MUTATION],
 	["DELETE_PROJECT_MUTATION", DELETE_PROJECT_MUTATION],
 	["SEARCH_PROJECTS_BY_NAME_QUERY", SEARCH_PROJECTS_BY_NAME_QUERY],
@@ -637,6 +639,14 @@ describe("projects.ts — queries and mutations", () => {
 	it("UPDATE_PROJECT_MUTATION returns teams", () => {
 		expect(getOperationType(UPDATE_PROJECT_MUTATION)).toBe("mutation");
 		expect(containsField(UPDATE_PROJECT_MUTATION, "teams")).toBe(true);
+	});
+
+	it("UPDATE_PROJECT_FIELDS_MUTATION returns editable project text fields", () => {
+		expect(getOperationType(UPDATE_PROJECT_FIELDS_MUTATION)).toBe("mutation");
+		expect(containsField(UPDATE_PROJECT_FIELDS_MUTATION, "description")).toBe(
+			true,
+		);
+		expect(containsField(UPDATE_PROJECT_FIELDS_MUTATION, "content")).toBe(true);
 	});
 });
 

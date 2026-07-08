@@ -30,8 +30,9 @@ async function handleCreateLabel(
 	command: Command,
 ): Promise<void> {
 	const rootOpts = getRootOpts(command);
-	const teamId = resolveTeam(options.team);
 	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
+	const teamId = await linearService.resolveTeamId(resolveTeam(options.team));
 
 	const input: Record<string, unknown> = { name, teamId };
 	if (options.color) {

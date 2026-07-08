@@ -10,6 +10,7 @@ import {
 	PROJECT_BY_ID_QUERY,
 	PROJECT_READ_QUERY,
 	SEARCH_PROJECTS_BY_NAME_QUERY,
+	UPDATE_PROJECT_FIELDS_MUTATION,
 	UPDATE_PROJECT_MUTATION,
 } from "../queries/projects.js";
 import type {
@@ -21,6 +22,7 @@ import type {
 	ProjectByIdResponse,
 	ProjectReadResponse,
 	SearchProjectsByNameResponse,
+	UpdateProjectFieldsResponse,
 	UpdateProjectResponse,
 } from "../queries/projects-types.js";
 import type { LinearProject } from "../types/linear.js";
@@ -315,6 +317,30 @@ function formatTeamsOutput(
 	return {
 		id: updatedProject.id,
 		name: updatedProject.name,
+		teams: updatedProject.teams.nodes.map((t) => ({
+			id: t.id,
+			key: t.key,
+			name: t.name,
+		})),
+	};
+}
+
+function hasOption(options: OptionValues, key: string): boolean {
+	return options[key] !== undefined;
+}
+
+function flattenProjectUpdate(
+	projectUpdate: UpdateProjectFieldsResponse["projectUpdate"],
+) {
+	if (!projectUpdate.project) {
+		throw new Error("Failed to update project");
+	}
+	const updatedProject = projectUpdate.project;
+	return {
+		id: updatedProject.id,
+		name: updatedProject.name,
+		description: updatedProject.description ?? undefined,
+		content: updatedProject.content ?? undefined,
 		teams: updatedProject.teams.nodes.map((t) => ({
 			id: t.id,
 			key: t.key,
@@ -646,6 +672,45 @@ async function handleReadProject(
 	});
 }
 
+async function handleUpdateProject(
+	projectNameOrId: string,
+	options: OptionValues,
+	command: Command,
+): Promise<void> {
+	const input: Record<string, unknown> = {};
+	if (hasOption(options, "name")) {
+		input.name = options.name;
+	}
+	if (hasOption(options, "description")) {
+		input.description = options.description;
+	}
+	if (hasOption(options, "content")) {
+		input.content = options.content;
+	}
+
+	if (Object.keys(input).length === 0) {
+		throw new Error(
+			"Nothing to update. Pass at least one of --name, --description, or --content.",
+		);
+	}
+
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
+	const projectId = await linearService.resolveProjectId(projectNameOrId);
+
+	const updateResult =
+		await graphQLService.rawRequest<UpdateProjectFieldsResponse>(
+			UPDATE_PROJECT_FIELDS_MUTATION,
+			{ id: projectId, input },
+		);
+	const projectUpdate = updateResult.projectUpdate;
+	if (!projectUpdate.success) {
+		throw new Error(`Failed to update project "${projectNameOrId}"`);
+	}
+	outputSuccess(flattenProjectUpdate(projectUpdate));
+}
+
 export function setupProjectsCommands(program: Command): void {
 	const projects = program
 		.command("projects")
@@ -684,6 +749,20 @@ export function setupProjectsCommands(program: Command): void {
 			"Read one project's full details (resolves name/slug/URL/ID). `--format summary` shows state, lead, teams, target, progress, url; JSON includes description/content.",
 		)
 		.action(handleAsyncCommand(handleReadProject));
+
+	projects
+		.command("update <project>")
+		.description("Update project name, short description, or markdown content")
+		.option("--name <name>", "project name")
+		.option(
+			"-d, --description <text>",
+			"short summary (max 255 chars, shown in lists)",
+		)
+		.option(
+			"--content <markdown>",
+			"full markdown body (shown in project panel)",
+		)
+		.action(handleAsyncCommand(handleUpdateProject));
 
 	projects
 		.command("list")
