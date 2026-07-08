@@ -79,6 +79,18 @@ export interface UpdateProjectResponse {
 	};
 }
 
+interface ProjectUpdateFieldsNode extends ProjectBaseNode {
+	description: string | null;
+	content: string | null;
+}
+
+export interface UpdateProjectFieldsResponse {
+	projectUpdate: {
+		success: boolean;
+		project: ProjectUpdateFieldsNode | null;
+	};
+}
+
 interface ProjectArchiveEntity {
 	id: string;
 }

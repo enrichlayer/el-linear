@@ -3,8 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestProgram, runCommand } from "../__tests__/test-helpers.js";
 
 const mockGetLabels = vi.fn();
+const mockResolveTeamId = vi.fn();
 const mockService = {
 	getLabels: mockGetLabels,
+	resolveTeamId: mockResolveTeamId,
 };
 const mockCreateLinearService = vi.fn().mockReturnValue(mockService);
 
@@ -55,6 +57,9 @@ describe("labels", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		mockResolveTeam.mockImplementation((v: string) => v);
+		mockResolveTeamId.mockImplementation((v: string) =>
+			Promise.resolve(`resolved-${v}`),
+		);
 		program = createTestProgram();
 		setupLabelsCommands(program);
 	});
@@ -97,6 +102,8 @@ describe("labels", () => {
 
 	describe("create", () => {
 		it("creates label with name and team", async () => {
+			mockResolveTeam.mockReturnValue("team-key-eng");
+			mockResolveTeamId.mockResolvedValue("team-uuid-eng");
 			mockRawRequest.mockResolvedValue({
 				issueLabelCreate: {
 					success: true,
@@ -111,10 +118,14 @@ describe("labels", () => {
 				"ENG",
 			]);
 			expect(mockResolveTeam).toHaveBeenCalledWith("ENG");
+			expect(mockResolveTeamId).toHaveBeenCalledWith("team-key-eng");
 			expect(mockRawRequest).toHaveBeenCalledWith(
 				expect.anything(),
 				expect.objectContaining({
-					input: expect.objectContaining({ name: "Feature", teamId: "ENG" }),
+					input: expect.objectContaining({
+						name: "Feature",
+						teamId: "team-uuid-eng",
+					}),
 				}),
 			);
 			expect(mockOutputSuccess).toHaveBeenCalledWith({
@@ -124,6 +135,8 @@ describe("labels", () => {
 		});
 
 		it("includes parent label when --parent specified", async () => {
+			mockResolveTeam.mockReturnValue("team-key-eng");
+			mockResolveTeamId.mockResolvedValue("team-uuid-eng");
 			mockRawRequest
 				.mockResolvedValueOnce({
 					issueLabels: { nodes: [{ id: "parent-lbl-id", name: "Category" }] },
@@ -146,7 +159,7 @@ describe("labels", () => {
 			// First call: find parent label
 			expect(mockRawRequest).toHaveBeenCalledWith(
 				expect.anything(),
-				expect.objectContaining({ name: "Category", teamId: "ENG" }),
+				expect.objectContaining({ name: "Category", teamId: "team-uuid-eng" }),
 			);
 			// Second call: create with parentId
 			expect(mockRawRequest).toHaveBeenCalledWith(
@@ -154,7 +167,7 @@ describe("labels", () => {
 				expect.objectContaining({
 					input: expect.objectContaining({
 						name: "SubFeature",
-						teamId: "ENG",
+						teamId: "team-uuid-eng",
 						parentId: "parent-lbl-id",
 					}),
 				}),
