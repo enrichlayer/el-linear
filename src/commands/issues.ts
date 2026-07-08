@@ -328,6 +328,7 @@ async function handleListIssues(
 	const excludeTerminalStates =
 		!options.includeClosed && explicitStatus === undefined;
 	const hasOtherFilters =
+		options.search ||
 		options.team ||
 		options.labels ||
 		options.status ||
@@ -346,6 +347,7 @@ async function handleListIssues(
 	// (DEV-4478 cycle-1.)
 	if (hasOtherFilters || excludeTerminalStates || options.includeClosed) {
 		const searchArgs: SearchIssueArgs = {
+			query: options.search,
 			teamId: options.team ? resolveTeam(options.team) : undefined,
 			assigneeId: options.assignee
 				? await resolveAssignee(options.assignee, rootOpts)
@@ -372,8 +374,15 @@ async function handleListIssues(
 				"excluded terminal states (Done / Canceled) by default; pass --include-closed to include them",
 			);
 		}
+		if (options.search) {
+			const relationPrompt = buildRelationCandidatePrompt(result);
+			if (relationPrompt) {
+				outputWarning(relationPrompt);
+			}
+		}
 		warnIfTruncated(result.length, limit);
 		outputIssues(result, command, {
+			query: options.search,
 			team: options.team,
 		});
 	} else {
@@ -1681,6 +1690,10 @@ export function setupIssuesCommands(program: Command): void {
 		.command("list")
 		.description("List issues.")
 		.option("-l, --limit <number>", "limit results", "25")
+		.option(
+			"--search <query>",
+			"full-text search term; composes with list filters",
+		)
 		.option("--team <team>", "filter by team key (EL: resolves names)")
 		.option("--assignee <assignee>", "filter by assignee (name, alias, or ID)")
 		.option(
