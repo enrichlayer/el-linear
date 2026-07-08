@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	decideGateLedger,
 	emitGateEvent,
+	GATE_LEDGER_BACKUP_SUFFIX,
+	GATE_LEDGER_MAX_BYTES,
 	gateEventsPath,
 } from "./gate-telemetry.js";
 
@@ -128,6 +130,35 @@ describe("emitGateEvent", () => {
 		});
 		const raw = await readFile(join(dir, "gate-events.jsonl"), "utf8");
 		expect(raw.trim().split("\n")).toHaveLength(2);
+	});
+
+	it("rotates an oversized ledger before appending a fresh event", async () => {
+		const ledger = join(dir, "gate-events.jsonl");
+		const oldRecord = {
+			ts: "2026-07-07T00:00:00.000Z",
+			kind: "gate",
+			name: "el-linear",
+			subcommand: "issues create",
+			metadata: { gate: "issues-create-dup", outcome: "blocked" },
+		};
+		await writeFile(
+			ledger,
+			`${JSON.stringify(oldRecord)}\n${" ".repeat(GATE_LEDGER_MAX_BYTES + 1)}`,
+			"utf8",
+		);
+
+		await emitGateEvent("el-linear", "issues create", {
+			gate: "issues-create-dup",
+			outcome: "overridden",
+		});
+
+		expect(
+			await readFile(`${ledger}${GATE_LEDGER_BACKUP_SUFFIX}`, "utf8"),
+		).toContain(JSON.stringify(oldRecord));
+		const current = await readFile(ledger, "utf8");
+		const lines = current.trim().split("\n");
+		expect(lines).toHaveLength(1);
+		expect(JSON.parse(lines[0] ?? "").metadata.outcome).toBe("overridden");
 	});
 
 	it("is a no-op (writes nothing) when EL_TELEMETRY_DISABLED is set", async () => {

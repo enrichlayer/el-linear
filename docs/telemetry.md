@@ -43,8 +43,11 @@ configured. Emission turns on only when:
 | `EL_TELEMETRY_DIR=<path>` is set | **On** → writes to `<path>/gate-events.jsonl` (created on demand). Setting an explicit destination is the opt-in. |
 | neither is set | **On only if `~/.cache/el-telemetry/` already exists** (i.e. you already run the Enrich Layer telemetry tooling). A fresh install has no such directory, so nothing is written. |
 
-There is **no server and no database** — the ledger is a plain append-only
-JSONL file on your machine. Nothing is sent anywhere.
+There is **no server and no database** — the ledger is a plain local JSONL file
+on your machine. Nothing is sent anywhere. Before appending a fresh event,
+el-linear rotates an active ledger larger than 2 MiB to one backup generation
+named `gate-events.jsonl.old`; the next event starts a new active
+`gate-events.jsonl`.
 
 To enable it on an open-source install, just point it at a directory:
 
@@ -91,6 +94,10 @@ Because it's plain JSONL, any tool works. To compute override-rate with `jq`:
 
 ```bash
 LEDGER="${EL_TELEMETRY_DIR:-$HOME/.cache/el-telemetry}/gate-events.jsonl"
+FILES=()
+[ -f "$LEDGER.old" ] && FILES+=("$LEDGER.old")
+[ -f "$LEDGER" ] && FILES+=("$LEDGER")
+[ "${#FILES[@]}" -gt 0 ] || { echo "no gate telemetry ledger"; exit 0; }
 
 jq -rs '
   map(.metadata) |
@@ -99,7 +106,7 @@ jq -rs '
   ($blocked + $overridden) as $total |
   "blocked=\($blocked) overridden=\($overridden) " +
   "override_rate=\(if $total>0 then ($overridden*100/$total|floor) else 0 end)%"
-' "$LEDGER"
+' "${FILES[@]}"
 ```
 
 Enrich Layer's internal tooling ships a reference reader,
