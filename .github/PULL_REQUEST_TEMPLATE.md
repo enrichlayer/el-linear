@@ -2,6 +2,8 @@
 el-linear PR template. Fill in each section — the requesting-code-review SOP
 (and any AI reviewer) expects What / Why / How / Test on every PR.
 Keep it short; link the Linear issue (e.g. DEV-1234) so it auto-closes on merge.
+Use a Conventional Commit PR title. Published-surface changes need a releaseable
+title such as `fix(cli): ...` or `feat(output): ...` so release-please publishes.
 -->
 
 ## What
