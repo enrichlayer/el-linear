@@ -84,7 +84,7 @@ describe("buildRelationCandidatePrompt", () => {
 		expect(out).toMatch(/^relation_candidates:/);
 	});
 
-	it("enumerates IDs inline and asks the user to reply with the IDs to link", () => {
+	it("enumerates IDs inline, leads with proactive linking, keeps the reply fallback", () => {
 		const out = buildRelationCandidatePrompt([
 			{ identifier: "DEV-2134" },
 			{ identifier: "FIN-77" },
@@ -94,6 +94,10 @@ describe("buildRelationCandidatePrompt", () => {
 		expect(out).toContain("DEV-2134");
 		expect(out).toContain("FIN-77");
 		expect(out).toContain("ALL-672");
+		// DEV-5853: proactive framing is primary — link the relevant ones now.
+		expect(out).toContain("Link the relevant ones now");
+		expect(out).toContain("--related-to");
+		// …and the reply flow is retained as the auto-mode-block fallback.
 		expect(out).toContain("reply with the IDs you want linked");
 		expect(out).toContain("link DEV-2134 and FIN-77");
 		expect(out).toContain('"no links"');
