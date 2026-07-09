@@ -241,7 +241,7 @@ el-linear issues search "keywords from proposed title" --include-closed 2>&1
 
 **The default is to link, not to ask.** A cross-link is cheap and reversible; a *missing* link is invisible and costs reviewers and SOP tooling the context they need. When you identify an issue that is **related** / a **blocker** / a **follow-up** / the **origin** of the work in front of you, create the relation yourself — don't stage the candidates and wait for the human to name them, and don't hedge with "tell me if you want these linked."
 
-- **At create time**, pass `--related-to "<ids>"` / `--parent <id>` / `--blocked-by <id>` directly on `issues create` — this path is never gated, so link generously the moment you file.
+- **At create time**, pass `--related-to "<ids>"` / `--parent <id>` / `--blocked-by <id>` directly on `issues create` — this path typically passes the classifier, so link generously the moment you file.
 - **After the fact**, call `el-linear issues relate <source> --related-to "<ids>"` (or `--blocked-by` / `--blocks` / `--duplicate-of`) proactively, the same way.
 - Over-linking is self-correcting (a wrong relation is one command to remove); under-linking is not. When in doubt, link.
 
@@ -262,8 +262,8 @@ starting with `relation_candidates:` enumerating the candidate IDs. Treat it
 as a **convenience list of link candidates, not a stop sign** — under the
 proactive default above, relate the ones that are genuinely related/blocking
 without waiting to be told. Prefer create-time `--related-to` when the search
-ran as part of filing a new issue (never gated); otherwise call `issues
-relate` directly.
+ran as part of filing a new issue (create-time relations typically pass the
+classifier); otherwise call `issues relate` directly.
 
 **Residual auto-mode constraint (the only reason to pause).** Claude Code's
 auto-mode permission classifier *may* block a standalone `issues relate
