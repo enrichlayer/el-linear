@@ -237,6 +237,16 @@ el-linear issues search "keywords from proposed title" --include-closed 2>&1
    el-linear issues create "Title" --team ENG --related-to "ENG-456,ENG-789" ... 2>&1
    ```
 
+### Cross-linking: be generous, link proactively, don't wait ([DEV-5853](https://linear.app/verticalint/issue/DEV-5853/))
+
+**The default is to link, not to ask.** A cross-link is cheap and reversible; a *missing* link is invisible and costs reviewers and SOP tooling the context they need. When you identify an issue that is **related** / a **blocker** / a **follow-up** / the **origin** of the work in front of you, create the relation yourself — don't stage the candidates and wait for the human to name them, and don't hedge with "tell me if you want these linked."
+
+- **At create time**, pass `--related-to "<ids>"` / `--parent <id>` / `--blocked-by <id>` directly on `issues create` — this path is never gated, so link generously the moment you file.
+- **After the fact**, call `el-linear issues relate <source> --related-to "<ids>"` (or `--blocked-by` / `--blocks` / `--duplicate-of`) proactively, the same way.
+- Over-linking is self-correcting (a wrong relation is one command to remove); under-linking is not. When in doubt, link.
+
+The one exception is below: if the auto-mode permission classifier actually blocks a specific post-hoc `relate` call, that block — not caution — is your signal to surface the candidates for a one-word confirm.
+
 ### Existence check — before an "add capability X" issue ([DEV-5097](https://linear.app/verticalint/issue/DEV-5097/))
 
 The dup-check above guards against duplicating an *issue*. This guards against duplicating *reality*: before filing an issue to **add** a flag / guard / command / subcommand, confirm it doesn't **already exist**.
@@ -248,38 +258,29 @@ Skipping it cost real rework across sessions: a hook guard and `--jq`/`--fields`
 
 When `el-linear issues search` (or the cross-resource `search`) returns rows
 carrying issue identifiers, the JSON envelope embeds a `_warnings` line
-starting with `relation_candidates:` that enumerates the candidate IDs and
-asks the user to reply with which ones to link, and states the skip phrase.
+starting with `relation_candidates:` enumerating the candidate IDs. Treat it
+as a **convenience list of link candidates, not a stop sign** — under the
+proactive default above, relate the ones that are genuinely related/blocking
+without waiting to be told. Prefer create-time `--related-to` when the search
+ran as part of filing a new issue (never gated); otherwise call `issues
+relate` directly.
 
-That warning is the authoritative instruction — surface it to the user
-verbatim and follow it literally: **do not call `el-linear issues relate`
-until the user replies naming the IDs to link.** Only user-named IDs go into
-the `issues relate <source> --related-to "<ids>"` call — never pass an ID the
-user did not name, even one your own search obviously surfaced. The CLI emits
-the full procedure (every candidate ID, the example reply, the skip phrase) in
-that one line, so follow it rather than re-deriving or paraphrasing it away.
-
-Why this matters: Claude Code's auto-mode permission classifier blocks
-`issues relate --related-to "<ids>"` when the IDs were *agent-inferred*
-(came from your own search) rather than *user-specified* (typed by the human),
-because each listed peer is a write target. Routing the IDs through an
-explicit human reply converts them from agent-inferred → user-specified;
-the existing search step (above) stays intact; auto-mode's guard is not
-weakened. The fix is the loop shape, not the guard.
-
-Anti-patterns:
-
-- **Calling `issues relate` directly off your own search output** — even if
-  the IDs are real and the candidates look obvious, this is the exact path
-  the auto-mode guard refuses.
-- **Splitting one relate call into N single-ID calls** to "look smaller" —
-  same provenance problem, same block, just multiplied.
-- **Asking the user a yes/no question** ("Should I link these?") instead of
-  having them name the IDs — yes answers stay agent-inferred, the reply
-  must carry the IDs to convert them to user-specified.
+**Residual auto-mode constraint (the only reason to pause).** Claude Code's
+auto-mode permission classifier *may* block a standalone `issues relate
+--related-to "<ids>"` when it judges the IDs *agent-inferred* (surfaced by
+your own search) rather than *user-specified*, because each peer is a write
+target. A standing user instruction to cross-link generously is itself
+authorization — so proceed by default. But if a specific `relate` call is
+**actually blocked** by the classifier, that block is your cue: surface the
+candidate IDs to the user for a one-word confirm, then re-run with the
+user-named IDs (which pass). This is the **exception path**, not the default —
+do not pre-emptively withhold links the classifier would have allowed. Two
+ways to keep it frictionless: file relations at create time (`--related-to`),
+or the operator adds a permission rule / runs non-auto-mode so post-hoc
+`relate` never trips.
 
 If `--include-closed` search returns no matches, no `relation_candidates:`
-warning is emitted (nothing to confirm) and the flow proceeds normally.
+warning is emitted and the flow proceeds normally.
 
 ### Viewing existing relations
 
