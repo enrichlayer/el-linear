@@ -14,6 +14,19 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 * **labels:** resolve `labels create --team` keys and names before creating the label (DEV-5749)
 
+## [1.38.0](https://github.com/enrichlayer/el-linear/compare/v1.37.2...v1.38.0) (2026-07-09)
+
+
+### Features
+
+* **relations:** proactive-first relation_candidates guidance + linear-operations skill (DEV-5853) ([#239](https://github.com/enrichlayer/el-linear/issues/239)) ([4792c05](https://github.com/enrichlayer/el-linear/commit/4792c05a0b92dd3a614f7648829853fe2c89a2ba))
+
+
+### Bug Fixes
+
+* include test files in typecheck ([#235](https://github.com/enrichlayer/el-linear/issues/235)) ([a53236f](https://github.com/enrichlayer/el-linear/commit/a53236fd514b280b1b1c1721e44eff6ebab21207))
+* **release:** guard el-linear PR titles ([#236](https://github.com/enrichlayer/el-linear/issues/236)) ([3c5cf73](https://github.com/enrichlayer/el-linear/commit/3c5cf73a5ba398c10af5320c3d24d2ea8b232735))
+
 ## [1.37.2](https://github.com/enrichlayer/el-linear/compare/v1.37.1...v1.37.2) (2026-07-06)
 
 
