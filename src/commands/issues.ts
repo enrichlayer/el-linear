@@ -6,6 +6,11 @@ import {
 	enrichValidationErrors,
 } from "../config/error-enrichment.js";
 import {
+	evaluateGoalCompletion,
+	formatGoalCompletionBlock,
+	getGoalCompletionGateConfig,
+} from "../config/goal-completion-validation.js";
+import {
 	enforceValidation,
 	validateIssueCreation,
 } from "../config/issue-validation.js";
@@ -952,6 +957,71 @@ async function enforceSopLabelParent(
 	);
 }
 
+/**
+ * DEV-5920: create-time goal-completion gate. Checks the description for a
+ * "Done when" (or equivalent) section containing at least one falsifiable
+ * criterion — the deterministic form of the concrete-goals rule (RFC-0027
+ * discussion): a goal a later session can't mechanically verify has no
+ * terminal state to converge on.
+ *
+ * OPT-IN and two-mode: dormant unless `validation.goalCompletionGate` is
+ * `"warn"` (stderr warning, creation proceeds — recorded as `advisory`) or
+ * `"block"` (throws — recorded as `blocked`), mirroring the DEV-5378 SOP gate
+ * on config plumbing and the DEV-5590 advisory tier on outcomes. Bypassed by
+ * `--skip-validation` (blanket, emits nothing) and the narrow
+ * `--allow-vague-goal` (which records an `overridden` gate event on a
+ * would-fire, mirroring `--allow-duplicate`). Purely local — no network, so it
+ * runs before the service-backed gates and has no fail-open branch.
+ */
+async function enforceGoalCompletion(
+	description: string,
+	options: OptionValues,
+): Promise<void> {
+	if (options.skipValidation) {
+		return;
+	}
+	const { mode, headers } = getGoalCompletionGateConfig();
+	if (mode === "off") {
+		return;
+	}
+	const evaluation = evaluateGoalCompletion(description, headers);
+	if (evaluation.ok) {
+		return;
+	}
+
+	// Record the decision so `el-telemetry gates` can compute override-rate,
+	// mirroring the dup gate (DEV-4834): `overridden` when the caller passed
+	// --allow-vague-goal, `advisory` in warn mode, `blocked` when we stop.
+	const gateEvent = { gate: "issues-create-goal-completion" } as const;
+	if (options.allowVagueGoal) {
+		await emitGateEvent("el-linear", "issues create", {
+			...gateEvent,
+			outcome: "overridden",
+		});
+		return;
+	}
+
+	const message = formatGoalCompletionBlock({
+		reason: evaluation.reason,
+		headers,
+		sectionHeader:
+			evaluation.reason === "vague-section" ? evaluation.header : undefined,
+	});
+	if (mode === "warn") {
+		await emitGateEvent("el-linear", "issues create", {
+			...gateEvent,
+			outcome: "advisory",
+		});
+		outputWarning(message);
+		return;
+	}
+	await emitGateEvent("el-linear", "issues create", {
+		...gateEvent,
+		outcome: "blocked",
+	});
+	throw new Error(`Issue creation blocked: ${message}`);
+}
+
 async function handleCreateIssue(
 	title: string | undefined,
 	options: OptionValues,
@@ -985,6 +1055,24 @@ async function handleCreateIssue(
 			footer: explicitFooter,
 			noFooter,
 		}) ?? "";
+
+	// DEV-5920: goal-completion gate. Opt-in (dormant unless
+	// validation.goalCompletionGate is "warn"/"block"). Runs on the raw resolved
+	// description — not the composed one — so an attachment link or a configured
+	// messageFooter (which routinely carries digits/URLs) can't satisfy the
+	// falsifiability check on the author's behalf. Purely local, so it runs
+	// before the service-backed gates. Skipped on the --from-template path when
+	// no local description override is present: the description is instantiated
+	// server-side from the template, invisible to a client-side check (same gap
+	// as the dup gate on a template-resolved title).
+	{
+		const rawDescription = resolveDescription(options) || "";
+		const hasFromTemplate =
+			typeof options.fromTemplate === "string" && options.fromTemplate;
+		if (!hasFromTemplate || rawDescription) {
+			await enforceGoalCompletion(rawDescription, options);
+		}
+	}
 
 	const { graphQLService, linearService, issuesService } =
 		await createIssuesService(rootOpts);
@@ -1859,7 +1947,7 @@ export function setupIssuesCommands(program: Command): void {
 		)
 		.option(
 			"--skip-validation",
-			"skip all validation (labels, description, assignee, project, duplicate detection, SOP-parent gate)",
+			"skip all validation (labels, description, assignee, project, duplicate detection, SOP-parent gate, goal-completion gate)",
 		)
 		.option(
 			"--allow-duplicate",
@@ -1868,6 +1956,10 @@ export function setupIssuesCommands(program: Command): void {
 		.option(
 			"--allow-unparented-sop",
 			"skip the SOP-label parent gate and create an SOP-labeled issue without a parent SOP",
+		)
+		.option(
+			"--allow-vague-goal",
+			'skip the goal-completion gate and create even without a falsifiable "Done when" / acceptance-criteria section',
 		)
 		.option(
 			"--no-auto-link",

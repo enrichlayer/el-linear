@@ -1542,6 +1542,220 @@ describe("issues commands", () => {
 		});
 	});
 
+	// DEV-5920: create-time goal-completion gate. These assert the real
+	// composition (resolve description → evaluate → warn/block/override), not
+	// just the pure evaluator (covered in goal-completion-validation.test.ts) —
+	// per the "test compositions" rule, the gate's value is that a vague
+	// description actually prevents (or annotates) the create POST.
+	describe("issues create — goal-completion gate (DEV-5920)", () => {
+		// Field validation is ON so the create path runs; each test supplies its
+		// own --description since the description is what's under test.
+		const goalArgs = [
+			"--team",
+			"DEV",
+			"--labels",
+			"feature",
+			"--assignee",
+			"bob",
+			"--project",
+			"Infrastructure",
+		];
+		const blockConfig = {
+			...baseConfig,
+			validation: { enabled: true, goalCompletionGate: "block" },
+		};
+		const warnConfig = {
+			...baseConfig,
+			validation: { enabled: true, goalCompletionGate: "warn" },
+		};
+		const vagueDescription =
+			"Context long enough for the description length check to pass.\n\n## Done when\n\n- Things are generally better and cleaner";
+		const falsifiableDescription =
+			"Context long enough for the length check.\n\n## Done when\n\n- [ ] `pnpm test` reports 0 failures";
+		const noSectionDescription =
+			"A sufficiently long description that passes the length check.";
+
+		beforeEach(() => {
+			// Neutralize the dup gate so only the goal-completion gate is under test.
+			mockSearchIssues.mockResolvedValue([]);
+			mockCreateIssue.mockResolvedValue({ id: "x", identifier: "DEV-999" });
+		});
+
+		it("block mode: a missing goal section blocks before the create POST", async () => {
+			mockLoadConfig.mockReturnValue(blockConfig);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Improve the widget pipeline",
+				...goalArgs,
+				"--description",
+				noSectionDescription,
+			]);
+
+			expect(mockCreateIssue).not.toHaveBeenCalled();
+			expect(process.exit).toHaveBeenCalledWith(1);
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("no goal-completion section"),
+			);
+			expect(mockEmitGateEvent).toHaveBeenCalledWith(
+				"el-linear",
+				"issues create",
+				expect.objectContaining({
+					gate: "issues-create-goal-completion",
+					outcome: "blocked",
+				}),
+			);
+		});
+
+		it("block mode: a vague-adjectives-only section blocks, naming the section", async () => {
+			mockLoadConfig.mockReturnValue(blockConfig);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Improve the widget pipeline",
+				...goalArgs,
+				"--description",
+				vagueDescription,
+			]);
+
+			expect(mockCreateIssue).not.toHaveBeenCalled();
+			expect(process.exit).toHaveBeenCalledWith(1);
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("no falsifiable criterion"),
+			);
+			expect(mockEmitGateEvent).toHaveBeenCalledWith(
+				"el-linear",
+				"issues create",
+				expect.objectContaining({
+					gate: "issues-create-goal-completion",
+					outcome: "blocked",
+				}),
+			);
+		});
+
+		it("block mode: a falsifiable criterion passes and creates", async () => {
+			mockLoadConfig.mockReturnValue(blockConfig);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Improve the widget pipeline",
+				...goalArgs,
+				"--description",
+				falsifiableDescription,
+			]);
+
+			expect(mockCreateIssue).toHaveBeenCalled();
+			expect(process.exit).not.toHaveBeenCalledWith(1);
+			expect(mockEmitGateEvent).not.toHaveBeenCalled();
+		});
+
+		it("warn mode: a vague section warns, records advisory, and still creates", async () => {
+			mockLoadConfig.mockReturnValue(warnConfig);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Improve the widget pipeline",
+				...goalArgs,
+				"--description",
+				vagueDescription,
+			]);
+
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringContaining("no falsifiable criterion"),
+			);
+			expect(mockEmitGateEvent).toHaveBeenCalledWith(
+				"el-linear",
+				"issues create",
+				expect.objectContaining({
+					gate: "issues-create-goal-completion",
+					outcome: "advisory",
+				}),
+			);
+			expect(mockCreateIssue).toHaveBeenCalled();
+			expect(process.exit).not.toHaveBeenCalledWith(1);
+		});
+
+		it("is dormant when the gate is not opted in (default off)", async () => {
+			// validation.enabled is true but goalCompletionGate is absent → gate off.
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				validation: { enabled: true },
+			});
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Improve the widget pipeline",
+				...goalArgs,
+				"--description",
+				vagueDescription,
+			]);
+
+			expect(mockEmitGateEvent).not.toHaveBeenCalled();
+			expect(mockCreateIssue).toHaveBeenCalled();
+		});
+
+		it("--allow-vague-goal records an override and creates (block mode)", async () => {
+			mockLoadConfig.mockReturnValue(blockConfig);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Improve the widget pipeline",
+				...goalArgs,
+				"--description",
+				vagueDescription,
+				"--allow-vague-goal",
+			]);
+
+			expect(mockEmitGateEvent).toHaveBeenCalledWith(
+				"el-linear",
+				"issues create",
+				expect.objectContaining({
+					gate: "issues-create-goal-completion",
+					outcome: "overridden",
+				}),
+			);
+			expect(mockCreateIssue).toHaveBeenCalled();
+			expect(process.exit).not.toHaveBeenCalledWith(1);
+		});
+
+		it("--skip-validation bypasses the gate and emits nothing", async () => {
+			mockLoadConfig.mockReturnValue(blockConfig);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Improve the widget pipeline",
+				...goalArgs,
+				"--description",
+				vagueDescription,
+				"--skip-validation",
+			]);
+
+			expect(mockEmitGateEvent).not.toHaveBeenCalled();
+			expect(mockCreateIssue).toHaveBeenCalled();
+		});
+	});
+
 	// DEV-4293: `create --checkout` must record branch.<branch>.linearIssue.
 	// Runs against a real temp git repo (the checkout + git config writes are
 	// real); chdir is restored in afterEach so it can't leak into other tests.

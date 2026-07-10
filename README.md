@@ -271,8 +271,11 @@ itself: `el-linear teams list --raw | jq '.[] | {key, id}'`, etc.
 
 ### Gate telemetry (optional)
 
-`issues create` has a duplicate-detection gate (on by default) and an opt-in
-[SOP-label parent gate](./docs/configuration.md#sop-label-parent-gate-validationsoplabelparentgate).
+`issues create` has a duplicate-detection gate (on by default), an opt-in
+[SOP-label parent gate](./docs/configuration.md#sop-label-parent-gate-validationsoplabelparentgate),
+and an opt-in
+[goal-completion gate](./docs/configuration.md#goal-completion-gate-validationgoalcompletiongate)
+(requires a falsifiable "Done when" / acceptance-criteria section).
 el-linear can record each gate's fire/override decision to a local JSONL file so
 you can measure its **override-rate** and tell whether it's too aggressive. It is
 **off by default** and writes nothing unless you opt in (e.g.

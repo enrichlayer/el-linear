@@ -205,7 +205,18 @@ intended flow for the CLI.
     "sopLabelParentGate": false,
     // Label names (matched case-insensitively) that mark an issue as an SOP
     // for `sopLabelParentGate`. Default ["SOP"].
-    "sopLabels": ["SOP"]
+    "sopLabels": ["SOP"],
+    // OPT-IN goal-completion gate (default: off). "warn" prints a stderr
+    // warning, "block" stops creation, when the description has no
+    // "Done when" / acceptance-criteria section with a falsifiable criterion.
+    // Bypass a single create with --allow-vague-goal. Left off for the
+    // open-source audience — a concrete-goals convention isn't universal.
+    "goalCompletionGate": false,
+    // Section headers (matched case-insensitively, ## / ### / **bold** forms)
+    // accepted as the goal-completion section for `goalCompletionGate`.
+    // Default ["Done when", "Done-when", "Acceptance criteria",
+    // "Success criteria"].
+    "goalSectionHeaders": ["Done when", "Acceptance criteria"]
   }
 }
 ```
@@ -243,6 +254,58 @@ can't slip an orphan SOP onto the board. A **transport/service error** (network,
 GraphQL 5xx, timeout) **fails open** with a warning and records a `fail-open`
 gate event, so infra trouble can't block legitimate creation. A genuinely
 resolvable non-SOP parent always hard-blocks.
+
+### Goal-completion gate (`validation.goalCompletionGate`)
+
+An **opt-in** create-time gate that checks the description for a
+**goal-completion section** — a `Done when` (or `Acceptance criteria`,
+`Success criteria`, `Done-when`, matched case-insensitively via the same
+`##` / `###` / `**bold**` header forms `issues read --field` understands) —
+containing at least one **falsifiable criterion**. The rationale is
+concrete-goals (RFC-0027 discussion): a goal a later session can't mechanically
+verify gives the implementing agent no terminal state to converge on, so the
+gate turns "state how you'll know it's done" from prose advice into a
+deterministic check.
+
+A criterion counts as falsifiable when any one of these is present in the
+section: a **command** (inline code or a fenced block), a **threshold number or
+percentage**, a **named artifact path** (`src/foo.ts`, `report.json`), an
+**exit-code / status assertion** ("exits non-zero", "tests pass", "CI green"),
+or an explicit **"verifiable via X"** phrase. A section made only of bare
+quality adjectives ("improved", "better", "cleaner", "faster") with no number,
+command, or artifact does **not** count.
+
+Two modes (default off):
+
+```json
+{ "validation": { "enabled": true, "goalCompletionGate": "warn" } }
+```
+
+- `"warn"` — print a stderr warning naming what's missing; creation proceeds
+  (recorded as an `advisory` gate event).
+- `"block"` — stop creation with a non-zero exit listing what's missing
+  (recorded as a `blocked` gate event).
+- absent / `false` — dormant (the open-source default).
+
+It is **off by default** (like the SOP gate) because a concrete-goals
+convention isn't universal to every workspace; the Enrich Layer shared team
+config enables `"warn"` separately. Override the accepted section headers with
+`goalSectionHeaders`.
+
+Escape hatches, in order of narrowness:
+
+- `--allow-vague-goal` — create this one issue without a falsifiable
+  goal-completion section (records an `overridden` gate event, mirroring
+  `--allow-duplicate` / `--allow-unparented-sop`).
+- `--skip-validation` — blanket bypass of all create validation, including this
+  gate.
+- `validation.goalCompletionGate: false` (or omitting it) — disable the gate.
+
+The gate is purely local (no network). On the `--from-template` path with no
+local `--description` override, the description is instantiated server-side and
+is invisible to a client-side check, so the gate no-ops there (same
+client-side-visibility gap as the duplicate-detection gate on a
+template-resolved title).
 
 A complete minimal config (token + defaultTeam only) is enough for most basic use:
 

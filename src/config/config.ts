@@ -148,6 +148,26 @@ export interface ElLinearConfig {
 		 * for the `sopLabelParentGate` check. Defaults to `["SOP"]`.
 		 */
 		sopLabels?: string[];
+		/**
+		 * OPT-IN goal-completion gate (DEV-5920). When `"warn"` or `"block"`,
+		 * `issues create` checks the description for a goal-completion section
+		 * ("Done when" / "Acceptance criteria" / … — see `goalSectionHeaders`)
+		 * containing at least one falsifiable criterion (a command, a threshold
+		 * number, an artifact path, an exit-code assertion, or a "verifiable
+		 * via X" phrase). `"warn"` prints a stderr warning; `"block"` stops
+		 * creation. Defaults to off (absent/`false`) — el-linear is
+		 * MIT/open-source and a fresh install must not be surprised by a new
+		 * refusal (the EL shared team config opts in). Bypass a single create
+		 * with `--allow-vague-goal`.
+		 */
+		goalCompletionGate?: false | "warn" | "block";
+		/**
+		 * Section header names (matched case-insensitively, `##`/`###`/bold
+		 * pseudo-header forms) accepted as the goal-completion section for the
+		 * `goalCompletionGate` check. Defaults to `["Done when", "Done-when",
+		 * "Acceptance criteria", "Success criteria"]`.
+		 */
+		goalSectionHeaders?: string[];
 	};
 	/**
 	 * Optional override for the Linear workspace URL key (the part after
