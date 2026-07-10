@@ -500,6 +500,11 @@ async function resolveCreateInputs(
 	title: string,
 	options: OptionValues,
 	rootOpts: Record<string, unknown>,
+	// Pre-resolved description, threaded in so this validation path does NOT
+	// call resolveDescription() itself — on the `--description-file -` (stdin)
+	// path a second read drains the pipe to "" (DEV-5920 cycle-2). Resolve
+	// happens exactly once in handleCreateIssue and the value flows here.
+	resolvedDescription: string | undefined,
 ): Promise<{
 	teamInput: string;
 	teamId: string;
@@ -546,10 +551,9 @@ async function resolveCreateInputs(
 		typeof options.fromTemplate === "string" && options.fromTemplate;
 	if (!options.skipValidation && !hasFromTemplate) {
 		const rawLabels = options.labels ? splitList(options.labels) : null;
-		const description = resolveDescription(options);
 		const validationResult = validateIssueCreation({
 			labels: rawLabels,
-			description: description || undefined,
+			description: resolvedDescription || undefined,
 			title,
 			assignee: effectiveAssignee,
 			project: options.project,
@@ -1028,6 +1032,21 @@ async function handleCreateIssue(
 	command: Command,
 ): Promise<void> {
 	const rootOpts = getRootOpts(command);
+	// DEV-5920 (cycle-2): resolve the description exactly ONCE, before anything
+	// else. On create, resolveDescription would otherwise run three times —
+	// field validation (inside resolveCreateInputs), the body build, and the
+	// goal-completion gate. With `--description-file -` each call does
+	// fs.readFileSync(fd 0), and a stdin pipe only yields data on the FIRST
+	// read — later reads drain to "". That silently dropped a piped body and
+	// made the gate see an empty description (spurious block/warn). Resolving
+	// once here and threading the value through fixes all three reads. This
+	// single resolve also enforces the --template / --description-file
+	// mutual-exclusivity guard (it lives in resolveDescription). Kept as a lone
+	// resolve rather than round-tripping through options.description because
+	// resolveDescription returns file bodies verbatim (no inline-escape
+	// normalization) — re-resolving an inline copy would corrupt a file that
+	// intentionally contains backslash sequences.
+	const rawDescription = resolveDescription(options);
 	const {
 		teamInput,
 		teamId,
@@ -1037,11 +1056,11 @@ async function handleCreateIssue(
 		status,
 		subscriberIds,
 		priority,
-	} = await resolveCreateInputs(title ?? "", options, rootOpts);
+	} = await resolveCreateInputs(title ?? "", options, rootOpts, rawDescription);
 
 	const uploadResults = await uploadAttachmentsIfNeeded(options, rootOpts);
 	const descriptionWithAttachments = buildDescriptionWithAttachments(
-		resolveDescription(options) || "",
+		rawDescription ?? "",
 		uploadResults,
 	);
 	// Append messageFooter (config or --footer flag) so auto-link picks up any
@@ -1066,11 +1085,10 @@ async function handleCreateIssue(
 	// server-side from the template, invisible to a client-side check (same gap
 	// as the dup gate on a template-resolved title).
 	{
-		const rawDescription = resolveDescription(options) || "";
 		const hasFromTemplate =
 			typeof options.fromTemplate === "string" && options.fromTemplate;
 		if (!hasFromTemplate || rawDescription) {
-			await enforceGoalCompletion(rawDescription, options);
+			await enforceGoalCompletion(rawDescription ?? "", options);
 		}
 	}
 

@@ -134,6 +134,28 @@ describe("hasFalsifiableCriterion", () => {
 		);
 	});
 
+	it("accepts an anchored extension-less path", () => {
+		expect(
+			hasFalsifiableCriterion("- Run ./scripts/migrate to completion"),
+		).toBe(true);
+		expect(hasFalsifiableCriterion("- Output written to /var/log/app")).toBe(
+			true,
+		);
+	});
+
+	it("does not over-fire on un-anchored prose slashes (and/or, read/write)", () => {
+		// The artifact-path proxy requires a file extension or a leading anchor,
+		// so a bare English slash is not treated as a falsifiable criterion.
+		expect(
+			hasFalsifiableCriterion("- The behavior is better for read/write cases"),
+		).toBe(false);
+		expect(
+			hasFalsifiableCriterion(
+				"- Cleaner client/server split and/or nicer code",
+			),
+		).toBe(false);
+	});
+
 	it("accepts an exit-code assertion without digits", () => {
 		expect(
 			hasFalsifiableCriterion("- The command exits non-zero on a bad ref"),

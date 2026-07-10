@@ -85,8 +85,14 @@ export function getGoalCompletionGateConfig(): GoalCompletionGateConfig {
  *   "95%"), counts ("all 12 tests"), issue/artifact ids. Deliberately
  *   permissive — the failure mode this gate targets is a section with NO
  *   number/command/artifact at all, not a weak number.
- * - **artifact path** — a slash-joined path (`src/utils/foo.ts`) or a bare
- *   filename with a code-adjacent extension.
+ * - **artifact path** — a bare filename with a code-adjacent extension
+ *   (`foo.ts`, `report.json` — this also matches the file segment inside a
+ *   longer path like `src/utils/foo.ts`), or an ANCHORED slash-path (leading
+ *   `./`, `../`, `/`, or `~/`) for extension-less dirs like `./scripts/run`.
+ *   The anchor requirement is deliberate: an un-anchored two-segment
+ *   `a/b` pattern over-fires on English prose ("and/or", "read/write",
+ *   "client/server"), so a real relative artifact path must either carry a
+ *   file extension or start with a path anchor to count.
  * - **exit/status assertion** — "exits non-zero", "exit code 0", "tests
  *   pass", "CI green", "returns nonzero".
  * - **verifiable-via phrase** — "verifiable via/by/with/through X".
@@ -97,9 +103,12 @@ const FALSIFIABLE_PROXY_RES: readonly RegExp[] = [
 	/^ {0,3}(?:`{3,}|~{3,})/m,
 	// Threshold number / percentage / count.
 	/\d/,
-	// Artifact path: slash-joined segments, or a filename with an extension.
-	/(?:^|[\s("'[])[\w.-]+\/[\w.\-/]+/m,
+	// Artifact path — a filename with a code-adjacent extension (also fires on
+	// the file segment of a longer path), OR an anchored slash-path for
+	// extension-less dirs. The anchor (`./` `../` `/` `~/`) is required so a
+	// bare `a/b` doesn't over-fire on prose like "and/or" / "read/write".
 	/\b[\w-]+\.(?:ts|tsx|js|jsx|mjs|cjs|json|md|mdx|ya?ml|sh|css|html|txt|csv|toml|sql|py|go|rs|lock)\b/i,
+	/(?:^|[\s("'[])(?:\.{1,2}\/|~\/|\/)[\w.-]+(?:\/[\w.-]+)*/m,
 	// Exit-code / status assertion.
 	/\bexit(?:s|ed)?\s+(?:code\s+|status\s+)?(?:non-?zero|zero|\d+)\b/i,
 	/\bexit\s+(?:code|status)\b/i,
@@ -128,8 +137,11 @@ export type GoalCompletionEvaluation =
 
 /**
  * Evaluate a description against the goal-completion rule. Headers are tried
- * in order; the FIRST one present in the description decides the outcome
- * (matching `extractField`'s first-match-wins semantics). A present-but-vague
+ * in **configured list order**, not document order — the first header in
+ * `headers` that is present in the description decides the outcome, even if a
+ * later-listed header appears earlier in the body. This is intentional: the
+ * list order encodes the operator's preferred canonical header, so the block
+ * message names the header they'd rather authors use. A present-but-vague
  * section is reported as `vague-section` with the header that matched, so the
  * error can point at the exact section rather than a generic "missing".
  */
