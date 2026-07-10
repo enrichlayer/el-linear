@@ -894,6 +894,37 @@ describe("GraphQLIssuesService", () => {
 		});
 	});
 
+	// FE-926: mirrors the createIssue hint below — a create can hit the same
+	// raw "Conflict on insert of DocumentContent" GraphQL error if Linear's
+	// description-content store is in a bad state. Not observed on the create
+	// path itself (FE-921's create succeeded; the corruption surfaced ~1
+	// minute later, only visible on subsequent update attempts), but the
+	// create mutation shares the same description-writing failure mode, so
+	// it gets the same actionable message instead of the raw error.
+	describe("createIssue DocumentContent conflict hint (FE-926)", () => {
+		it("enriches a DocumentContent conflict into an actionable message", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			vi.spyOn(graphQLService, "rawRequest").mockRejectedValue(
+				new Error(
+					"GraphQL request failed: Conflict on insert of DocumentContent - Entity DocumentContent with id d28f4672-3d8c-45a5-98bf-93c59399238e already exists.",
+				),
+			);
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			await expect(
+				service.createIssue({
+					title: "Test",
+					teamId: "11111111-1111-4111-8111-111111111111",
+					teamInput: "DEV",
+					description: "test",
+				}),
+			).rejects.toThrow(
+				/description store is in conflict for this issue\. This does not self-heal by retrying/s,
+			);
+		});
+	});
+
 	describe("updateIssue project/milestone resolution", () => {
 		const ISSUE_UUID = "22222222-2222-4222-8222-222222222222";
 		const PROJECT_UUID = "33333333-3333-4333-8333-333333333333";
@@ -1073,6 +1104,38 @@ describe("GraphQLIssuesService", () => {
 			// No throw — the DEV-matching candidate was picked. The mutation
 			// would have failed if the wrong project was chosen because the
 			// project-id passed to the mutation is the resolver's pick.
+		});
+	});
+
+	// FE-926: a description write can fail with a raw "Conflict on insert of
+	// DocumentContent" GraphQL error when Linear's description-content store
+	// gets into a corrupted state for a specific issue (observed on FE-921 —
+	// the description saved cleanly at creation, then was silently empty
+	// ~1 minute later with no history trace, and every update attempt since
+	// has hit this same conflict against a *different* DocumentContent id
+	// each time). Retrying does not self-heal, so the raw message is enriched
+	// with the known workaround instead of surfacing Linear's internal error.
+	describe("updateIssue DocumentContent conflict hint (FE-926)", () => {
+		const ISSUE_UUID = "44444444-4444-4444-8444-444444444444";
+
+		it("enriches a DocumentContent conflict into an actionable workaround message", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			vi.spyOn(graphQLService, "rawRequest").mockRejectedValue(
+				new Error(
+					"GraphQL request failed: Conflict on insert of DocumentContent - Entity DocumentContent with id d28f4672-3d8c-45a5-98bf-93c59399238e already exists.",
+				),
+			);
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			await expect(
+				service.updateIssue({
+					id: ISSUE_UUID,
+					description: "test restore probe",
+				}),
+			).rejects.toThrow(
+				/description store is in conflict for 44444444-4444-4444-8444-444444444444\. This does not self-heal by retrying.*--duplicate-of 44444444-4444-4444-8444-444444444444/s,
+			);
 		});
 	});
 
