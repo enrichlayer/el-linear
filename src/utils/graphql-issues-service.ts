@@ -252,6 +252,37 @@ function extractSummaryText(
 	return parts.length > 0 ? parts.join("") : undefined;
 }
 
+/**
+ * FE-926: Linear's description-content store can end up in a corrupted state
+ * for a specific issue — observed on FE-921, where a description saved
+ * cleanly at creation was empty ~1 minute later with no issue-history trace,
+ * and every subsequent write attempt raised this same raw GraphQL error
+ * against a *different* DocumentContent id each time. It can surface from
+ * any call that touches the issue's description, including a plain
+ * batch-resolve read (not just the create/update mutation itself), so
+ * `updateIssue`/`createIssue` wrap their whole body rather than a single
+ * call site. Retrying does not self-heal — the raw backend message is
+ * replaced with the known workaround.
+ */
+function rethrowWithDocumentContentHint(
+	error: unknown,
+	issueId?: string,
+): never {
+	const msg = error instanceof Error ? error.message : String(error);
+	if (msg.includes("Conflict on insert of DocumentContent")) {
+		const detail = issueId
+			? `for ${issueId}. This does not self-heal by retrying — each attempt fails against a new conflicting id. Workaround: create a replacement issue with the same content, relate it back with --duplicate-of ${issueId}, and cancel the original.`
+			: "for this issue. This does not self-heal by retrying — each attempt fails against a new conflicting id. If it recurs on the same issue after creation, recreate it under a fresh id rather than repairing via update.";
+		throw new Error(
+			`Linear reports its description store is in conflict ${detail}`,
+		);
+	}
+	if (error instanceof Error) {
+		throw error;
+	}
+	throw new Error(msg);
+}
+
 export class GraphQLIssuesService {
 	private readonly graphQLService: GraphQLService;
 	private readonly linearService: LinearService;
@@ -551,6 +582,17 @@ export class GraphQLIssuesService {
 		args: UpdateIssueArgs,
 		labelMode = "overwriting",
 	): Promise<LinearIssue> {
+		try {
+			return await this.updateIssueImpl(args, labelMode);
+		} catch (error) {
+			rethrowWithDocumentContentHint(error, args.id);
+		}
+	}
+
+	private async updateIssueImpl(
+		args: UpdateIssueArgs,
+		labelMode = "overwriting",
+	): Promise<LinearIssue> {
 		// Normalize URL/slug-id --project inputs to UUIDs before the batch
 		// resolver runs; see comment on `withNormalizedProjectId`.
 		const normalizedArgs = await this.withNormalizedProjectId(args);
@@ -727,6 +769,14 @@ export class GraphQLIssuesService {
 	}
 
 	async createIssue(args: CreateIssueArgs): Promise<LinearIssue> {
+		try {
+			return await this.createIssueImpl(args);
+		} catch (error) {
+			rethrowWithDocumentContentHint(error);
+		}
+	}
+
+	private async createIssueImpl(args: CreateIssueArgs): Promise<LinearIssue> {
 		// Pre-resolve URL/slug-id forms of --project to a UUID so the batch
 		// resolver below (which uses a `name eqIgnoreCase` filter) can skip
 		// the project lookup entirely. Plain name inputs flow through unchanged
