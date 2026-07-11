@@ -98,11 +98,15 @@ class GraphQLDocumentsService {
 
 	async listDocuments(options?: {
 		projectId?: string;
+		issueId?: string;
 		first?: number;
 	}): Promise<LinearDocument[]> {
-		const filter = options?.projectId
-			? { project: { id: { eq: options.projectId } } }
-			: undefined;
+		let filter: Record<string, unknown> | undefined;
+		if (options?.projectId) {
+			filter = { project: { id: { eq: options.projectId } } };
+		} else if (options?.issueId) {
+			filter = { issue: { id: { eq: options.issueId } } };
+		}
 		const result = await this.graphqlService.rawRequest<ListDocumentsResponse>(
 			LIST_DOCUMENTS_QUERY,
 			{

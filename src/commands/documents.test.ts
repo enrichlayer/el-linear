@@ -82,6 +82,7 @@ describe("documents commands", () => {
 
 			expect(mockListDocuments).toHaveBeenCalledWith({
 				projectId: undefined,
+				issueId: undefined,
 				first: 50,
 			});
 			expect(mockOutputSuccess).toHaveBeenCalledWith({
@@ -106,11 +107,31 @@ describe("documents commands", () => {
 			expect(mockResolveProjectId).toHaveBeenCalledWith("My Project");
 			expect(mockListDocuments).toHaveBeenCalledWith({
 				projectId: "proj-uuid-123",
+				issueId: undefined,
 				first: 50,
 			});
 		});
 
-		it("uses --issue to find documents via attachments", async () => {
+		it("uses --issue to filter documents by their direct issue link", async () => {
+			mockResolveIssueId.mockResolvedValue("issue-uuid-1");
+			mockListDocuments.mockResolvedValue([
+				{ id: "doc-1", title: "Linked Doc" },
+			]);
+
+			const program = createTestProgram();
+			setupDocumentsCommands(program);
+			await runCommand(program, ["documents", "list", "--issue", "ENG-5"]);
+
+			expect(mockResolveIssueId).toHaveBeenCalledWith("ENG-5");
+			expect(mockListDocuments).toHaveBeenCalledWith({
+				projectId: undefined,
+				issueId: "issue-uuid-1",
+				first: 50,
+			});
+			expect(mockListAttachments).not.toHaveBeenCalled();
+		});
+
+		it("uses --attached-to to find documents via URL attachments", async () => {
 			mockResolveIssueId.mockResolvedValue("issue-uuid-1");
 			mockListAttachments.mockResolvedValue([
 				{ url: "https://linear.app/team/document/my-doc-abc123" },
@@ -122,14 +143,19 @@ describe("documents commands", () => {
 
 			const program = createTestProgram();
 			setupDocumentsCommands(program);
-			await runCommand(program, ["documents", "list", "--issue", "ENG-5"]);
+			await runCommand(program, [
+				"documents",
+				"list",
+				"--attached-to",
+				"ENG-5",
+			]);
 
 			expect(mockResolveIssueId).toHaveBeenCalledWith("ENG-5");
 			expect(mockListAttachments).toHaveBeenCalledWith("issue-uuid-1");
 			expect(mockListDocumentsBySlugIds).toHaveBeenCalledWith(["abc123"], 50);
 		});
 
-		it("errors when both --project and --issue are provided", async () => {
+		it("errors when multiple document relation filters are provided", async () => {
 			const program = createTestProgram();
 			setupDocumentsCommands(program);
 
@@ -140,10 +166,14 @@ describe("documents commands", () => {
 				"X",
 				"--issue",
 				"Y",
+				"--attached-to",
+				"Z",
 			]);
 
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
-				expect.stringContaining("Cannot use --project and --issue together"),
+				expect.stringContaining(
+					"Cannot combine --project, --issue, and --attached-to",
+				),
 			);
 			expect(process.exit).toHaveBeenCalledWith(1);
 		});
@@ -164,6 +194,49 @@ describe("documents commands", () => {
 	});
 
 	describe("documents create", () => {
+		it("preserves the same direct issue link through create, read, and list", async () => {
+			const linkedDocument = {
+				id: "doc-linked",
+				title: "Linked Doc",
+				issue: {
+					id: "issue-uuid-1",
+					identifier: "ENG-5",
+					title: "Issue",
+				},
+			};
+			mockResolveIssueId.mockResolvedValue("issue-uuid-1");
+			mockCreateDocument.mockResolvedValue(linkedDocument);
+			mockGetDocument.mockResolvedValue(linkedDocument);
+			mockListDocuments.mockResolvedValue([linkedDocument]);
+
+			const program = createTestProgram();
+			setupDocumentsCommands(program);
+			await runCommand(program, [
+				"documents",
+				"create",
+				"--title",
+				"Linked Doc",
+				"--issue",
+				"ENG-5",
+			]);
+			await runCommand(program, ["documents", "read", "doc-linked"]);
+			await runCommand(program, ["documents", "list", "--issue", "ENG-5"]);
+
+			expect(mockCreateDocument).toHaveBeenCalledWith(
+				expect.objectContaining({ issueId: "issue-uuid-1" }),
+			);
+			expect(mockGetDocument).toHaveBeenCalledWith("doc-linked");
+			expect(mockListDocuments).toHaveBeenCalledWith({
+				projectId: undefined,
+				issueId: "issue-uuid-1",
+				first: 50,
+			});
+			expect(mockOutputSuccess).toHaveBeenLastCalledWith({
+				data: [linkedDocument],
+				meta: { count: 1 },
+			});
+		});
+
 		it("creates a document with title", async () => {
 			const createdDoc = {
 				id: "doc-new",
