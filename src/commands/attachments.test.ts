@@ -190,18 +190,18 @@ describe("attachments commands", () => {
 	});
 
 	describe("attachments download", () => {
-		it("resolves an attachment by title and saves it", async () => {
+		it("uses a safe attachment title as the default output path", async () => {
 			mockResolveIssueId.mockResolvedValue("issue-uuid-1");
 			mockListAttachments.mockResolvedValue([
 				{
 					id: "att-pdf",
-					title: "report.pdf",
+					title: "../../report.pdf",
 					url: "https://uploads.linear.app/report-pdf",
 				},
 			]);
 			mockDownloadFile.mockResolvedValue({
 				success: true,
-				filePath: "/tmp/report.pdf",
+				filePath: "report.pdf",
 			});
 
 			const program = createTestProgram();
@@ -210,18 +210,16 @@ describe("attachments commands", () => {
 				"attachments",
 				"download",
 				"DEV-1",
-				"report.pdf",
-				"--output",
-				"/tmp/report.pdf",
+				"att-pdf",
 				"--overwrite",
 			]);
 
 			expect(mockDownloadFile).toHaveBeenCalledWith(
 				"https://uploads.linear.app/report-pdf",
-				{ output: "/tmp/report.pdf", overwrite: true },
+				{ output: "report.pdf", overwrite: true },
 			);
 			expect(mockOutputSuccess).toHaveBeenCalledWith(
-				expect.objectContaining({ filePath: "/tmp/report.pdf" }),
+				expect.objectContaining({ filePath: "report.pdf" }),
 			);
 		});
 	});

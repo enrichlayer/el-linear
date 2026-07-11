@@ -1,3 +1,4 @@
+import { basename } from "node:path";
 import type { Command, OptionValues } from "commander";
 import type { LinearAttachment } from "../types/linear.js";
 import { createFileService } from "../utils/file-service.js";
@@ -147,8 +148,15 @@ export function setupAttachmentsCommands(program: Command): void {
 						rootOpts,
 					);
 					const fileService = await createFileService(rootOpts);
+					const titleBasename = attachment.title
+						? basename(attachment.title)
+						: undefined;
+					const defaultOutput =
+						titleBasename && ![".", ".."].includes(titleBasename)
+							? titleBasename
+							: undefined;
 					const result = await fileService.downloadFile(attachment.url, {
-						output: options.output,
+						output: options.output ?? defaultOutput,
 						overwrite: options.overwrite,
 					});
 					if (!result.success) throw new Error(result.error);
