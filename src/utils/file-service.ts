@@ -1,7 +1,11 @@
 import { access, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname } from "node:path";
 import type { LinearCredential } from "../auth/linear-credential.js";
-import type { FileDownloadResult, FileUploadResult } from "../types/linear.js";
+import type {
+	FileDownloadResult,
+	FileReadResult,
+	FileUploadResult,
+} from "../types/linear.js";
 import { extractFilenameFromUrl, isLinearUploadUrl } from "./embed-parser.js";
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
@@ -65,6 +69,63 @@ export class FileService {
 		this.authHeader = buildAuthHeader(auth);
 	}
 
+	private async fetchUpload(url: string): Promise<Response> {
+		const urlObj = new URL(url);
+		const headers: Record<string, string> = {};
+		if (!urlObj.searchParams.has("signature")) {
+			headers.Authorization = this.authHeader;
+		}
+		return fetch(url, { method: "GET", headers });
+	}
+
+	async readTextFile(url: string): Promise<FileReadResult> {
+		if (!isLinearUploadUrl(url)) {
+			return {
+				success: false,
+				error: "URL must be from uploads.linear.app domain",
+			};
+		}
+
+		try {
+			const response = await this.fetchUpload(url);
+			if (!response.ok) {
+				return {
+					success: false,
+					error: `HTTP ${response.status}: ${response.statusText}`,
+					statusCode: response.status,
+				};
+			}
+
+			const contentType = (response.headers.get("content-type") ?? "")
+				.split(";", 1)[0]
+				.toLowerCase();
+			const isText =
+				contentType.startsWith("text/") ||
+				[
+					"application/json",
+					"application/xml",
+					"application/javascript",
+				].includes(contentType);
+			if (!isText) {
+				return {
+					success: false,
+					error: `Attachment is not text (${contentType || "unknown content type"}); use attachments download instead.`,
+				};
+			}
+
+			return {
+				success: true,
+				content: await response.text(),
+				contentType,
+			};
+		} catch (error) {
+			return {
+				success: false,
+				error: error instanceof Error ? error.message : String(error),
+			};
+		}
+	}
+
 	async downloadFile(
 		url: string,
 		options: { output?: string; overwrite?: boolean } = {},
@@ -90,14 +151,7 @@ export class FileService {
 		}
 
 		try {
-			const urlObj = new URL(url);
-			const isSignedUrl = urlObj.searchParams.has("signature");
-			const headers: Record<string, string> = {};
-			if (!isSignedUrl) {
-				headers.Authorization = this.authHeader;
-			}
-
-			const response = await fetch(url, { method: "GET", headers });
+			const response = await this.fetchUpload(url);
 			if (!response.ok) {
 				return {
 					success: false,

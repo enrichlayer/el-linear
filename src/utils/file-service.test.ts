@@ -150,6 +150,68 @@ describe("FileService", () => {
 		});
 	});
 
+	describe("readTextFile", () => {
+		it("reads text with the configured authorization header", async () => {
+			const service = createService();
+			mockFetch.mockResolvedValue({
+				ok: true,
+				headers: new Headers({ "content-type": "text/html; charset=utf-8" }),
+				text: () => Promise.resolve("<h1>Report</h1>"),
+			});
+
+			const result = await service.readTextFile(
+				"https://uploads.linear.app/abc/report",
+			);
+
+			expect(result).toEqual({
+				success: true,
+				content: "<h1>Report</h1>",
+				contentType: "text/html",
+			});
+			expect(mockFetch).toHaveBeenCalledWith(
+				"https://uploads.linear.app/abc/report",
+				{ method: "GET", headers: { Authorization: "test-api-token" } },
+			);
+		});
+
+		it("rejects binary content", async () => {
+			const service = createService();
+			mockFetch.mockResolvedValue({
+				ok: true,
+				headers: new Headers({ "content-type": "application/pdf" }),
+			});
+
+			const result = await service.readTextFile(
+				"https://uploads.linear.app/abc/report",
+			);
+
+			expect(result).toEqual({
+				success: false,
+				error:
+					"Attachment is not text (application/pdf); use attachments download instead.",
+			});
+		});
+
+		it("returns the HTTP status for a failed read", async () => {
+			const service = createService();
+			mockFetch.mockResolvedValue({
+				ok: false,
+				status: 401,
+				statusText: "Unauthorized",
+			});
+
+			const result = await service.readTextFile(
+				"https://uploads.linear.app/abc/report",
+			);
+
+			expect(result).toEqual({
+				success: false,
+				error: "HTTP 401: Unauthorized",
+				statusCode: 401,
+			});
+		});
+	});
+
 	describe("uploadFile", () => {
 		it("returns error if file not found", async () => {
 			const service = createService();
