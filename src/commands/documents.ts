@@ -106,7 +106,7 @@ async function handleListDocuments(
 			...new Set(
 				attachments
 					.map((att) => extractDocumentIdFromUrl(att.url))
-					.filter((id: string | null) => id !== null),
+					.filter((id): id is string => id !== null),
 			),
 		];
 		if (documentSlugIds.length === 0) {
@@ -114,7 +114,7 @@ async function handleListDocuments(
 			return;
 		}
 		const docs = await documentsService.listDocumentsBySlugIds(
-			documentSlugIds as string[],
+			documentSlugIds,
 			limit,
 		);
 		outputSuccess({ data: docs, meta: { count: docs.length } });

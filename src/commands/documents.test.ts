@@ -194,7 +194,7 @@ describe("documents commands", () => {
 	});
 
 	describe("documents create", () => {
-		it("preserves the same direct issue link through create, read, and list", async () => {
+		it("wires create, read, and list consistently for the same direct issue link", async () => {
 			const linkedDocument = {
 				id: "doc-linked",
 				title: "Linked Doc",
