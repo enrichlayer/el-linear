@@ -32,12 +32,20 @@ vi.mock("../utils/graphql-attachments-service.js", () => ({
 }));
 
 const mockUploadFile = vi.fn();
-const mockFileServiceInstance = { uploadFile: mockUploadFile };
+const mockDownloadFile = vi.fn();
+const mockReadTextFile = vi.fn();
+const mockFileServiceInstance = {
+	uploadFile: mockUploadFile,
+	downloadFile: mockDownloadFile,
+	readTextFile: mockReadTextFile,
+};
 
 vi.mock("../utils/file-service.js", () => ({
 	createFileService: vi.fn().mockResolvedValue(mockFileServiceInstance),
 	FileService: class {
 		uploadFile = mockUploadFile;
+		downloadFile = mockDownloadFile;
+		readTextFile = mockReadTextFile;
 	},
 }));
 
@@ -125,6 +133,94 @@ describe("attachments commands", () => {
 				success: true,
 				message: "Attachment deleted",
 			});
+		});
+	});
+
+	describe("attachments read", () => {
+		it("resolves an attachment by ID and writes text to stdout", async () => {
+			mockResolveIssueId.mockResolvedValue("issue-uuid-1");
+			mockListAttachments.mockResolvedValue([
+				{
+					id: "att-1",
+					title: "report.html",
+					url: "https://uploads.linear.app/report",
+				},
+			]);
+			mockReadTextFile.mockResolvedValue({
+				success: true,
+				content: "<h1>Report</h1>",
+				contentType: "text/html",
+			});
+
+			const program = createTestProgram();
+			setupAttachmentsCommands(program);
+			await runCommand(program, ["attachments", "read", "DEV-1", "att-1"]);
+
+			expect(mockReadTextFile).toHaveBeenCalledWith(
+				"https://uploads.linear.app/report",
+			);
+			expect(consoleErrorSpy).toHaveBeenCalledWith("<h1>Report</h1>");
+			expect(consoleErrorSpy).toHaveBeenCalledWith("\n");
+		});
+
+		it("reports a non-text attachment without writing binary data", async () => {
+			mockResolveIssueId.mockResolvedValue("issue-uuid-1");
+			mockListAttachments.mockResolvedValue([
+				{
+					id: "att-pdf",
+					title: "report.pdf",
+					url: "https://uploads.linear.app/report-pdf",
+				},
+			]);
+			mockReadTextFile.mockResolvedValue({
+				success: false,
+				error:
+					"Attachment is not text (application/pdf); use attachments download instead.",
+			});
+
+			const program = createTestProgram();
+			setupAttachmentsCommands(program);
+			await runCommand(program, ["attachments", "read", "DEV-1", "att-pdf"]);
+
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("use attachments download instead"),
+			);
+			expect(process.exit).toHaveBeenCalledWith(1);
+		});
+	});
+
+	describe("attachments download", () => {
+		it("uses a safe attachment title as the default output path", async () => {
+			mockResolveIssueId.mockResolvedValue("issue-uuid-1");
+			mockListAttachments.mockResolvedValue([
+				{
+					id: "att-pdf",
+					title: "../../report.pdf",
+					url: "https://uploads.linear.app/report-pdf",
+				},
+			]);
+			mockDownloadFile.mockResolvedValue({
+				success: true,
+				filePath: "report.pdf",
+			});
+
+			const program = createTestProgram();
+			setupAttachmentsCommands(program);
+			await runCommand(program, [
+				"attachments",
+				"download",
+				"DEV-1",
+				"att-pdf",
+				"--overwrite",
+			]);
+
+			expect(mockDownloadFile).toHaveBeenCalledWith(
+				"https://uploads.linear.app/report-pdf",
+				{ output: "report.pdf", overwrite: true },
+			);
+			expect(mockOutputSuccess).toHaveBeenCalledWith(
+				expect.objectContaining({ filePath: "report.pdf" }),
+			);
 		});
 	});
 

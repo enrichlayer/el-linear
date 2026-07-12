@@ -121,6 +121,20 @@ el-linear comments list DEV-123 --format json 2>&1 | python3 -c "import json,sys
 `#comment-<hash>`. `comments list --format summary` includes each comment id
 so you can copy it straight into `comments read`.
 
+### Attachment reads and downloads
+
+List attachments first, then use the attachment ID or exact title. Text files
+can be streamed directly; binary files require an explicit download path.
+
+```bash
+el-linear attachments list DEV-123 --format summary
+el-linear attachments read DEV-123 <attachment-id>
+el-linear attachments download DEV-123 <attachment-id> --output /tmp/report.pdf
+```
+
+Do not reconstruct authenticated `curl` commands from attachment URLs. The
+attachment commands use the active Linear profile and reject binary stdout.
+
 ### Terse write confirmations: `-q, --quiet`
 
 `issues create|update` and `comments create|update` accept `-q, --quiet`, which prints a single machine-stable confirmation line instead of the full JSON envelope — no need to `grep` the result for the identifier / state / url:

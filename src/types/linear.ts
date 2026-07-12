@@ -240,6 +240,10 @@ export type FileDownloadResult =
 	| { success: true; filePath: string }
 	| { success: false; error: string; statusCode?: number };
 
+export type FileReadResult =
+	| { success: true; content: string; contentType: string }
+	| { success: false; error: string; statusCode?: number };
+
 export type FileUploadResult =
 	| { success: true; assetUrl: string; filename: string }
 	| { success: false; error: string; statusCode?: number };
