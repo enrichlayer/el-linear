@@ -15,6 +15,14 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 * **labels:** resolve `labels create --team` keys and names before creating the label (DEV-5749)
 
+## [1.38.1](https://github.com/enrichlayer/el-linear/compare/v1.38.0...v1.38.1) (2026-07-12)
+
+
+### Bug Fixes
+
+* **attachments:** add authenticated reads and downloads (DEV-5981) ([#244](https://github.com/enrichlayer/el-linear/issues/244)) ([64e7bdd](https://github.com/enrichlayer/el-linear/commit/64e7bdd647d4b7f4832e6d197a3b67bd57585203))
+* **issues:** enrich the DocumentContent write-conflict error with an actionable hint (FE-926) ([#240](https://github.com/enrichlayer/el-linear/issues/240)) ([0fa04af](https://github.com/enrichlayer/el-linear/commit/0fa04af8c41317b1e915a284d3e1bb5ea4bbee15))
+
 ## [1.38.0](https://github.com/enrichlayer/el-linear/compare/v1.37.2...v1.38.0) (2026-07-09)
 
 
