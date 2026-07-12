@@ -13,6 +13,7 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Bug Fixes
 
+* **documents:** make `documents list --issue` return directly issue-linked documents and expose attachment filtering separately (DEV-5971)
 * **labels:** resolve `labels create --team` keys and names before creating the label (DEV-5749)
 
 ## [1.38.1](https://github.com/enrichlayer/el-linear/compare/v1.38.0...v1.38.1) (2026-07-12)

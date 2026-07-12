@@ -79,9 +79,12 @@ async function handleListDocuments(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	if (options.project && options.issue) {
+	const filters = [options.project, options.issue, options.attachedTo].filter(
+		Boolean,
+	);
+	if (filters.length > 1) {
 		throw new Error(
-			"Cannot use --project and --issue together. Choose one filter.",
+			"Cannot combine --project, --issue, and --attached-to. Choose one filter.",
 		);
 	}
 
@@ -95,15 +98,15 @@ async function handleListDocuments(
 		);
 	}
 
-	if (options.issue) {
+	if (options.attachedTo) {
 		const attachmentsService = await createGraphQLAttachmentsService(rootOpts);
-		const issueId = await linearService.resolveIssueId(options.issue);
+		const issueId = await linearService.resolveIssueId(options.attachedTo);
 		const attachments = await attachmentsService.listAttachments(issueId);
 		const documentSlugIds = [
 			...new Set(
 				attachments
 					.map((att) => extractDocumentIdFromUrl(att.url))
-					.filter((id: string | null) => id !== null),
+					.filter((id): id is string => id !== null),
 			),
 		];
 		if (documentSlugIds.length === 0) {
@@ -111,7 +114,7 @@ async function handleListDocuments(
 			return;
 		}
 		const docs = await documentsService.listDocumentsBySlugIds(
-			documentSlugIds as string[],
+			documentSlugIds,
 			limit,
 		);
 		outputSuccess({ data: docs, meta: { count: docs.length } });
@@ -122,8 +125,13 @@ async function handleListDocuments(
 	if (options.project) {
 		projectId = await linearService.resolveProjectId(options.project);
 	}
+	let issueId: string | undefined;
+	if (options.issue) {
+		issueId = await linearService.resolveIssueId(options.issue);
+	}
 	const docs = await documentsService.listDocuments({
 		projectId,
+		issueId,
 		first: limit,
 	});
 	outputSuccess({ data: docs, meta: { count: docs.length } });
@@ -147,10 +155,13 @@ export function setupDocumentsCommands(program: Command): void {
 		.option("--team <team>", "team key or name")
 		.option("--icon <icon>", "document icon")
 		.option("--color <color>", "icon color")
-		.option("--issue <issue>", "link document to issue (e.g., ABC-123)")
+		.option(
+			"--issue <issue>",
+			"link document directly to issue (e.g., ABC-123)",
+		)
 		.option(
 			"--attach-to <issue>",
-			"also attach document to issue (e.g., ABC-123)",
+			"also create a URL attachment on issue (e.g., ABC-123)",
 		)
 		.action(handleAsyncCommand(handleCreateDocument));
 
@@ -218,7 +229,11 @@ export function setupDocumentsCommands(program: Command): void {
 		.option("--project <project>", "filter by project name or ID")
 		.option(
 			"--issue <issue>",
-			"filter by issue (shows documents attached to the issue)",
+			"filter by direct issue link (set by documents create --issue)",
+		)
+		.option(
+			"--attached-to <issue>",
+			"filter by URL attachments (set by documents create --attach-to)",
 		)
 		.option("-l, --limit <limit>", "maximum number of documents", "50")
 		.action(handleAsyncCommand(handleListDocuments));

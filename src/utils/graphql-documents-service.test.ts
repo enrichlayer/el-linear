@@ -176,6 +176,20 @@ describe("GraphQLDocumentsService", () => {
 			);
 		});
 
+		it("lists documents with direct issue-link filter", async () => {
+			const service = await createService();
+			mockRawRequest.mockResolvedValue({
+				documents: { nodes: [{ id: "doc-1", title: "Issue Doc" }] },
+			});
+			await service.listDocuments({ issueId: "issue-1" });
+			expect(mockRawRequest).toHaveBeenCalledWith(
+				expect.any(String),
+				expect.objectContaining({
+					filter: { issue: { id: { eq: "issue-1" } } },
+				}),
+			);
+		});
+
 		it("lists documents with custom limit", async () => {
 			const service = await createService();
 			mockRawRequest.mockResolvedValue({ documents: { nodes: [] } });
