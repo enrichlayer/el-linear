@@ -61,10 +61,28 @@ PR titles before merge:
 - **`pnpm-lock.yaml` is not a published surface.** It is not in `package.json`'s
   `files`, so it is never shipped, and a consumer resolves our dependencies from
   the **ranges in `package.json`** — never from our lockfile. A lockfile-only PR
-  (the shape every dependabot bump takes) therefore needs no release and may use
-  `build(deps):`. A dependency change that *is* consumer-visible edits
-  `package.json`, which is still listed above and still requires a releaseable
-  type.
+  (the shape every routine dependabot bump takes) therefore needs no release and
+  may use `build(deps):`.
+- **`package.json` is checked per-key, not wholesale.** Only the keys that reach a
+  consumer make it a published surface:
+
+  | Key | Consumer-visible? |
+  |---|---|
+  | `dependencies`, `optionalDependencies`, `peerDependencies` | **yes** — resolved at the consumer's install |
+  | `engines`, `bin`, `exports`, `files`, `name`, `version` | **yes** |
+  | `devDependencies` | **no** — never installed by a consumer, and the build is `tsc`, not a bundler, so no dev tool is inlined into `dist/` |
+  | `scripts` | **no**, except install-time lifecycle scripts (`postinstall` and friends), which *do* run on a consumer's machine |
+
+  So a **major** dev-dependency bump — which rewrites the range in `package.json`
+  and is the one dependabot shape the lockfile rule above does not cover — passes
+  with `build(deps-dev):` and cuts no release. A **runtime** dependency range bump
+  still requires `fix:`/`feat:` and still cuts a release: that half is the reason
+  the gate exists.
+
+  **Fail-closed:** if the check cannot read both sides of the `package.json` diff
+  (file added or deleted, unparseable, shallow fetch), it falls back to treating the
+  whole file as published. A release gate that guesses "probably fine" when it cannot
+  see the diff is not a gate.
 - release-please release PRs titled like `chore(main): release 1.37.3` are
   accepted.
 

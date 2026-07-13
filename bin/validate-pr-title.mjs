@@ -33,6 +33,9 @@ const RELEASEABLE_TYPES = new Set(["feat", "fix"]);
 // it. The rule's intent survives without it — `package.json` is still listed, so a
 // genuinely consumer-visible dependency change (a range bump, a new or moved dep)
 // still demands a releaseable title.
+//
+// `package.json` is listed here but is NOT judged by path alone: see
+// DEV_ONLY_PACKAGE_KEYS below for the section-aware refinement (DEV-6066).
 const PUBLISHED_PATHS = [
 	"README.md",
 	"LICENSE",
@@ -43,11 +46,161 @@ const PUBLISHED_PATHS = [
 
 const PUBLISHED_PREFIXES = ["src/", "claude-skills/"];
 
+export const PACKAGE_JSON = "package.json";
+
+// `package.json` is a published surface, but only SOME of its keys reach a consumer
+// (DEV-6066). The gate is therefore SECTION-AWARE for this one file: it fires when a
+// consumer-visible key actually moved, not merely because the file is in the changed-
+// file list.
+//
+// The check is written as a DENYLIST of provably-invisible keys, not an allowlist of
+// visible ones, and that direction is deliberate: it FAILS CLOSED. Any key not named
+// here — `main`, `types`, `exports`, `bin`, `files`, `engines`, `dependencies`,
+// `optionalDependencies`, `peerDependencies`, `version`, `sideEffects`,
+// `publishConfig`, or one npm adds next year — still fires the gate. An allowlist
+// would silently pass every key nobody thought to list, which for a release gate is
+// the expensive direction to be wrong in.
+//
+//   devDependencies — never installed by a consumer of the published tarball, and
+//                     never inlined into `dist/`: the build is `tsc`, not a bundler.
+//                     A devDependency bump is exactly as invisible to a consumer as a
+//                     lockfile bump, which DEV-6064 already established.
+//   scripts         — dev-only TARGETS (`build`, `lint`, `test`, …) are invisible.
+//                     The npm lifecycle scripts below are NOT: they execute on the
+//                     consumer's machine at install time, so they are carved back out.
+const DEV_ONLY_PACKAGE_KEYS = new Set(["devDependencies", "scripts"]);
+
+// Scripts npm runs on a CONSUMER's machine when our package is installed as a
+// dependency. Editing one of these is consumer-visible even though `scripts` as a
+// whole is dev-only. (`prepare` runs for git installs of this package.)
+const CONSUMER_LIFECYCLE_SCRIPTS = new Set([
+	"preinstall",
+	"install",
+	"postinstall",
+	"prepare",
+]);
+
 export function isPublishedSurfacePath(path) {
 	return (
 		PUBLISHED_PATHS.includes(path) ||
 		PUBLISHED_PREFIXES.some((prefix) => path.startsWith(prefix))
 	);
+}
+
+function deepEqual(a, b) {
+	if (a === b) return true;
+	if (typeof a !== typeof b || a === null || b === null) return false;
+	if (typeof a !== "object") return false;
+
+	if (Array.isArray(a) || Array.isArray(b)) {
+		if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+			return false;
+		}
+		return a.every((item, index) => deepEqual(item, b[index]));
+	}
+
+	const aKeys = Object.keys(a);
+	const bKeys = Object.keys(b);
+	if (aKeys.length !== bKeys.length) return false;
+	// Key ORDER is not semantic in JSON, so compare by key, not by serialization.
+	return aKeys.every(
+		(key) => Object.hasOwn(b, key) && deepEqual(a[key], b[key]),
+	);
+}
+
+function changedTopLevelKeys(base, head) {
+	const keys = new Set([...Object.keys(base), ...Object.keys(head)]);
+	return [...keys].filter((key) => !deepEqual(base[key], head[key])).sort();
+}
+
+/**
+ * Top-level `package.json` keys that moved AND are visible to a consumer of the
+ * published npm package.
+ *
+ * @param {Record<string, unknown>} base parsed base-ref package.json
+ * @param {Record<string, unknown>} head parsed head-ref package.json
+ * @returns {string[]} sorted consumer-visible keys; empty means "no consumer can tell"
+ */
+export function consumerVisiblePackageJsonKeys(base, head) {
+	return changedTopLevelKeys(base, head).filter((key) => {
+		if (!DEV_ONLY_PACKAGE_KEYS.has(key)) return true;
+
+		if (key === "scripts") {
+			// Dev-only targets are invisible; install-time lifecycle scripts are not.
+			const scriptKeys = changedTopLevelKeys(
+				base.scripts ?? {},
+				head.scripts ?? {},
+			);
+			return scriptKeys.some((script) =>
+				CONSUMER_LIFECYCLE_SCRIPTS.has(script),
+			);
+		}
+
+		return false;
+	});
+}
+
+function parsePackageJson(source) {
+	if (typeof source !== "string" || !source.trim()) return null;
+	try {
+		const parsed = JSON.parse(source);
+		return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+			? parsed
+			: null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Decide whether a `package.json` edit reaches a consumer.
+ *
+ * FAIL-CLOSED: without both blobs (not supplied, unparseable, file added or deleted)
+ * we cannot prove the change is invisible, so we fall back to the pre-DEV-6066
+ * wholesale behavior and treat the file as a published surface. A release gate that
+ * guesses "probably fine" when it cannot see the diff is not a gate.
+ *
+ * @param {{base?: string|null, head?: string|null}} [sources] raw JSON text of each side
+ */
+export function classifyPackageJsonChange(sources) {
+	const base = parsePackageJson(sources?.base);
+	const head = parsePackageJson(sources?.head);
+
+	if (!base || !head) {
+		return { consumerVisible: true, keys: [], readable: false };
+	}
+
+	const keys = consumerVisiblePackageJsonKeys(base, head);
+	return { consumerVisible: keys.length > 0, keys, readable: true };
+}
+
+/**
+ * The changed files that count as a published surface, as human-readable entries.
+ * `package.json` is section-aware (DEV-6066) and names the offending keys; every
+ * other path is classified by path alone.
+ *
+ * @param {string[]} changedFiles
+ * @param {{packageJson?: {base?: string|null, head?: string|null}}} [context]
+ */
+export function publishedSurfaceEntries(changedFiles, context = {}) {
+	const entries = [];
+
+	for (const path of changedFiles) {
+		if (path === PACKAGE_JSON) {
+			const verdict = classifyPackageJsonChange(context.packageJson);
+			if (!verdict.consumerVisible) continue;
+			entries.push(
+				verdict.keys.length > 0
+					? `${PACKAGE_JSON} (${verdict.keys.join(", ")})`
+					: PACKAGE_JSON,
+			);
+			continue;
+		}
+
+		if (isPublishedSurfacePath(path)) entries.push(path);
+	}
+
+	return entries;
 }
 
 export function titleInfo(title) {
@@ -68,10 +221,18 @@ export function titleInfo(title) {
 	};
 }
 
-export function validatePrTitle(title, changedFiles = []) {
+/**
+ * @param {string} title the PR title (or, for a single-commit PR, the commit subject)
+ * @param {string[]} [changedFiles] paths changed against the base ref
+ * @param {{packageJson?: {base?: string|null, head?: string|null}}} [context]
+ *   Raw `package.json` text on each side of the diff. A path list alone cannot answer
+ *   "did a consumer-visible KEY move", so the section-aware check (DEV-6066) needs the
+ *   blobs. Omitting it is safe — the check falls back to the wholesale behavior.
+ */
+export function validatePrTitle(title, changedFiles = [], context = {}) {
 	const normalizedTitle = title.trim();
 	const info = titleInfo(normalizedTitle);
-	const publishedFiles = changedFiles.filter(isPublishedSurfacePath);
+	const publishedFiles = publishedSurfaceEntries(changedFiles, context);
 
 	if (!normalizedTitle) {
 		return {
@@ -131,20 +292,48 @@ function parseArgs(argv) {
 	return options;
 }
 
+function git(args) {
+	return execFileSync("git", args, { encoding: "utf8" });
+}
+
 function changedFilesFromGit(base) {
 	if (!base) return [];
 
-	const output = execFileSync(
-		"git",
-		["diff", "--name-only", `${base}...HEAD`],
-		{
-			encoding: "utf8",
-		},
-	);
+	const output = git(["diff", "--name-only", `${base}...HEAD`]);
 	return output
 		.split(/\r?\n/u)
 		.map((file) => file.trim())
 		.filter(Boolean);
+}
+
+function showBlob(rev, path) {
+	try {
+		return git(["show", `${rev}:${path}`]);
+	} catch {
+		// Missing on that side (added / deleted / shallow fetch). classifyPackageJsonChange
+		// fails closed on a null blob, which is the behavior we want.
+		return null;
+	}
+}
+
+/**
+ * Read `package.json` on both sides of the diff, matching the merge-base semantics of
+ * the `base...HEAD` range used for the changed-file list.
+ */
+function packageJsonSourcesFromGit(base) {
+	if (!base) return undefined;
+
+	let mergeBase = base;
+	try {
+		mergeBase = git(["merge-base", base, "HEAD"]).trim() || base;
+	} catch {
+		// Shallow clone with no reachable merge-base: compare against the base ref itself.
+	}
+
+	return {
+		base: showBlob(mergeBase, PACKAGE_JSON),
+		head: showBlob("HEAD", PACKAGE_JSON),
+	};
 }
 
 function main() {
@@ -153,7 +342,10 @@ function main() {
 		options.changedFiles.length > 0
 			? options.changedFiles
 			: changedFilesFromGit(options.base);
-	const result = validatePrTitle(options.title, changedFiles);
+	const context = changedFiles.includes(PACKAGE_JSON)
+		? { packageJson: packageJsonSourcesFromGit(options.base) }
+		: {};
+	const result = validatePrTitle(options.title, changedFiles, context);
 
 	if (result.ok) {
 		console.log(result.message);
