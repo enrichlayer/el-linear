@@ -7,11 +7,36 @@ const CONVENTIONAL_TITLE_RE =
 const RELEASE_PLEASE_TITLE_RE = /^chore\(main\): release \d+\.\d+\.\d+$/u;
 const RELEASEABLE_TYPES = new Set(["feat", "fix"]);
 
+// Paths that must not change without cutting a release — for EITHER of two reasons:
+//
+//   1. they reach a CONSUMER of the published npm package — `README.md`, `LICENSE`,
+//      `package.json`, and everything under `src/` / `claude-skills/` (the last two
+//      via PUBLISHED_PREFIXES below); or
+//   2. they steer RELEASE-PLEASE ITSELF — `release-please-config.json` and
+//      `.release-please-manifest.json`. These are never published and reach no
+//      consumer; they are listed because changing them changes how we release.
+//
+// Both reasons are stated because reason (1) alone is false for the two
+// release-please files, and this comment is the authority a future maintainer will
+// apply to decide whether some new path belongs here. A criterion that is untrue of
+// its own list is worse than none.
+//
+// `pnpm-lock.yaml` is deliberately NOT here (DEV-6064). It satisfies neither reason:
+// it is not in package.json's `files` (`dist/`, `claude-skills/`, `LICENSE`,
+// `README.md`) so it is never published, and a dependent resolves our dependencies
+// from the RANGES in `package.json`, never from our lockfile. A lockfile-only change
+// cannot reach a consumer and does not warrant a release.
+//
+// Listing it made every dependabot PR permanently red (dependabot always titles
+// `build(deps):` and a routine bump touches only the lockfile), which is strictly
+// worse than no bot: the red gets ignored, and a real security bump gets ignored with
+// it. The rule's intent survives without it — `package.json` is still listed, so a
+// genuinely consumer-visible dependency change (a range bump, a new or moved dep)
+// still demands a releaseable title.
 const PUBLISHED_PATHS = [
 	"README.md",
 	"LICENSE",
 	"package.json",
-	"pnpm-lock.yaml",
 	"release-please-config.json",
 	".release-please-manifest.json",
 ];

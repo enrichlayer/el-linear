@@ -15,6 +15,13 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 * **labels:** resolve `labels create --team` keys and names before creating the label (DEV-5749)
 
+## [1.39.0](https://github.com/enrichlayer/el-linear/compare/v1.38.2...v1.39.0) (2026-07-13)
+
+
+### Features
+
+* **skill:** require plain-language, jargon-free issue and MR titles (DEV-6051) ([#248](https://github.com/enrichlayer/el-linear/issues/248)) ([e68dc9d](https://github.com/enrichlayer/el-linear/commit/e68dc9d0d7497ad3d0f1980620dc8bda811e688a))
+
 ## [1.38.2](https://github.com/enrichlayer/el-linear/compare/v1.38.1...v1.38.2) (2026-07-12)
 
 
