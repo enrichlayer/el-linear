@@ -371,7 +371,7 @@ Complete ALL items before creating any issue:
 - [ ] **Assignee** — ask user if unclear (`el-linear users list --active`).
 - [ ] **Project** — always ask user, never guess (`el-linear projects list`).
 - [ ] **Labels** — exactly 1 type label + 1–2 domain labels (see Label Taxonomy below).
-- [ ] **Title** — action verb matching the type label (see Title Verb Convention), sentence case, specific scope.
+- [ ] **Title** — action verb matching the type label (see Title Verb Convention), sentence case, specific scope, **plain-language and jargon-free** (see Title Readability).
 - [ ] **Description** — 2–4 sentences with context and intent, formatted with **bold** and `inline code`.
 - [ ] **"Why we need this"** — genuine motivation, not a restatement of the title.
 
@@ -496,6 +496,27 @@ Title must start with a verb that matches the type label:
 - `chore` → Update, Remove, Clean, Migrate, Deploy, Rotate, Configure, Document, Review, Publish, Standardize, Upgrade
 - `spike` → Research, Investigate, Explore, Evaluate, Audit, Benchmark
 - `refactor` → Refactor, Restructure, Extract, Decouple, Simplify
+
+### Title Readability — plain language, jargon in the body
+
+**The title says what problem is being solved, in words a non-author can read.** The title is the shared surface — a teammate scanning the board, a manager triaging priority, a future picker deciding what to pick up. If it only parses for the person who wrote it that week, that whole audience is locked out. This applies to **MR/PR titles too** — they front the same board.
+
+**Keep the mechanism detail — function names, env-var constants, symbol soup — in the description, not the title.** Moving it into the body doesn't lose precision; it puts precision where the reader who opens the issue actually wants it. The title carries the *problem*; the body carries the *how*.
+
+- **Lead with the problem or outcome**, not the internal symbol at the center of it.
+- **Move code identifiers, env-var constants, and file/function names into the body**, under a `## …` heading where they read as helpful context.
+- **Proper nouns that ARE the clearest name stay.** The name of a tool, service, or protocol a teammate would recognize (a CLI name, `Vault`, `CI`, `OAuth`) is not jargon — don't paraphrase it into vagueness. The test is "would a teammate recognize this?", not "does it contain a lowercase token?".
+- **Don't overcorrect into mush.** "Fix the thing that was broken" is worse than a jargon title — specificity still matters, just express it in problem terms.
+
+Before → after:
+
+| ❌ Jargon title | ✅ Plain-language title |
+|---|---|
+| `parseTokenBucket drops refill when lastRefillTs is unset` | Fix rate limiter losing its refill allowance after an idle period |
+| `AUTH_SESSION_TTL mismatch logs out users early in refreshSession` | Fix users getting logged out before their session length expires |
+| `Extract validateEntry into shared pkg (3 hand-rolled copies)` | Deduplicate the entry validator copied across three packages |
+
+The mechanism (`parseTokenBucket`, `AUTH_SESSION_TTL`, `refreshSession`, the three copies) still gets stated — in the **description**, where it reads as context instead of a barrier.
 
 ### Rules
 
