@@ -49,23 +49,58 @@ Two paths: automatic (default) and manual (bootstrap or hotfix).
 
 ### PR title guard
 
-GitHub squash merges use the PR title as the commit subject. Because
-release-please reads conventional commit subjects on `main`, CI validates PR
-titles before merge:
+Because release-please reads conventional commit subjects on `main`, CI validates
+PR titles before merge:
 
 - Every PR title must start with a Conventional Commit type.
 - PRs touching published el-linear surface (`src/`, `claude-skills/`,
-  `README.md`, `LICENSE`, `package.json`, `pnpm-lock.yaml`, or release-please
-  metadata) must use a releaseable type: `fix:`, `feat:`, or a breaking-change
-  `!` marker.
+  `README.md`, `LICENSE`, `package.json`, or release-please metadata) must use a
+  releaseable type: `fix:`, `feat:`, or a breaking-change `!` marker.
 - CI/docs/test-only PRs can use non-release conventional types such as `ci:`,
   `docs:`, or `test:`.
+- **`pnpm-lock.yaml` is not a published surface.** It is not in `package.json`'s
+  `files`, so it is never shipped, and a consumer resolves our dependencies from
+  the **ranges in `package.json`** — never from our lockfile. A lockfile-only PR
+  (the shape every dependabot bump takes) therefore needs no release and may use
+  `build(deps):`. A dependency change that *is* consumer-visible edits
+  `package.json`, which is still listed above and still requires a releaseable
+  type.
 - release-please release PRs titled like `chore(main): release 1.37.3` are
   accepted.
 
 This is intentionally deterministic: a source change titled
 `DEV-1234 add a flag` fails before merge because it would land on `main` without
 opening a release PR.
+
+#### ⚠️ A single-commit PR squashes under the COMMIT subject, not the PR title
+
+The guard above validates the **PR title** — but that is not always what lands on
+`main`, and release-please only ever reads what lands.
+
+This repo's `squash_merge_commit_title` is **`COMMIT_OR_PR_TITLE`**, which means:
+
+| PR has… | Squash subject comes from |
+|---|---|
+| exactly **one** commit | the **commit** subject — the PR title is ignored |
+| **two or more** commits | the **PR title** |
+
+Rebase-merge and merge-commit are also enabled, and both land the original commit
+subjects verbatim regardless of the PR title.
+
+**So retitling a single-commit PR does not change what release-please sees.** A PR
+whose commit says `docs:` but whose title says `feat:` will squash as `docs:`,
+publish nothing — and the `validate` check will be **green**, because it only ever
+looked at the title.
+
+If you retitle a PR to make it releaseable, make the **commit subject** match:
+
+```bash
+git commit --amend -m "feat(scope): ..."   # single-commit PR
+git push --force-with-lease
+```
+
+…or push a second, correctly-typed commit (which also works, since two commits make
+the squash use the PR title).
 
 ### Automatic — release-please (default)
 
