@@ -55,11 +55,17 @@ titles before merge:
 
 - Every PR title must start with a Conventional Commit type.
 - PRs touching published el-linear surface (`src/`, `claude-skills/`,
-  `README.md`, `LICENSE`, `package.json`, `pnpm-lock.yaml`, or release-please
-  metadata) must use a releaseable type: `fix:`, `feat:`, or a breaking-change
-  `!` marker.
+  `README.md`, `LICENSE`, `package.json`, or release-please metadata) must use a
+  releaseable type: `fix:`, `feat:`, or a breaking-change `!` marker.
 - CI/docs/test-only PRs can use non-release conventional types such as `ci:`,
   `docs:`, or `test:`.
+- **`pnpm-lock.yaml` is not a published surface.** It is not in `package.json`'s
+  `files`, so it is never shipped, and a consumer resolves our dependencies from
+  the **ranges in `package.json`** — never from our lockfile. A lockfile-only PR
+  (the shape every dependabot bump takes) therefore needs no release and may use
+  `build(deps):`. A dependency change that *is* consumer-visible edits
+  `package.json`, which is still listed above and still requires a releaseable
+  type.
 - release-please release PRs titled like `chore(main): release 1.37.3` are
   accepted.
 
