@@ -44,6 +44,7 @@ import {
 	renderFixedWidthTable,
 	renderMarkdownTable,
 } from "../utils/table-formatter.js";
+import { readTextInputFile } from "../utils/text-input-file.js";
 import { isUuid } from "../utils/uuid.js";
 import { parsePositiveInt, splitList } from "../utils/validators.js";
 
@@ -329,6 +330,42 @@ function hasOption(options: OptionValues, key: string): boolean {
 	return options[key] !== undefined;
 }
 
+/**
+ * Resolve the project body from `--content <markdown>` or `--content-file <path>`
+ * (DEV-6033). Mirrors `resolveDescription()`'s contract for issues: the two are
+ * sources for the same field, so accepting both would silently drop one — reject
+ * up front instead.
+ *
+ * Returns `undefined` only when NEITHER flag was passed, which is what lets
+ * `projects update` keep distinguishing "leave content alone" from "clear it"
+ * (`--content ""` yields `""`, and `"" !== undefined`, so it still reaches the
+ * mutation — the same distinction `hasOption` drew before).
+ *
+ * Inline `--content` is passed through verbatim, exactly as it was before this
+ * flag existed. It is deliberately NOT run through `normalizeInlineTextInput`:
+ * that would newly rewrite `\n` inside an existing caller's `--content` string,
+ * a behavior change to a shipped flag that this issue does not ask for.
+ */
+export function resolveProjectContent(
+	options: OptionValues,
+): string | undefined {
+	const hasInline = typeof options.content === "string";
+	const hasFile = typeof options.contentFile === "string";
+
+	if (hasInline && hasFile) {
+		throw new Error(
+			"--content and --content-file are mutually exclusive — pass one or the other",
+		);
+	}
+	if (hasFile) {
+		return readTextInputFile(options.contentFile as string, "Content");
+	}
+	if (hasInline) {
+		return options.content as string;
+	}
+	return undefined;
+}
+
 function flattenProjectUpdate(
 	projectUpdate: UpdateProjectFieldsResponse["projectUpdate"],
 ) {
@@ -513,6 +550,12 @@ async function handleCreateProject(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
+	// Resolve the body BEFORE the create mutation. An unreadable --content-file
+	// (or --content alongside it) must fail while nothing has been created yet —
+	// resolving after the create would leave an orphan project behind and then
+	// throw, which is the worst of both outcomes.
+	const content = resolveProjectContent(options);
+
 	const rootOpts = getRootOpts(command);
 	const graphQLService = await createGraphQLService(rootOpts);
 
@@ -564,10 +607,10 @@ async function handleCreateProject(
 	const project = createResult.projectCreate.project;
 
 	// Step 4: Set content if provided (separate mutation — Linear API quirk)
-	if (options.content) {
+	if (content) {
 		await graphQLService.rawRequest(UPDATE_PROJECT_MUTATION, {
 			id: project.id,
-			input: { content: options.content },
+			input: { content },
 		});
 	}
 
@@ -684,13 +727,17 @@ async function handleUpdateProject(
 	if (hasOption(options, "description")) {
 		input.description = options.description;
 	}
-	if (hasOption(options, "content")) {
-		input.content = options.content;
+	// `undefined` means neither --content nor --content-file was passed. An
+	// explicit `--content ""` resolves to "" and still lands here, so clearing a
+	// project's body keeps working exactly as it did under `hasOption`.
+	const content = resolveProjectContent(options);
+	if (content !== undefined) {
+		input.content = content;
 	}
 
 	if (Object.keys(input).length === 0) {
 		throw new Error(
-			"Nothing to update. Pass at least one of --name, --description, or --content.",
+			"Nothing to update. Pass at least one of --name, --description, --content, or --content-file.",
 		);
 	}
 
@@ -730,6 +777,10 @@ export function setupProjectsCommands(program: Command): void {
 			"--content <markdown>",
 			"full markdown body (shown in project panel)",
 		)
+		.option(
+			"--content-file <path>",
+			"read the markdown body from a file (or '-' for stdin); mutually exclusive with --content",
+		)
 		.option("--force", "create even if a project with the same name exists")
 		.action(handleAsyncCommand(handleCreateProject));
 
@@ -761,6 +812,10 @@ export function setupProjectsCommands(program: Command): void {
 		.option(
 			"--content <markdown>",
 			"full markdown body (shown in project panel)",
+		)
+		.option(
+			"--content-file <path>",
+			"read the markdown body from a file (or '-' for stdin); mutually exclusive with --content",
 		)
 		.action(handleAsyncCommand(handleUpdateProject));
 
