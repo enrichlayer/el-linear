@@ -514,7 +514,7 @@ Before → after:
 |---|---|
 | `parseTokenBucket drops refill when lastRefillTs is unset` | Fix rate limiter losing its refill allowance after an idle period |
 | `AUTH_SESSION_TTL mismatch logs out users early in refreshSession` | Fix users getting logged out before their session length expires |
-| `Extract validateEntry into shared pkg (3 hand-rolled copies)` | Deduplicate the entry validator copied across three packages |
+| `Extract validateEntry into shared pkg (3 hand-rolled copies)` | Extract the duplicated entry validator into a shared package |
 
 The mechanism (`parseTokenBucket`, `AUTH_SESSION_TTL`, `refreshSession`, the three copies) still gets stated — in the **description**, where it reads as context instead of a barrier.
 
