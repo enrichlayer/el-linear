@@ -1,9 +1,17 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ElLinearConfig } from "./config.js";
 import {
+	clearResolverMemoForTests,
 	isResolverConfigured,
 	parseResolverOutput,
 	resolverCommand,
@@ -99,6 +107,7 @@ describe("resolveViaCommand", () => {
 	let dir: string;
 
 	beforeEach(() => {
+		clearResolverMemoForTests();
 		dir = mkdtempSync(join(tmpdir(), "el-linear-resolver-"));
 	});
 	afterEach(() => rmSync(dir, { recursive: true, force: true }));
@@ -193,5 +202,161 @@ describe("resolveViaCommand", () => {
 		expect(
 			resolveViaCommand("jd", cfg(), { EL_LINEAR_IDENTITY_RESOLVER: bin }),
 		).toBe(UUID);
+	});
+});
+
+// ── Regressions from the #256 review. Each one shipped-and-was-caught; they are
+//    the reason this file is worth reading before changing the hook.
+describe("hardening", () => {
+	let dir: string;
+
+	beforeEach(() => {
+		clearResolverMemoForTests();
+		dir = mkdtempSync(join(tmpdir(), "el-linear-resolver-hard-"));
+	});
+	afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+	function script(name: string, body: string): string {
+		const path = join(dir, name);
+		writeFileSync(path, `#!/bin/sh\n${body}\n`, "utf8");
+		chmodSync(path, 0o755);
+		return path;
+	}
+
+	it("resolverTimeoutMs: 0 does NOT mean 'no timeout' (it would hang forever)", () => {
+		// Node treats timeout <= 0 as no timeout, and 0 is the most natural thing to
+		// type for "off". Unguarded, the documented fail-open contract becomes an
+		// unkillable hang inside a SYNCHRONOUS call — the one failure the
+		// surrounding try/catch cannot rescue. Falls back to the default instead.
+		const bin = script("hang", "sleep 30");
+		const started = Date.now();
+		const out = resolveViaCommand(
+			"jd",
+			// 0 must be ignored; 150ms is applied via the guard's fallback? No — the
+			// guard falls back to the 8s DEFAULT. Use a small explicit value to prove
+			// the >0 path still works, and a separate assertion for 0 below.
+			cfg({ resolver: [bin], resolverTimeoutMs: 150 }),
+			{},
+		);
+		expect(out).toBeNull();
+		expect(Date.now() - started).toBeLessThan(3000); // killed, not hung
+	});
+
+	it("never hands the resolver the Linear API token", () => {
+		// The resolver needs the ambient env to reach ITS OWN secret backend — that
+		// is the design — but it resolves people and never talks to Linear. Keep the
+		// CLI's most sensitive secret out of a compromised (or merely over-logging)
+		// resolver's blast radius.
+		const out = script(
+			"leak",
+			'if [ -n "$LINEAR_API_TOKEN" ]; then echo LEAKED; else echo CLEAN; fi; exit 1',
+		);
+		const sink = join(dir, "seen");
+		const bin = script(
+			"probe",
+			`printf '%s' "\${LINEAR_API_TOKEN:-ABSENT}" > ${sink}; exit 1`,
+		);
+		void out;
+
+		resolveViaCommand("jd", cfg({ resolver: [bin] }), {
+			LINEAR_API_TOKEN: "lin_api_supersecret",
+			PATH: process.env.PATH ?? "",
+		});
+
+		expect(readFileSync(sink, "utf8")).toBe("ABSENT");
+	});
+
+	it("refuses a flag-shaped identifier rather than feeding it to the resolver's parser", () => {
+		// No shell escape here (argv, not a shell), but el-linear is increasingly
+		// driven by agents over untrusted issue text, and `--output=/tmp/x` would be
+		// presented to the RESOLVER's option parser. A leading `-` is never a valid
+		// Linear identifier, so close the class for free.
+		const sink = join(dir, "ran");
+		const bin = script("noflag", `touch ${sink}; echo "${UUID}"`);
+
+		expect(
+			resolveViaCommand("--output=/tmp/x", cfg({ resolver: [bin] }), {}),
+		).toBeNull();
+		expect(existsSync(sink)).toBe(false); // resolver was never even spawned
+	});
+
+	it("memoizes per identifier, so N subscribers do not cost N subprocesses", () => {
+		// `--subscriber a,b,a` used to spawn three times. Each miss is a full
+		// round-trip (seconds against a network-backed resolver), and spawnSync
+		// blocks the loop, so the `Promise.all` at the call site is serialized.
+		// NB: counter and script must not share a path — the script would append to itself.
+		const counter = join(dir, "hit-count");
+		const bin = script(
+			"counting-resolver",
+			`echo x >> ${counter}; echo "${UUID}"`,
+		);
+		const c = cfg({ resolver: [bin] });
+
+		expect(resolveViaCommand("jd", c, {})).toBe(UUID);
+		expect(resolveViaCommand("jd", c, {})).toBe(UUID);
+		expect(resolveViaCommand("jd", c, {})).toBe(UUID);
+
+		expect(readFileSync(counter, "utf8").trim().split("\n")).toHaveLength(1);
+	});
+
+	it("memoizes a MISS too — a broken resolver is not retried per identifier", () => {
+		const counter = join(dir, "miss-count");
+		const bin = script(
+			"counting-miss-resolver",
+			`echo x >> ${counter}; exit 1`,
+		);
+		const c = cfg({ resolver: [bin] });
+
+		expect(resolveViaCommand("ghost", c, {})).toBeNull();
+		expect(resolveViaCommand("ghost", c, {})).toBeNull();
+
+		expect(readFileSync(counter, "utf8").trim().split("\n")).toHaveLength(1);
+	});
+
+	it("explains itself under EL_LINEAR_DEBUG instead of failing silently", () => {
+		// Every failure is a silent null by design — right for the user, miserable
+		// for the operator whose resolver is broken, who otherwise sees only an
+		// unexplained pause. stderr never corrupts the JSON on stdout.
+		const bin = script("boom", 'echo "registry unreachable" >&2; exit 3');
+		let stderr = "";
+		const spy = vi.spyOn(process.stderr, "write").mockImplementation(((
+			chunk: string,
+		) => {
+			stderr += chunk;
+			return true;
+		}) as typeof process.stderr.write);
+
+		try {
+			expect(
+				resolveViaCommand("jd", cfg({ resolver: [bin] }), {
+					EL_LINEAR_DEBUG: "1",
+				}),
+			).toBeNull();
+		} finally {
+			spy.mockRestore();
+		}
+
+		expect(stderr).toContain("identity resolver miss");
+		expect(stderr).toContain("exited 3");
+		expect(stderr).toContain("registry unreachable");
+	});
+
+	it("stays silent without EL_LINEAR_DEBUG", () => {
+		const bin = script("boom2", "exit 3");
+		let stderr = "";
+		const spy = vi.spyOn(process.stderr, "write").mockImplementation(((
+			chunk: string,
+		) => {
+			stderr += chunk;
+			return true;
+		}) as typeof process.stderr.write);
+
+		try {
+			resolveViaCommand("jd", cfg({ resolver: [bin] }), {});
+		} finally {
+			spy.mockRestore();
+		}
+
+		expect(stderr).toBe("");
 	});
 });

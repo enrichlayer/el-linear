@@ -43,6 +43,63 @@ const RESOLVER_ENV = "EL_LINEAR_IDENTITY_RESOLVER";
 const DEFAULT_TIMEOUT_MS = 8000;
 
 /**
+ * Per-process memo. A single command can resolve the same person several times —
+ * `--subscriber a,b,a`, or an assignee who is also a subscriber — and each miss
+ * costs a full subprocess round-trip (seconds, against a network-backed
+ * resolver). Nothing here is cached across processes: el-linear is short-lived,
+ * and a stale identity cache on disk is exactly the drift this hook exists to
+ * remove.
+ */
+const memo = new Map<string, string | null>();
+
+/** Test seam — the memo would otherwise leak between cases in one vitest process. */
+export function clearResolverMemoForTests(): void {
+	memo.clear();
+}
+
+/**
+ * Resolve the effective timeout.
+ *
+ * `?? DEFAULT` is not enough: Node treats `timeout <= 0` as *no timeout*, and `0`
+ * is the most natural thing to type when you mean "off". That would turn the
+ * documented fail-open contract into an unkillable hang inside a synchronous
+ * call — the one failure mode the surrounding try/catch cannot save you from.
+ */
+function resolveTimeoutMs(config: Pick<ElLinearConfig, "identity">): number {
+	const configured = config.identity?.resolverTimeoutMs;
+	return typeof configured === "number" && configured > 0
+		? configured
+		: DEFAULT_TIMEOUT_MS;
+}
+
+/**
+ * The environment handed to the resolver.
+ *
+ * It inherits the ambient env on purpose — reaching its own secret backend
+ * (Vault, Infisical, 1Password, a plain env var) is the entire point, so
+ * scrubbing wholesale would defeat the design. But the resolver has no business
+ * with *Linear's* token: it resolves people, it never talks to Linear. Dropping
+ * it keeps the CLI's most sensitive secret out of the blast radius of a
+ * compromised — or merely over-logging — resolver.
+ */
+function resolverEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+	const { LINEAR_API_TOKEN: _dropped, ...rest } = env;
+	return rest;
+}
+
+/**
+ * Debug-gated diagnosis. Every failure here is a silent `null` by design, which
+ * is right for the user but miserable for the operator whose resolver is broken:
+ * all they see is an unexplained pause. `EL_LINEAR_DEBUG=1` is this repo's
+ * existing convention for "tell me what actually happened", and stderr never
+ * corrupts the JSON on stdout.
+ */
+function debugMiss(reason: string, env: NodeJS.ProcessEnv): void {
+	if (!env.EL_LINEAR_DEBUG) return;
+	process.stderr.write(`el-linear: identity resolver miss — ${reason}\n`);
+}
+
+/**
  * The configured resolver argv, or `null` when the hook is off.
  *
  * Env wins over config so a single invocation can point at a different resolver
@@ -160,23 +217,78 @@ export function resolveViaCommand(
 		return null;
 	}
 
+	// A leading `-` is never a valid Linear identifier, but it IS a flag to the
+	// resolver's own option parser — `--assignee "--output=/tmp/x"` would be
+	// presented to it as one. There is no shell escape here (argv, not a shell),
+	// but el-linear is increasingly driven by agents over untrusted issue text, so
+	// close the class for free rather than trust every resolver to be careful.
+	if (identifier.startsWith("-")) {
+		debugMiss(`refusing flag-shaped identifier "${identifier}"`, env);
+		return null;
+	}
+
+	const cached = memo.get(identifier);
+	if (cached !== undefined) {
+		return cached;
+	}
+
+	const resolved = spawnResolver(command, args, identifier, config, env);
+	memo.set(identifier, resolved);
+	return resolved;
+}
+
+function spawnResolver(
+	command: string,
+	args: string[],
+	identifier: string,
+	config: Pick<ElLinearConfig, "identity">,
+	env: NodeJS.ProcessEnv,
+): string | null {
 	try {
 		const result = spawnSync(command, [...args, identifier], {
 			encoding: "utf8",
-			timeout: config.identity?.resolverTimeoutMs ?? DEFAULT_TIMEOUT_MS,
-			// The identifier is untrusted input; never hand it to a shell.
+			timeout: resolveTimeoutMs(config),
+			// The identifier is untrusted input; never hand it to a shell. This also
+			// means a Windows npm shim (`el-identity.cmd`) will NOT be found — see
+			// the Windows note in docs/configuration.md. Turning `shell: true` on to
+			// fix that would hand the untrusted identifier to cmd.exe, which is a
+			// far worse trade.
 			shell: false,
 			// stdin closed: a resolver that decides to prompt must not hang the CLI.
 			stdio: ["ignore", "pipe", "pipe"],
+			env: resolverEnv(env),
 		});
 
-		// ENOENT (resolver not installed), a timeout, or a non-zero exit are all
-		// the same thing to us: no answer. The caller falls through to Linear.
-		if (result.error || result.status !== 0) {
+		// BOTH conditions are load-bearing; do not "simplify" this to one.
+		//   - a plain timeout      → error ETIMEDOUT, status null
+		//   - a maxBuffer overflow → error ENOBUFS,   status null
+		//   - a child that leaves a grandchild holding the stdout pipe
+		//                          → error ETIMEDOUT, status **0**
+		// Checking only `status` would let that last case through as a success and
+		// parse whatever partial output happened to be buffered.
+		if (result.error) {
+			debugMiss(`${command}: ${result.error.message}`, env);
 			return null;
 		}
-		return parseResolverOutput(result.stdout ?? "");
-	} catch {
+		if (result.status !== 0) {
+			const stderr = (result.stderr ?? "").trim().split("\n")[0] ?? "";
+			debugMiss(
+				`${command} exited ${result.status}${stderr ? `: ${stderr}` : ""}`,
+				env,
+			);
+			return null;
+		}
+
+		const parsed = parseResolverOutput(result.stdout ?? "");
+		if (!parsed) {
+			debugMiss(
+				`${command} printed no usable Linear UUID for "${identifier}"`,
+				env,
+			);
+		}
+		return parsed;
+	} catch (err) {
+		debugMiss(err instanceof Error ? err.message : String(err), env);
 		return null;
 	}
 }

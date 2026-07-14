@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
+// DEV-5628: resolveMemberWithRegistry consults the identity-resolver hook, which
+// spawns a subprocess. The mocked loadConfig below carries no `identity`, but the
+// hook ALSO honors $EL_LINEAR_IDENTITY_RESOLVER — so a developer who has that set
+// would have these unit tests shelling out. Mock the seam.
+vi.mock("./identity-resolver.js", () => ({
+	resolveViaCommand: vi.fn(() => null),
+}));
+
 vi.mock("./config.js", () => ({
 	loadConfig: () => ({
 		teams: {

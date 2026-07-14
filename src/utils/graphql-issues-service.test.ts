@@ -11,17 +11,33 @@ vi.mock("@linear/sdk", () => ({
 // Opt-in identity registry (DEV-4872). Default DORMANT (isRegistryConfigured →
 // false) so every existing test keeps the config/Linear-API resolution path;
 // the registry-first tests below flip it on and afterEach resets to dormant.
-const { mockIsRegistryConfigured, mockResolveViaRegistry } = vi.hoisted(() => ({
+const {
+	mockIsRegistryConfigured,
+	mockResolveViaRegistry,
+	mockResolveViaCommand,
+} = vi.hoisted(() => ({
 	mockIsRegistryConfigured: vi.fn(() => false),
 	mockResolveViaRegistry: vi.fn(),
+	mockResolveViaCommand: vi.fn(() => null),
 }));
 vi.mock("../config/registry-resolve.js", () => ({
 	isRegistryConfigured: mockIsRegistryConfigured,
 	resolveViaRegistry: mockResolveViaRegistry,
 }));
+// DEV-5628: resolveAssigneeId now consults the identity-resolver hook, which
+// SPAWNS A SUBPROCESS. Unmocked, these unit tests read the developer's real
+// ~/.config and shell out to whatever resolver they have configured — hermetic in
+// CI (no config → no resolver → no spawn) and emphatically not on a teammate's
+// laptop, where the suite goes from ~1.7s to double digits and can fail outright
+// against a network-backed resolver. Mock the seam, don't let the tests decide it.
+vi.mock("../config/identity-resolver.js", () => ({
+	resolveViaCommand: mockResolveViaCommand,
+}));
 afterEach(() => {
 	mockIsRegistryConfigured.mockReturnValue(false);
 	mockResolveViaRegistry.mockReset();
+	mockResolveViaCommand.mockReset();
+	mockResolveViaCommand.mockReturnValue(null);
 });
 
 const { GraphQLIssuesService } = await import("./graphql-issues-service.js");

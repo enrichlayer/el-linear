@@ -424,6 +424,21 @@ export function loadConfig(): ElLinearConfig {
 		: {};
 	// teamConfigPath inside a team config file would be circular; strip it.
 	delete teamRaw.teamConfigPath;
+	// `identity.resolver` names a BINARY el-linear will spawn. The team layer is
+	// data, not code: it arrives from a different repository via `git pull` (or,
+	// for an OSS user, from whatever repo they pointed `teamConfigPath` at), and
+	// nobody reviews a config file expecting it to hand them a subprocess. Letting
+	// it choose the executable would turn "clone this repo and run el-linear" into
+	// arbitrary code execution on every `--assignee` resolution.
+	//
+	// So the resolver is honored ONLY from the personal config (or the env var) —
+	// files the operator owns. Same reasoning as teamConfigPath above, which is
+	// stripped for the same "the team layer doesn't get to decide this" reason.
+	//
+	// An organization that wants to ship a resolver to its developers writes it
+	// into their personal config at setup time; that keeps the decision with the
+	// machine's owner instead of with whoever can land a commit upstream.
+	delete teamRaw.identity;
 
 	// Merge order: defaults → team config → personal config.
 	// Arrays (terms, defaultLabels, etc.) are concatenated so personal entries
