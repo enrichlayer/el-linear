@@ -71,7 +71,7 @@ PR titles before merge:
   | `dependencies`, `optionalDependencies`, `peerDependencies` | **yes** — resolved at the consumer's install |
   | `engines`, `bin`, `exports`, `files`, `name`, `version` | **yes** |
   | `devDependencies` | **no** — never installed by a consumer, and the build is `tsc`, not a bundler, so no dev tool is inlined into `dist/` |
-  | `scripts` | **no**, except install-time lifecycle scripts (`postinstall` and friends), which *do* run on a consumer's machine |
+  | `scripts` | **no** for purely local targets (`lint`, `test`, `typecheck`). **Yes** for two kinds: install-time lifecycle scripts (`preinstall` / `install` / `postinstall` / `prepare`), which run on a **consumer's** machine — and build/publish-time scripts (`build`, `prepack`, `prepublishOnly`, …), which run on the **release runner** and **produce the published `dist/`**. Editing `scripts.build` changes the bytes in the tarball even though it touches no dependency. |
 
   So a **major** dev-dependency bump — which rewrites the range in `package.json`
   and is the one dependabot shape the lockfile rule above does not cover — passes

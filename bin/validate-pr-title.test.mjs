@@ -243,6 +243,56 @@ describe("validate-pr-title", () => {
 			).toEqual(["scripts"]);
 		});
 
+		// `build` is NOT a dev-only target: .github/workflows/release.yml runs
+		// `pnpm run build` (-> tsc -> dist/) and then `pnpm publish`, and `dist/` is in
+		// package.json `files`. So editing the build command changes the bytes in the
+		// published tarball. An earlier draft of this gate called `build` invisible —
+		// which would have let a `chore:`-titled build change merge with no release, and
+		// silently altered the NEXT release's artifact.
+		it("treats build/publish-time scripts as consumer-visible — they produce the tarball", () => {
+			for (const script of [
+				"build",
+				"prepack",
+				"prepublishOnly",
+				"postpack",
+				"prepublish",
+			]) {
+				expect(
+					consumerVisiblePackageJsonKeys(JSON.parse(pkg()), {
+						...BASE_PACKAGE,
+						scripts: {
+							...BASE_PACKAGE.scripts,
+							[script]: "echo changed-artifact",
+						},
+					}),
+					`${script} must gate — it shapes the published tarball`,
+				).toEqual(["scripts"]);
+			}
+		});
+
+		it("FAILS a non-releaseable title that edits the build command", () => {
+			// The end-state that matters: this must not merge without cutting a release.
+			const result = validatePrTitle(
+				"chore: tweak the build command",
+				["package.json"],
+				{
+					packageJson: {
+						base: pkg(),
+						head: JSON.stringify({
+							...BASE_PACKAGE,
+							scripts: {
+								...BASE_PACKAGE.scripts,
+								build: "tsc -p tsconfig.build.json --sourceMap",
+							},
+						}),
+					},
+				},
+			);
+
+			expect(result.ok).toBe(false);
+			expect(result.message).toContain("package.json (scripts)");
+		});
+
 		it("fails closed when the package.json blobs are unavailable or unparseable", () => {
 			// No context at all — the pre-DEV-6066 wholesale behavior.
 			expect(

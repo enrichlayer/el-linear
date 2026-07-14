@@ -65,19 +65,42 @@ export const PACKAGE_JSON = "package.json";
 //                     never inlined into `dist/`: the build is `tsc`, not a bundler.
 //                     A devDependency bump is exactly as invisible to a consumer as a
 //                     lockfile bump, which DEV-6064 already established.
-//   scripts         — dev-only TARGETS (`build`, `lint`, `test`, …) are invisible.
-//                     The npm lifecycle scripts below are NOT: they execute on the
-//                     consumer's machine at install time, so they are carved back out.
+//   scripts         — purely local TARGETS (`lint`, `test`, `typecheck`, …) are
+//                     invisible. The scripts in RELEASE_AFFECTING_SCRIPTS below are
+//                     NOT, and are carved back out.
 const DEV_ONLY_PACKAGE_KEYS = new Set(["devDependencies", "scripts"]);
 
-// Scripts npm runs on a CONSUMER's machine when our package is installed as a
-// dependency. Editing one of these is consumer-visible even though `scripts` as a
-// whole is dev-only. (`prepare` runs for git installs of this package.)
-const CONSUMER_LIFECYCLE_SCRIPTS = new Set([
+// Scripts whose edit changes what a consumer actually receives. TWO distinct ways
+// that happens, and missing either is a hole:
+//
+//   1. It runs on the CONSUMER's machine at install time — `preinstall`, `install`,
+//      `postinstall`, `prepare` (the last also runs on a git install of this package).
+//      Editing one of these ships arbitrary code to every consumer.
+//
+//   2. It runs on the RELEASE RUNNER and PRODUCES THE PUBLISHED ARTIFACT.
+//      `.github/workflows/release.yml` runs `pnpm run build` (→ `tsc` → `dist/`) and
+//      then `pnpm publish`, which itself runs `prepack` / `prepublishOnly`. So a change
+//      to `scripts.build` changes the bytes in the tarball — even though it touches no
+//      dependency and runs on nobody's laptop but ours.
+//
+// (2) is the non-obvious one, and an earlier draft of this file got it wrong: it
+// listed `build` as a "dev-only target" and would have let a `chore:`-titled edit to
+// the build command merge with no release. The changed build would then silently apply
+// to the NEXT release, attributing an artifact change to an unrelated commit — exactly
+// the drift this gate exists to prevent. `dist/` is in `package.json` `files`; whatever
+// writes `dist/` is a published surface.
+const RELEASE_AFFECTING_SCRIPTS = new Set([
+	// (1) run on the consumer's machine
 	"preinstall",
 	"install",
 	"postinstall",
 	"prepare",
+	// (2) run on the release runner; produce/gate the published tarball
+	"build",
+	"prepack",
+	"postpack",
+	"prepublishOnly",
+	"prepublish",
 ]);
 
 export function isPublishedSurfacePath(path) {
@@ -126,14 +149,14 @@ export function consumerVisiblePackageJsonKeys(base, head) {
 		if (!DEV_ONLY_PACKAGE_KEYS.has(key)) return true;
 
 		if (key === "scripts") {
-			// Dev-only targets are invisible; install-time lifecycle scripts are not.
+			// Purely local targets (lint/test/typecheck) are invisible. Scripts that run
+			// on the consumer's machine at install time, OR on the release runner to
+			// produce the tarball (`build`, `prepack`, …), are not.
 			const scriptKeys = changedTopLevelKeys(
 				base.scripts ?? {},
 				head.scripts ?? {},
 			);
-			return scriptKeys.some((script) =>
-				CONSUMER_LIFECYCLE_SCRIPTS.has(script),
-			);
+			return scriptKeys.some((script) => RELEASE_AFFECTING_SCRIPTS.has(script));
 		}
 
 		return false;
