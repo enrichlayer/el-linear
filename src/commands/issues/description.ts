@@ -17,7 +17,6 @@
  * focus on commander wiring + handlers.
  */
 
-import fs from "node:fs";
 import type { OptionValues } from "commander";
 import { loadConfig } from "../../config/config.js";
 import { UPDATE_ISSUE_MUTATION } from "../../queries/issues.js";
@@ -31,21 +30,19 @@ import { normalizeInlineTextInput } from "../../utils/inline-text-input.js";
 import { extractIssueReferences } from "../../utils/issue-reference-extractor.js";
 import { wrapIssueReferencesAsLinks } from "../../utils/issue-reference-wrapper.js";
 import type { LinearService } from "../../utils/linear-service.js";
+import { readTextInputFile } from "../../utils/text-input-file.js";
 import { validateReferences } from "../../utils/validate-references.js";
 import { getWorkspaceUrlKey } from "../../utils/workspace-url.js";
 
 /**
  * Read description from a file path or stdin ("-").
  * Avoids shell escaping issues when descriptions contain special characters.
+ *
+ * Delegates to the shared reader so `projects --content-file` (DEV-6033), which
+ * is specified to behave identically, cannot drift from this one.
  */
 export function readDescriptionFile(filePath: string): string {
-	if (filePath === "-") {
-		return fs.readFileSync(0, "utf8").trim();
-	}
-	if (!fs.existsSync(filePath)) {
-		throw new Error(`Description file not found: ${filePath}`);
-	}
-	return fs.readFileSync(filePath, "utf8").trim();
+	return readTextInputFile(filePath, "Description");
 }
 
 /**

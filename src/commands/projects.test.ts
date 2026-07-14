@@ -1,3 +1,13 @@
+import fs, {
+	closeSync,
+	mkdtempSync,
+	openSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	createTestProgram,
@@ -58,7 +68,9 @@ vi.mock("../config/resolver.js", () => ({
 	resolveTeam: (name: string) => mockResolveTeam(name),
 }));
 
-const { setupProjectsCommands } = await import("./projects.js");
+const { setupProjectsCommands, resolveProjectContent } = await import(
+	"./projects.js"
+);
 
 describe("projects commands", () => {
 	beforeEach(() => {
@@ -526,6 +538,292 @@ describe("projects commands", () => {
 			expect(mockResolveProjectId).not.toHaveBeenCalled();
 			expect(mockGraphQLService.rawRequest).not.toHaveBeenCalled();
 			expect(mockOutputSuccess).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("--content-file (DEV-6033)", () => {
+		let dir: string;
+
+		// A body that the shell would mangle under the `--content "$(cat f.md)"`
+		// workaround this flag exists to replace: `$(...)` command substitution, a
+		// `$VAR`, backtick spans, and nested quotes. It must reach Linear byte-for-byte.
+		const HOSTILE_BODY = [
+			"# CS Knowledge System",
+			"",
+			"Run `el-linear projects list` — reads $HOME/.config.",
+			"",
+			"```bash",
+			'echo "budget: $100 (100%)" && printf \'%s\' "$(whoami)"',
+			"```",
+		].join("\n");
+
+		beforeEach(() => {
+			dir = mkdtempSync(join(tmpdir(), "el-linear-content-file-"));
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				projectCreate: {
+					success: true,
+					project: {
+						id: "p1",
+						name: "CS Knowledge System",
+						state: "planned",
+						teams: { nodes: [{ id: "t1", key: "DEV", name: "Dev" }] },
+					},
+				},
+				projects: { nodes: [] },
+			});
+		});
+
+		afterEach(() => {
+			rmSync(dir, { recursive: true, force: true });
+		});
+
+		function writeBody(body: string): string {
+			const path = join(dir, "content.md");
+			writeFileSync(path, body, "utf8");
+			return path;
+		}
+
+		/** The content-setting mutation `create` issues after projectCreate. */
+		function contentUpdateCalls() {
+			return mockGraphQLService.rawRequest.mock.calls.filter(
+				(call) =>
+					(call[1] as { input?: { content?: string } })?.input?.content !==
+					undefined,
+			);
+		}
+
+		it("create: sends the file's markdown as the project content, verbatim", async () => {
+			const path = writeBody(HOSTILE_BODY);
+
+			const program = createTestProgram();
+			setupProjectsCommands(program);
+			await runCommand(program, [
+				"projects",
+				"create",
+				"CS Knowledge System",
+				"--content-file",
+				path,
+			]);
+
+			const calls = contentUpdateCalls();
+			expect(calls).toHaveLength(1);
+			expect(calls[0][1]).toEqual({
+				id: "p1",
+				input: { content: HOSTILE_BODY },
+			});
+			expect(mockOutputSuccess).toHaveBeenCalled();
+		});
+
+		it("create: rejects --content and --content-file together", async () => {
+			const path = writeBody("# From file");
+
+			const program = createTestProgram();
+			setupProjectsCommands(program);
+			await runCommand(program, [
+				"projects",
+				"create",
+				"Launch",
+				"--content",
+				"# Inline",
+				"--content-file",
+				path,
+			]);
+
+			// handleAsyncCommand routes the throw to outputError; the success path
+			// must not fire, and nothing may be created when the flags conflict.
+			expect(mockOutputSuccess).not.toHaveBeenCalled();
+			expect(mockGraphQLService.rawRequest).not.toHaveBeenCalled();
+		});
+
+		it("create: an unreadable --content-file leaves NO orphan project behind", async () => {
+			// The body is resolved BEFORE the create mutation precisely so this cannot
+			// create the project and *then* fail to set its content. Without that
+			// ordering, `rawRequest` would have run projectCreate and the workspace
+			// would be left holding an empty project the caller never got told about.
+			const missing = join(dir, "does-not-exist.md");
+
+			const program = createTestProgram();
+			setupProjectsCommands(program);
+			await runCommand(program, [
+				"projects",
+				"create",
+				"Launch",
+				"--content-file",
+				missing,
+			]);
+
+			expect(mockGraphQLService.rawRequest).not.toHaveBeenCalled();
+			expect(mockOutputSuccess).not.toHaveBeenCalled();
+		});
+
+		it("update: sends the file's markdown as the project content", async () => {
+			const path = writeBody(HOSTILE_BODY);
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				projectUpdate: {
+					success: true,
+					project: {
+						id: "project-id-Launch",
+						name: "Launch",
+						description: "",
+						content: HOSTILE_BODY,
+						teams: { nodes: [] },
+					},
+				},
+			});
+
+			const program = createTestProgram();
+			setupProjectsCommands(program);
+			await runCommand(program, [
+				"projects",
+				"update",
+				"Launch",
+				"--content-file",
+				path,
+			]);
+
+			expect(mockGraphQLService.rawRequest).toHaveBeenCalledWith(
+				expect.stringContaining("projectUpdate"),
+				{ id: "project-id-Launch", input: { content: HOSTILE_BODY } },
+			);
+		});
+
+		it("update: rejects --content and --content-file together", async () => {
+			const path = writeBody("# From file");
+
+			const program = createTestProgram();
+			setupProjectsCommands(program);
+			await runCommand(program, [
+				"projects",
+				"update",
+				"Launch",
+				"--content",
+				"# Inline",
+				"--content-file",
+				path,
+			]);
+
+			expect(mockGraphQLService.rawRequest).not.toHaveBeenCalled();
+			expect(mockOutputSuccess).not.toHaveBeenCalled();
+		});
+
+		it("update: reads the body from stdin when --content-file is '-'", async () => {
+			const path = writeBody("# Piped body");
+			// readTextInputFile reads fd 0 for "-"; point fd 0 at the file.
+			const fd = openSync(path, "r");
+			const spy = vi
+				.spyOn(fs, "readFileSync")
+				.mockImplementation(((target: unknown, enc: unknown) =>
+					target === 0
+						? readFileSync(fd, enc as BufferEncoding)
+						: readFileSync(
+								target as string,
+								enc as BufferEncoding,
+							)) as typeof readFileSync);
+
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				projectUpdate: {
+					success: true,
+					project: {
+						id: "project-id-Launch",
+						name: "Launch",
+						description: "",
+						content: "# Piped body",
+						teams: { nodes: [] },
+					},
+				},
+			});
+
+			try {
+				const program = createTestProgram();
+				setupProjectsCommands(program);
+				await runCommand(program, [
+					"projects",
+					"update",
+					"Launch",
+					"--content-file",
+					"-",
+				]);
+
+				expect(mockGraphQLService.rawRequest).toHaveBeenCalledWith(
+					expect.stringContaining("projectUpdate"),
+					{ id: "project-id-Launch", input: { content: "# Piped body" } },
+				);
+			} finally {
+				spy.mockRestore();
+				closeSync(fd);
+			}
+		});
+
+		it("update: still clears content with an explicit empty --content", async () => {
+			// Regression guard for the hasOption() semantics the resolver replaced:
+			// `--content ""` is "clear it", NOT "leave it alone".
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				projectUpdate: {
+					success: true,
+					project: {
+						id: "project-id-Launch",
+						name: "Launch",
+						description: "",
+						content: "",
+						teams: { nodes: [] },
+					},
+				},
+			});
+
+			const program = createTestProgram();
+			setupProjectsCommands(program);
+			await runCommand(program, [
+				"projects",
+				"update",
+				"Launch",
+				"--content",
+				"",
+			]);
+
+			expect(mockGraphQLService.rawRequest).toHaveBeenCalledWith(
+				expect.stringContaining("projectUpdate"),
+				{ id: "project-id-Launch", input: { content: "" } },
+			);
+		});
+
+		// The resolver is exercised directly for the error messages. handleAsyncCommand
+		// calls outputError from INSIDE utils/output.js, so an ESM export mock cannot
+		// intercept that intra-module call — the command-level tests above can only
+		// observe that nothing reached Linear. These assert what the user actually reads.
+		describe("resolveProjectContent", () => {
+			it("rejects --content alongside --content-file", () => {
+				expect(() =>
+					resolveProjectContent({
+						content: "# Inline",
+						contentFile: "body.md",
+					}),
+				).toThrow("--content and --content-file are mutually exclusive");
+			});
+
+			it("names the missing file", () => {
+				expect(() =>
+					resolveProjectContent({ contentFile: "/nope/body.md" }),
+				).toThrow("Content file not found: /nope/body.md");
+			});
+
+			it("returns undefined when neither flag is passed (leave content alone)", () => {
+				expect(resolveProjectContent({})).toBeUndefined();
+			});
+
+			it("returns '' for an explicit empty --content (clear the content)", () => {
+				// "" !== undefined, so it still reaches the mutation — this is the
+				// distinction hasOption() used to draw, preserved.
+				expect(resolveProjectContent({ content: "" })).toBe("");
+			});
+
+			it("passes inline --content through verbatim", () => {
+				// Deliberately NOT normalizeInlineTextInput'd: doing so would newly
+				// rewrite `\n` in an existing caller's --content, a behavior change to
+				// a shipped flag that DEV-6033 does not ask for.
+				expect(resolveProjectContent({ content: "line1\\nline2" })).toBe(
+					"line1\\nline2",
+				);
+			});
 		});
 	});
 });
