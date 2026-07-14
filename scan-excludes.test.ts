@@ -41,6 +41,31 @@ describe("scan excludes (DEV-5944)", () => {
 		expect(biome.files.includes).toContain(`!${dir}`);
 	});
 
+	// The load-bearing premise of every exclude above is that these dirs hold NO
+	// TRACKED SOURCE — they are gitignored scratch space for worktrees. If that ever
+	// stops being true (someone starts tracking files under .tmp/), the excludes turn
+	// from "skip the noise" into "silently skip real code": those files would be
+	// neither tested nor linted, and nothing would say so. The excludes are only safe
+	// BECAUSE of .gitignore, so assert the thing they depend on.
+	it.each(WORKTREE_DIRS)(
+		"%s/ is gitignored — which is the only reason excluding it is safe",
+		(dir) => {
+			const gitignore = readFileSync(
+				fileURLToPath(new URL("./.gitignore", import.meta.url)),
+				"utf8",
+			)
+				.split("\n")
+				.map((line) => line.trim());
+
+			expect(
+				gitignore,
+				`${dir}/ is excluded from vitest + biome but is NOT gitignored — tracked source ` +
+					`under it would be silently unlinted and untested. Either gitignore it, or stop ` +
+					`excluding it from the scanners.`,
+			).toContain(`${dir}/`);
+		},
+	);
+
 	it("keeps excluding dist/ and node_modules/ from vitest", () => {
 		// Vitest's `exclude` REPLACES its defaults rather than extending them, so
 		// these have to stay listed explicitly — dropping one while adding .tmp
