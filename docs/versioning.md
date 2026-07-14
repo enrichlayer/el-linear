@@ -110,15 +110,43 @@ whose commit says `docs:` but whose title says `feat:` will squash as `docs:`,
 publish nothing — and the `validate` check will be **green**, because it only ever
 looked at the title.
 
-If you retitle a PR to make it releaseable, make the **commit subject** match:
+#### The rule that is safe under all three strategies
+
+The table above is about **squash**, which is not the only way PRs land here. What
+release-please actually reads differs per strategy, and the differences are subtle
+enough that it is not worth reasoning about them case by case:
+
+| Strategy | What release-please sees | Enabled? |
+|---|---|---|
+| **squash** | one commit: the PR title (2+ commits) or the sole commit's subject (1 commit) | yes |
+| **merge-commit** | the merge commit — whose **body GitHub fills with the PR title** — *and* the branch's own commits, which are also on `main` | yes — **`el-git pr merge`'s default** (pass `--squash` to change it) |
+| **rebase-merge** | the branch's commit subjects, verbatim. There is **no merge commit** to carry the PR title | yes |
+
+So the PR title reaches release-please under squash-with-2+-commits and under
+merge-commit, but **not** under a single-commit squash, and **not** under rebase-merge.
+Meanwhile the branch's own commit subjects are on `main` under merge-commit and
+rebase-merge, and release-please reads those too.
+
+**Therefore: make every commit subject on the branch correctly typed. Retitling the PR
+is necessary but not sufficient.**
 
 ```bash
-git commit --amend -m "feat(scope): ..."   # single-commit PR
+git commit --amend -m "chore(scope): ..."   # single-commit PR
 git push --force-with-lease
 ```
 
-…or push a second, correctly-typed commit (which also works, since two commits make
-the squash use the PR title).
+**"Just push a second, correctly-typed commit" is not a reliable substitute.** It works
+under squash (2+ commits ⇒ the PR title wins). Under merge-commit it *appears* to work
+only because release-please **deduplicates entries with the same description text** — so
+a retitle that keeps the description identical collapses into the merge commit's (correct)
+type. Change the wording while retitling and the old, wrongly-typed commit resurfaces in
+the changelog. Under rebase-merge it does not work at all.
+
+This is not hypothetical: [#250](https://github.com/enrichlayer/el-linear/pull/250) was
+retitled `fix(tooling):` → `chore(tooling):` and given a second `chore:` commit. It
+merged via a merge commit, and the original `fix(tooling):` commit **is on `main`** — it
+produced no changelog entry *only* because its description text was byte-identical to the
+retitled PR title and got deduped. That is luck, not a rule. Amend the subject.
 
 ### Automatic — release-please (default)
 
