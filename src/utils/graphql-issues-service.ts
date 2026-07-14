@@ -1,3 +1,5 @@
+import { loadConfig } from "../config/config.js";
+import { resolveViaCommand } from "../config/identity-resolver.js";
 import {
 	isRegistryConfigured,
 	resolveViaRegistry,
@@ -1758,9 +1760,15 @@ export class GraphQLIssuesService {
 		if (!assigneeId || isUuid(assigneeId)) {
 			return assigneeId;
 		}
-		// Opt-in registry resolution (DEV-4872): try the identity registry first,
-		// falling back to the Linear-API user lookup below on a miss. EL-only,
-		// env-gated, fail-open — a non-EL install never reaches the network here.
+		// Opt-in identity resolution, falling back to the Linear-API user lookup
+		// below on a miss. Both layers are optional and fail-open — an install
+		// with neither configured never reaches the network here.
+		//   1. The resolver-command hook (DEV-5628) — brings its own credentials.
+		//   2. The older env-gated HTTP registry (DEV-4872).
+		const viaCommand = resolveViaCommand(assigneeId, loadConfig());
+		if (viaCommand) {
+			return viaCommand;
+		}
 		if (isRegistryConfigured()) {
 			const viaRegistry = await resolveViaRegistry(assigneeId);
 			if (viaRegistry) {

@@ -231,6 +231,70 @@ intended flow for the CLI.
 }
 ```
 
+### Identity resolver hook (`identity.resolver`)
+
+**Optional.** A command el-linear shells out to in order to resolve a person.
+
+```jsonc
+{
+  "identity": {
+    // argv array — el-linear appends the identifier as the FINAL element
+    "resolver": ["el-identity", "resolve"],
+    // optional; a resolver slower than this is treated as a miss (default 8000)
+    "resolverTimeoutMs": 8000
+  }
+}
+```
+
+Use it when your organization keeps a people registry that knows things Linear
+does not — that `jd` is a person, or that a GitLab handle and a Linear handle
+belong to the same human. Linear's API can already resolve names and emails; this is for
+everything else.
+
+**Why a command and not a URL + credentials.** el-linear is MIT and most installs
+are not ours, so it must not bake in anybody's auth scheme. Baking one in means
+the next organization needs Infisical, or 1Password, or a plain env var, or SSO —
+and patches this package to get it. A command has no such problem: the credential
+lives entirely inside whatever you point it at. Adding a secret backend is writing
+a different script.
+
+**Contract.** el-linear runs `<resolver argv...> <identifier>` with no shell (the
+identifier is untrusted input, so it is always an argv element — a name like
+`"; rm -rf /"` is a literal argument, never a command) and reads **stdout**:
+
+| Resolver prints | Result |
+| --- | --- |
+| a bare UUID (`3f2a…`) | resolved |
+| `{"linearId": "3f2a…"}` | resolved |
+| `{"data": {"linearId": "…"}}` | resolved (an `{data, meta}` envelope) |
+| a **non**-UUID, or nothing | **miss** |
+| non-zero exit / timeout / binary not found | **miss** |
+
+A non-UUID string is deliberately a miss, not an answer: handing a bogus id to
+the API produces an opaque `Argument Validation Error`, whereas a miss falls
+through cleanly.
+
+**Fail-open.** Unconfigured, or on any failure, resolution falls through to the
+next layer and finally to Linear's own user lookup — exactly as it behaves with
+no `identity` block at all. A broken resolver degrades el-linear; it never breaks
+it. The hook never throws.
+
+Override or disable per invocation with `EL_LINEAR_IDENTITY_RESOLVER`
+(whitespace-separated command; empty string = off):
+
+```bash
+EL_LINEAR_IDENTITY_RESOLVER="" el-linear issues create ...   # ignore the hook once
+```
+
+Any script satisfying the contract works. A trivial one:
+
+```bash
+#!/bin/sh
+# my-resolver — look "$1" up however you like, print the Linear UUID.
+curl -fsS -H "Authorization: Bearer $(get-my-secret)" \
+     "https://registry.internal/people/$1" | jq -r .linearId
+```
+
 ### SOP-label parent gate (`validation.sopLabelParentGate`)
 
 An **opt-in** create-time gate: when the issue being created carries an

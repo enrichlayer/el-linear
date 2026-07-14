@@ -90,6 +90,31 @@ export interface ElLinearConfig {
 	teamAliases: Record<string, string>;
 	teams: Record<string, string>;
 	/**
+	 * Optional identity-resolver hook (DEV-5628). `resolver` is an argv array —
+	 * el-linear appends the identifier as the final element and reads a Linear
+	 * user UUID off stdout:
+	 *
+	 *   "identity": { "resolver": ["el-identity", "resolve"] }
+	 *
+	 * Use it when your org has a people registry that knows things Linear does
+	 * not (that `jd` is a person; that a GitLab handle and a Linear handle are one human).
+	 *
+	 * It is a COMMAND rather than a URL + credentials on purpose: el-linear is
+	 * MIT and most installs are not ours, so it must not bake in anybody's auth
+	 * scheme. The credential lives entirely inside whatever you point this at —
+	 * Vault, Infisical, 1Password, a plain env var, SSO. Adding a backend is
+	 * writing a different script, not patching this package.
+	 *
+	 * Entirely optional and fail-open: unconfigured, or on any failure,
+	 * resolution falls through to Linear's own user lookup exactly as before.
+	 * See `identity-resolver.ts` for the output contract.
+	 */
+	identity?: {
+		resolver?: string[];
+		/** Milliseconds before the resolver is treated as a miss (default 8000). */
+		resolverTimeoutMs?: number;
+	};
+	/**
 	 * Term-enforcement rules. Each rule has a canonical form and a list of
 	 * rejected forms; rejected forms in issue titles/descriptions are flagged
 	 * (or thrown on, in strict mode) with a hint to use the canonical form.
