@@ -332,9 +332,16 @@ function hasOption(options: OptionValues, key: string): boolean {
 
 /**
  * Resolve the project body from `--content <markdown>` or `--content-file <path>`
- * (DEV-6033). Mirrors `resolveDescription()`'s contract for issues: the two are
- * sources for the same field, so accepting both would silently drop one — reject
- * up front instead.
+ * (DEV-6033). The two are sources for the same field, so accepting both would
+ * silently drop one — we REJECT up front instead.
+ *
+ * That matches `comments --body-file` and `project-updates --body-file`, and it
+ * deliberately DIVERGES from `issues --description-file`, which documents a
+ * precedence (`--description-file` > `--description`) and therefore lets the file
+ * silently win when both are passed. Rejecting is the better contract — a caller
+ * who passes both has a bug, and telling them beats guessing — but do not describe
+ * this as "mirroring" issues: it is not, and a false claim about a sibling's
+ * mechanism outlives the person who wrote it.
  *
  * Returns `undefined` only when NEITHER flag was passed, which is what lets
  * `projects update` keep distinguishing "leave content alone" from "clear it"
