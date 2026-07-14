@@ -110,15 +110,36 @@ whose commit says `docs:` but whose title says `feat:` will squash as `docs:`,
 publish nothing — and the `validate` check will be **green**, because it only ever
 looked at the title.
 
-If you retitle a PR to make it releaseable, make the **commit subject** match:
+#### The rule that is true under all three strategies
+
+The table above is about **squash**. But squash is not the only way PRs land here, and
+the other two are the reason a title-only fix is not enough:
+
+| Strategy | What reaches `main` | Enabled? |
+|---|---|---|
+| **squash** | one commit: the PR title, *or* the sole commit's subject (table above) | yes |
+| **rebase-merge** | **every commit subject, verbatim** | yes |
+| **merge-commit** | **every commit subject, verbatim** | yes — and this is what **`el-git pr merge` uses by default** |
+
+Release-please scans **every commit** that reaches `main` since the last tag. So under
+two of the three enabled strategies — including the one our own tooling defaults to —
+a badly-typed commit lands and is read, no matter what the PR title says.
+
+**Therefore: every commit subject on the branch must be correctly typed.** Not just the
+PR title, and not just "one of them".
 
 ```bash
-git commit --amend -m "feat(scope): ..."   # single-commit PR
+git commit --amend -m "chore(scope): ..."   # single-commit PR
 git push --force-with-lease
 ```
 
-…or push a second, correctly-typed commit (which also works, since two commits make
-the squash use the PR title).
+**Do NOT rely on "just push a second, correctly-typed commit".** That only works under
+*squash* (two commits ⇒ the squash takes the PR title). Under rebase-merge or
+merge-commit the original, wrongly-typed commit still lands and still cuts — or still
+fails to cut — a release. This exact mistake shipped a **no-op patch release**: [#250](https://github.com/enrichlayer/el-linear/pull/250)
+was retitled `chore(tooling):` and given a second `chore:` commit, but `el-git pr merge`
+merged it with a merge commit, so the original `fix(tooling):` subject landed on `main`
+and release-please cut a release for a change whose tarball is byte-identical.
 
 ### Automatic — release-please (default)
 
