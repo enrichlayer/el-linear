@@ -89,7 +89,15 @@ const DEV_ONLY_PACKAGE_KEYS = new Set(["devDependencies", "scripts"]);
 // to the NEXT release, attributing an artifact change to an unrelated commit — exactly
 // the drift this gate exists to prevent. `dist/` is in `package.json` `files`; whatever
 // writes `dist/` is a published surface.
-const RELEASE_AFFECTING_SCRIPTS = new Set([
+//
+// `build` is in this set because `release.yml` happens to run `pnpm run build`. That
+// is a REPO CHOICE, not an npm law — if someone adds `pnpm run bundle` to the release
+// workflow tomorrow, this set would silently not know about it and the gate would go
+// half-blind. `validate-pr-title.test.mjs` therefore parses `.github/workflows/
+// release.yml` and asserts every `pnpm run <script>` it invokes appears here. The
+// workflow is the source of truth; this set has to keep up with it, and the test is
+// what makes that non-optional.
+export const RELEASE_AFFECTING_SCRIPTS = new Set([
 	// (1) run on the consumer's machine
 	"preinstall",
 	"install",

@@ -1,8 +1,11 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
 	classifyPackageJsonChange,
 	consumerVisiblePackageJsonKeys,
 	isPublishedSurfacePath,
+	RELEASE_AFFECTING_SCRIPTS,
 	titleInfo,
 	validatePrTitle,
 } from "./validate-pr-title.mjs";
@@ -267,6 +270,47 @@ describe("validate-pr-title", () => {
 					}),
 					`${script} must gate — it shapes the published tarball`,
 				).toEqual(["scripts"]);
+			}
+		});
+
+		// Drift guard. `build` is in RELEASE_AFFECTING_SCRIPTS only because release.yml
+		// runs `pnpm run build` — a repo choice, not an npm law. If someone adds a new
+		// build step to the release workflow (`pnpm run bundle`, `pnpm run codegen`, …)
+		// the gate would silently not know about it and would go half-blind: an edit to
+		// that script would change the published tarball while passing a `chore:` title.
+		//
+		// So the workflow is the source of truth and this test makes the set keep up with
+		// it. It fails the moment release.yml invokes a script the gate does not gate.
+		it("gates every script the release workflow actually runs (release.yml is the source of truth)", () => {
+			const workflow = readFileSync(
+				fileURLToPath(
+					new URL("../.github/workflows/release.yml", import.meta.url),
+				),
+				"utf8",
+			);
+
+			// `- run: pnpm run <script>` / `pnpm <script>` invocations in the release job.
+			const invoked = [
+				...workflow.matchAll(/pnpm\s+(?:run\s+)?([a-z][a-z0-9:_-]*)/gu),
+			]
+				.map((m) => m[1])
+				// Not package scripts — pnpm's own subcommands.
+				.filter(
+					(s) => !["install", "publish", "exec", "dlx", "add"].includes(s),
+				);
+
+			expect(
+				invoked.length,
+				"expected release.yml to run at least one script",
+			).toBeGreaterThan(0);
+
+			for (const script of invoked) {
+				expect(
+					RELEASE_AFFECTING_SCRIPTS.has(script),
+					`release.yml runs \`pnpm run ${script}\`, which produces the published tarball, but ` +
+						`"${script}" is not in RELEASE_AFFECTING_SCRIPTS — an edit to it would ship a ` +
+						`changed artifact with no release. Add it to the set.`,
+				).toBe(true);
 			}
 		});
 
