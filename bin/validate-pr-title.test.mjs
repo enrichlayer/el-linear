@@ -1,9 +1,33 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+	classifyPackageJsonChange,
+	consumerVisiblePackageJsonKeys,
 	isPublishedSurfacePath,
+	RELEASE_AFFECTING_SCRIPTS,
 	titleInfo,
 	validatePrTitle,
 } from "./validate-pr-title.mjs";
+
+/** A trimmed but structurally faithful el-linear package.json. */
+const BASE_PACKAGE = {
+	name: "@enrichlayer/el-linear",
+	version: "1.38.2",
+	main: "dist/main.js",
+	bin: { "el-linear": "dist/main.js" },
+	files: ["dist/", "claude-skills/", "LICENSE", "README.md"],
+	engines: { node: ">=22.0.0" },
+	scripts: { build: "tsc -p tsconfig.build.json", test: "vitest run" },
+	dependencies: { "@linear/sdk": "^86.0.0", commander: "^15.0.0" },
+	devDependencies: { typescript: "^6.0.3", vitest: "^4.0.18" },
+	optionalDependencies: { "@sentry/node": "^10.50.0" },
+};
+
+/** Serialize a package.json with an override applied, as the validator receives it. */
+function pkg(overrides = {}) {
+	return JSON.stringify({ ...BASE_PACKAGE, ...overrides }, null, "\t");
+}
 
 describe("validate-pr-title", () => {
 	it("accepts release-please release PR titles", () => {
@@ -105,6 +129,240 @@ describe("validate-pr-title", () => {
 		// The lockfile must not be named as the offender — package.json is.
 		expect(result.message).toContain("package.json");
 		expect(result.message).not.toContain("pnpm-lock.yaml");
+	});
+
+	// DEV-6066 — the published-surface check is SECTION-AWARE for package.json.
+	//
+	// DEV-6064 fixed the lockfile-only dependabot PR. The residual it left: dependabot
+	// rewrites the RANGE in package.json on a MAJOR bump, so the first major bump of a
+	// devDependency (typescript, @types/node, vitest, @biomejs/biome — the
+	// `dev-dependencies` group in .github/dependabot.yml) reproduces the identical
+	// permanent-red. These tests pin BOTH halves of the rule.
+	describe("section-aware package.json check (DEV-6066)", () => {
+		it("lets a devDependencies-only major bump pass with a build(deps-dev) title", () => {
+			// The exact shape of the next dev-dependencies group PR: package.json range
+			// rewrite + lockfile, titled build(deps-dev). A consumer cannot observe it —
+			// devDeps are never installed by a dependent and the build is `tsc`, not a
+			// bundler, so no dev tool is inlined into dist/.
+			const result = validatePrTitle(
+				"build(deps-dev): Bump the dev-dependencies group with 2 updates",
+				["package.json", "pnpm-lock.yaml"],
+				{
+					packageJson: {
+						base: pkg(),
+						head: pkg({
+							devDependencies: { typescript: "^7.0.0", vitest: "^5.0.0" },
+						}),
+					},
+				},
+			);
+
+			expect(result.ok).toBe(true);
+		});
+
+		it("STILL fails a runtime dependency range bump with a build(deps) title", () => {
+			// The half of the rule that is the reason the gate exists. A `dependencies`
+			// range IS resolved at the consumer's install, so it must cut a release.
+			const result = validatePrTitle(
+				"build(deps): Bump @linear/sdk from 86.0.0 to 87.0.0",
+				["package.json", "pnpm-lock.yaml"],
+				{
+					packageJson: {
+						base: pkg(),
+						head: pkg({
+							dependencies: {
+								"@linear/sdk": "^87.0.0",
+								commander: "^15.0.0",
+							},
+						}),
+					},
+				},
+			);
+
+			expect(result.ok).toBe(false);
+			expect(result.message).toContain("will not trigger release-please");
+			// The message names the offending KEY, not just the file.
+			expect(result.message).toContain("package.json (dependencies)");
+			expect(result.message).not.toContain("pnpm-lock.yaml");
+		});
+
+		it("still fires for optionalDependencies and peerDependencies bumps", () => {
+			expect(
+				validatePrTitle("build(deps): Bump @sentry/node", ["package.json"], {
+					packageJson: {
+						base: pkg(),
+						head: pkg({ optionalDependencies: { "@sentry/node": "^11.0.0" } }),
+					},
+				}).ok,
+			).toBe(false);
+
+			expect(
+				validatePrTitle("chore: add a peer dep", ["package.json"], {
+					packageJson: {
+						base: pkg(),
+						head: pkg({ peerDependencies: { typescript: "^6.0.0" } }),
+					},
+				}).ok,
+			).toBe(false);
+		});
+
+		it("fires for every other consumer-visible key, not just dependencies", () => {
+			const cases = {
+				engines: { engines: { node: ">=24.0.0" } },
+				bin: { bin: { "el-linear": "dist/cli.js" } },
+				exports: { exports: { ".": "./dist/main.js" } },
+				files: { files: ["dist/"] },
+				name: { name: "@enrichlayer/el-linear-next" },
+				version: { version: "2.0.0" },
+				// NOT in the issue's enumerated list — proves the check is fail-closed
+				// (denylist of dev-only keys) rather than an allowlist that would let an
+				// unlisted-but-consumer-visible key slip through.
+				main: { main: "dist/cli.js" },
+			};
+
+			for (const [key, override] of Object.entries(cases)) {
+				const result = validatePrTitle("ci: tweak", ["package.json"], {
+					packageJson: { base: pkg(), head: pkg(override) },
+				});
+				expect(result.ok, `${key} must still gate`).toBe(false);
+				expect(result.message).toContain(`package.json (${key})`);
+			}
+		});
+
+		it("treats dev-only script targets as invisible but install lifecycle scripts as visible", () => {
+			expect(
+				consumerVisiblePackageJsonKeys(JSON.parse(pkg()), {
+					...BASE_PACKAGE,
+					scripts: { ...BASE_PACKAGE.scripts, test: "vitest run --coverage" },
+				}),
+			).toEqual([]);
+
+			// A postinstall runs on the CONSUMER's machine at install time.
+			expect(
+				consumerVisiblePackageJsonKeys(JSON.parse(pkg()), {
+					...BASE_PACKAGE,
+					scripts: { ...BASE_PACKAGE.scripts, postinstall: "node ./setup.js" },
+				}),
+			).toEqual(["scripts"]);
+		});
+
+		// `build` is NOT a dev-only target: .github/workflows/release.yml runs
+		// `pnpm run build` (-> tsc -> dist/) and then `pnpm publish`, and `dist/` is in
+		// package.json `files`. So editing the build command changes the bytes in the
+		// published tarball. An earlier draft of this gate called `build` invisible —
+		// which would have let a `chore:`-titled build change merge with no release, and
+		// silently altered the NEXT release's artifact.
+		it("treats build/publish-time scripts as consumer-visible — they produce the tarball", () => {
+			for (const script of [
+				"build",
+				"prepack",
+				"prepublishOnly",
+				"postpack",
+				"prepublish",
+			]) {
+				expect(
+					consumerVisiblePackageJsonKeys(JSON.parse(pkg()), {
+						...BASE_PACKAGE,
+						scripts: {
+							...BASE_PACKAGE.scripts,
+							[script]: "echo changed-artifact",
+						},
+					}),
+					`${script} must gate — it shapes the published tarball`,
+				).toEqual(["scripts"]);
+			}
+		});
+
+		// Drift guard. `build` is in RELEASE_AFFECTING_SCRIPTS only because release.yml
+		// runs `pnpm run build` — a repo choice, not an npm law. If someone adds a new
+		// build step to the release workflow (`pnpm run bundle`, `pnpm run codegen`, …)
+		// the gate would silently not know about it and would go half-blind: an edit to
+		// that script would change the published tarball while passing a `chore:` title.
+		//
+		// So the workflow is the source of truth and this test makes the set keep up with
+		// it. It fails the moment release.yml invokes a script the gate does not gate.
+		it("gates every script the release workflow actually runs (release.yml is the source of truth)", () => {
+			const workflow = readFileSync(
+				fileURLToPath(
+					new URL("../.github/workflows/release.yml", import.meta.url),
+				),
+				"utf8",
+			);
+
+			// `- run: pnpm run <script>` / `pnpm <script>` invocations in the release job.
+			const invoked = [
+				...workflow.matchAll(/pnpm\s+(?:run\s+)?([a-z][a-z0-9:_-]*)/gu),
+			]
+				.map((m) => m[1])
+				// Not package scripts — pnpm's own subcommands.
+				.filter(
+					(s) => !["install", "publish", "exec", "dlx", "add"].includes(s),
+				);
+
+			expect(
+				invoked.length,
+				"expected release.yml to run at least one script",
+			).toBeGreaterThan(0);
+
+			for (const script of invoked) {
+				expect(
+					RELEASE_AFFECTING_SCRIPTS.has(script),
+					`release.yml runs \`pnpm run ${script}\`, which produces the published tarball, but ` +
+						`"${script}" is not in RELEASE_AFFECTING_SCRIPTS — an edit to it would ship a ` +
+						`changed artifact with no release. Add it to the set.`,
+				).toBe(true);
+			}
+		});
+
+		it("FAILS a non-releaseable title that edits the build command", () => {
+			// The end-state that matters: this must not merge without cutting a release.
+			const result = validatePrTitle(
+				"chore: tweak the build command",
+				["package.json"],
+				{
+					packageJson: {
+						base: pkg(),
+						head: JSON.stringify({
+							...BASE_PACKAGE,
+							scripts: {
+								...BASE_PACKAGE.scripts,
+								build: "tsc -p tsconfig.build.json --sourceMap",
+							},
+						}),
+					},
+				},
+			);
+
+			expect(result.ok).toBe(false);
+			expect(result.message).toContain("package.json (scripts)");
+		});
+
+		it("fails closed when the package.json blobs are unavailable or unparseable", () => {
+			// No context at all — the pre-DEV-6066 wholesale behavior.
+			expect(
+				validatePrTitle("build(deps): Bump something", ["package.json"]).ok,
+			).toBe(false);
+
+			// File added or deleted (one side missing), and malformed JSON.
+			expect(
+				classifyPackageJsonChange({ base: null, head: pkg() }),
+			).toMatchObject({ consumerVisible: true, readable: false });
+			expect(
+				classifyPackageJsonChange({ base: pkg(), head: "{ not json" }),
+			).toMatchObject({ consumerVisible: true, readable: false });
+		});
+
+		it("ignores key REORDERING and formatting-only churn", () => {
+			const reordered = JSON.stringify(
+				Object.fromEntries(Object.entries(BASE_PACKAGE).reverse()),
+				null,
+				2,
+			);
+
+			expect(
+				classifyPackageJsonChange({ base: pkg(), head: reordered }),
+			).toMatchObject({ consumerVisible: false, keys: [] });
+		});
 	});
 
 	it("exposes parsed title type and releaseability", () => {
