@@ -15,6 +15,14 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 * **labels:** resolve `labels create --team` keys and names before creating the label (DEV-5749)
 
+## [1.40.0](https://github.com/enrichlayer/el-linear/compare/v1.39.0...v1.40.0) (2026-07-14)
+
+
+### Features
+
+* **projects:** add --content-file to projects create/update (DEV-6033) ([9232e97](https://github.com/enrichlayer/el-linear/commit/9232e97c7513a28bf67f863bbdb9416a5cae8043))
+* **skill:** document projects --content-file in the published linear-operations skill (DEV-6033) ([401df22](https://github.com/enrichlayer/el-linear/commit/401df22387be5fd1de108bb9f0ab69f65023d932))
+
 ## [1.39.0](https://github.com/enrichlayer/el-linear/compare/v1.38.2...v1.39.0) (2026-07-13)
 
 
