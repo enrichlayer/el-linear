@@ -248,6 +248,12 @@ function spawnResolver(
 		const result = spawnSync(command, [...args, identifier], {
 			encoding: "utf8",
 			timeout: resolveTimeoutMs(config),
+			// `spawnSync` waits for the child to fully exit after its timeout. Its
+			// default kill signal is SIGTERM, which a broken resolver can trap or
+			// ignore forever — defeating this hook's fail-open timeout. The resolver
+			// is an isolated lookup helper, so force it down when its time budget is
+			// exhausted rather than letting it wedge the whole CLI.
+			killSignal: "SIGKILL",
 			// The identifier is untrusted input; never hand it to a shell. This also
 			// means a Windows npm shim (`el-identity.cmd`) will NOT be found — see
 			// the Windows note in docs/configuration.md. Turning `shell: true` on to

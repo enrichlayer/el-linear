@@ -168,6 +168,26 @@ describe("resolveViaCommand", () => {
 		).toBeNull();
 	});
 
+	it("forces a resolver that ignores SIGTERM to stop at the timeout", () => {
+		// spawnSync waits until its child has fully exited after a timeout. Its
+		// default SIGTERM is catchable, so a resolver that ignores it would wedge
+		// the whole CLI forever instead of failing open.
+		const bin = script(
+			"stubborn-resolver",
+			"trap '' TERM; while :; do :; done",
+		);
+		const started = Date.now();
+
+		expect(
+			resolveViaCommand(
+				"jd",
+				cfg({ resolver: [bin], resolverTimeoutMs: 150 }),
+				{},
+			),
+		).toBeNull();
+		expect(Date.now() - started).toBeLessThan(3000);
+	});
+
 	it("misses (null) when the resolver prints garbage", () => {
 		const bin = script("resolver", "echo 'not a uuid at all'");
 		expect(resolveViaCommand("jd", cfg({ resolver: [bin] }), {})).toBeNull();
