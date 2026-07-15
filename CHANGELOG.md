@@ -19,6 +19,15 @@ project adheres to [Semantic Versioning](https://semver.org/).
 * **quality:** restore a clean full-repository lint baseline (DEV-6142)
 * **labels:** resolve `labels create --team` keys and names before creating the label (DEV-5749)
 
+## [1.41.1](https://github.com/enrichlayer/el-linear/compare/v1.41.0...v1.41.1) (2026-07-15)
+
+
+### Bug Fixes
+
+* **issues:** honor nested read options (DEV-6141) ([#257](https://github.com/enrichlayer/el-linear/issues/257)) ([b58997c](https://github.com/enrichlayer/el-linear/commit/b58997ca33b4097c0658753cae0a363ab8697275))
+* **issues:** offer the sub-issue path when the duplicate gate fires ([#263](https://github.com/enrichlayer/el-linear/issues/263)) ([8b05fae](https://github.com/enrichlayer/el-linear/commit/8b05fae7430d50e4cf836cf6447f827c6eb4b28b))
+* **lint:** stop the biome scan from following links out of the repo (DEV-6206) ([#264](https://github.com/enrichlayer/el-linear/issues/264)) ([25ca91b](https://github.com/enrichlayer/el-linear/commit/25ca91b817bd66339385f8286b2ea98dbe4fa58e))
+
 ## [1.41.0](https://github.com/enrichlayer/el-linear/compare/v1.40.0...v1.41.0) (2026-07-15)
 
 
