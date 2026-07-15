@@ -231,6 +231,106 @@ intended flow for the CLI.
 }
 ```
 
+### Identity resolver hook (`identity.resolver`)
+
+**Optional.** A command el-linear shells out to in order to resolve a person.
+
+```jsonc
+{
+  "identity": {
+    // argv array — el-linear appends the identifier as the FINAL element
+    "resolver": ["el-identity", "resolve"],
+    // optional; a resolver slower than this is treated as a miss (default 8000)
+    "resolverTimeoutMs": 8000
+  }
+}
+```
+
+Use it when your organization keeps a people registry that knows things Linear
+does not — that `jd` is a person, or that a GitLab handle and a Linear handle
+belong to the same human. Linear's API can already resolve names and emails; this is for
+everything else.
+
+**Why a command and not a URL + credentials.** el-linear is MIT and most installs
+are not ours, so it must not bake in anybody's auth scheme. Baking one in means
+the next organization needs Infisical, or 1Password, or a plain env var, or SSO —
+and patches this package to get it. A command has no such problem: the credential
+lives entirely inside whatever you point it at. Adding a secret backend is writing
+a different script.
+
+**Contract.** el-linear runs `<resolver argv...> <identifier>` with no shell (the
+identifier is untrusted input, so it is always an argv element — a name like
+`"; rm -rf /"` is a literal argument, never a command) and reads **stdout**:
+
+| Resolver prints | Result |
+| --- | --- |
+| a bare UUID (`3f2a…`) | resolved |
+| `{"linearId": "3f2a…"}` | resolved |
+| `{"data": {"linearId": "…"}}` | resolved (an `{data, meta}` envelope) |
+| a **non**-UUID, or nothing | **miss** |
+| non-zero exit / timeout / binary not found | **miss** |
+
+A non-UUID string is deliberately a miss, not an answer: handing a bogus id to
+the API produces an opaque `Argument Validation Error`, whereas a miss falls
+through cleanly. An identifier starting with `-` is refused outright — it is never
+a valid Linear identifier, and it would otherwise be parsed as a flag by *your*
+resolver.
+
+The resolver inherits your environment (it needs it to reach its own secret
+backend) **except `LINEAR_API_TOKEN`**, which is removed: the resolver resolves
+people, it never talks to Linear, and there is no reason for the CLI's most
+sensitive secret to be in its blast radius.
+
+**Fail-open.** Unconfigured, or on any failure, resolution falls through to the
+next layer and finally to Linear's own user lookup — exactly as it behaves with
+no `identity` block at all. A broken resolver degrades el-linear; it never breaks
+it. The hook never throws.
+
+Because every failure is a silent miss, a broken resolver is otherwise invisible
+— you just see an unexplained pause. Run with `EL_LINEAR_DEBUG=1` to have the
+miss explained on stderr (exit code, stderr excerpt, unparseable output).
+
+**Personal config only — the team layer cannot set this.** `identity.resolver`
+names a binary el-linear will *spawn*. A team config layer (`teamConfigPath` /
+`EL_LINEAR_TEAM_CONFIG`) arrives from someone else's repository, and nobody
+reviews a config file expecting it to hand them a subprocess — honoring it there
+would turn "clone this repo and run el-linear" into arbitrary code execution. So
+the resolver is read **only** from your personal `config.json` or the env var.
+The loader strips `identity` from the team layer, exactly as it has always
+stripped `teamConfigPath`. An organization shipping a resolver to its developers
+should write it into their personal config at setup time.
+
+**Timeout.** `resolverTimeoutMs` must be a positive number; `0` is *not* "no
+timeout" and is ignored in favor of the 8000 ms default. (Node would treat `0` as
+"wait forever", which inside a synchronous call is an unkillable hang — the one
+failure mode fail-open cannot save you from.)
+
+**Repeated identifiers are resolved once** per process, so `--subscriber a,b,a`
+costs one subprocess for `a`, not two. Nothing is cached to disk: a stale
+identity cache is exactly the drift this hook exists to remove.
+
+**Windows.** The command is spawned without a shell (the identifier is untrusted
+input and must never reach `cmd.exe`), which means an npm shim like
+`el-identity.cmd` will **not** be found — Node refuses `.cmd`/`.bat` without a
+shell. On Windows, point `resolver` at a real executable, or at the
+interpreter plus script (e.g. `["node", "C:/path/to/resolver.js"]`).
+
+Override or disable per invocation with `EL_LINEAR_IDENTITY_RESOLVER`
+(whitespace-separated command; empty string = off):
+
+```bash
+EL_LINEAR_IDENTITY_RESOLVER="" el-linear issues create ...   # ignore the hook once
+```
+
+Any script satisfying the contract works. A trivial one:
+
+```bash
+#!/bin/sh
+# my-resolver — look "$1" up however you like, print the Linear UUID.
+curl -fsS -H "Authorization: Bearer $(get-my-secret)" \
+     "https://registry.internal/people/$1" | jq -r .linearId
+```
+
 ### SOP-label parent gate (`validation.sopLabelParentGate`)
 
 An **opt-in** create-time gate: when the issue being created carries an

@@ -2,6 +2,7 @@ import { createGraphQLService } from "../utils/graphql-service.js";
 import { outputWarning } from "../utils/output.js";
 import { isUuid, isUuidPrefix } from "../utils/uuid.js";
 import { loadConfig } from "./config.js";
+import { resolveViaCommand } from "./identity-resolver.js";
 import {
 	isRegistryConfigured,
 	resolveViaRegistry,
@@ -127,18 +128,43 @@ export async function resolveAssignee(
 }
 
 /**
- * Resolve a member identifier (alias / handle / name) to a UUID, consulting the
- * opt-in identity registry first when configured, then the bundled config
- * (`resolveMember`). The shared async resolution path behind `--assignee` and
- * `--delegate` (DEV-4871 / DEV-4872).
+ * Resolve a member identifier (alias / handle / name) to a UUID. The shared
+ * async resolution path behind `--assignee` and `--delegate` (DEV-4871 /
+ * DEV-4872 / DEV-5628).
  *
- * EL-only and env-gated on `EL_IDENTITY_URL`; fail-open — when unconfigured, on
- * a miss, or on any failure it falls back to config, so a non-EL install and an
- * unreachable registry both behave exactly as before. Never throws.
+ * Order, most authoritative first:
+ *
+ *   1. **The identity-resolver hook** (`identity.resolver`, DEV-5628) — an
+ *      operator-supplied command. This is the one to reach for: it can answer
+ *      for aliases and cross-system handles Linear has never heard of, and it
+ *      owns its own credentials, so el-linear carries no auth scheme.
+ *   2. **The HTTP registry** (`EL_IDENTITY_URL`, DEV-4871) — the older,
+ *      env-gated path. Superseded by (1), which needs no URL or CF-Access
+ *      credentials in the environment. Kept because it ships and someone may
+ *      rely on it.
+ *   3. **The bundled config** (`resolveMember`) — a local lookup table.
+ *
+ * All three are optional. With none of them, `resolveMember` hands the raw input
+ * back and Linear's own user lookup resolves it (`LinearService.resolveUserId`
+ * matches email → displayName → name), which is why an install with no config at
+ * all still works.
+ *
+ * Fail-open throughout: a miss or a failure at any layer falls through to the
+ * next. Never throws.
  */
 export async function resolveMemberWithRegistry(
 	input: string,
 ): Promise<string> {
+	// UUIDs are already canonical — don't spend a subprocess on them.
+	if (isUuid(input)) {
+		return input;
+	}
+
+	const viaCommand = resolveViaCommand(input, loadConfig());
+	if (viaCommand) {
+		return viaCommand;
+	}
+
 	if (isRegistryConfigured()) {
 		const viaRegistry = await resolveViaRegistry(input);
 		if (viaRegistry) {

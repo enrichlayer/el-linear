@@ -154,6 +154,72 @@ describe("loadConfig — team config layer", () => {
 		delete process.env.EL_LINEAR_TEAM_CONFIG;
 	});
 
+	// ── SECURITY: the team layer is DATA, not code. ──────────────────────────
+	// `identity.resolver` names a binary el-linear will SPAWN on every --assignee
+	// resolution. The team config arrives from a different repository via `git
+	// pull` (or, for an OSS user, from whatever repo they pointed teamConfigPath
+	// at) — nobody reviews a config file expecting it to hand them a subprocess.
+	// Honoring it there would turn "clone this repo and run el-linear" into
+	// arbitrary code execution. Same reasoning as teamConfigPath, which the loader
+	// has always stripped from the team layer.
+	it("IGNORES identity.resolver from the team config layer (RCE guard)", async () => {
+		const teamPath = "/shared/team-config.json";
+		fsFiles.set(
+			teamPath,
+			JSON.stringify({
+				defaultTeam: "ENG",
+				identity: { resolver: ["/tmp/evil-payload"] },
+			}),
+		);
+		process.env.EL_LINEAR_TEAM_CONFIG = teamPath;
+		defaultExistsReturn = true;
+		defaultReadReturn = JSON.stringify({});
+
+		const { loadConfig } = await import("./config.js");
+		const config = loadConfig();
+
+		// The rest of the team layer still merges …
+		expect(config.defaultTeam).toBe("ENG");
+		// … but it does not get to choose what we execute.
+		expect(config.identity).toBeUndefined();
+	});
+
+	it("honors identity.resolver from the PERSONAL config (the operator's own file)", async () => {
+		const teamPath = "/shared/team-config.json";
+		fsFiles.set(teamPath, JSON.stringify({ defaultTeam: "ENG" }));
+		process.env.EL_LINEAR_TEAM_CONFIG = teamPath;
+		defaultExistsReturn = true;
+		defaultReadReturn = JSON.stringify({
+			identity: { resolver: ["my-resolver", "--json"] },
+		});
+
+		const { loadConfig } = await import("./config.js");
+		expect(loadConfig().identity?.resolver).toEqual(["my-resolver", "--json"]);
+	});
+
+	it("a personal resolver REPLACES rather than concatenates into a nonsense argv", async () => {
+		// deepMerge concatenates arrays — right for `terms`/`defaultLabels`, where
+		// personal entries extend team ones. For an ARGV it is catastrophic:
+		//   ["el-identity","resolve"] + ["my-resolver"]
+		//     → spawns `el-identity resolve my-resolver <identifier>`
+		// which fails as a silent timeout. Stripping identity from the team layer
+		// makes this structurally impossible; this test is the tripwire if anyone
+		// ever reintroduces an identity default into a lower layer.
+		const teamPath = "/shared/team-config.json";
+		fsFiles.set(
+			teamPath,
+			JSON.stringify({ identity: { resolver: ["el-identity", "resolve"] } }),
+		);
+		process.env.EL_LINEAR_TEAM_CONFIG = teamPath;
+		defaultExistsReturn = true;
+		defaultReadReturn = JSON.stringify({
+			identity: { resolver: ["my-resolver"] },
+		});
+
+		const { loadConfig } = await import("./config.js");
+		expect(loadConfig().identity?.resolver).toEqual(["my-resolver"]);
+	});
+
 	it("merges team config under personal config (personal wins)", async () => {
 		const teamPath = "/shared/team-config.json";
 
