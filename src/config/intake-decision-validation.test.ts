@@ -171,6 +171,8 @@ describe("evaluateIntakeDecision", () => {
 
 	it.each([
 		["tilde fence", "~~~markdown", "~~~"],
+		["tilde fence with backticks in its info string", "~~~```markdown", "~~~"],
+		["backtick fence with tildes in its info string", "```~~~markdown", "```"],
 		["unclosed backtick fence", "```markdown", ""],
 		["six-backtick fence", "``````markdown", "``````"],
 	])("does not treat a %s template as operative", (_name, opener, closer) => {

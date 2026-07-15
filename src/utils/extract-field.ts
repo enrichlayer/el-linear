@@ -30,7 +30,7 @@ const BOLD_PSEUDO_HEADER_RE = /^\*\*([^*\n]+?)(?::\s*)?\*\*\s*$/;
 // permitted as fence indent per the CommonMark spec). We toggle an inFence
 // flag while scanning so section headers inside code samples don't
 // terminate the real section.
-const FENCE_DELIMITER_RE = /^ {0,3}([`~]{3,})(.*)$/;
+const FENCE_DELIMITER_RE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 
 interface FenceState {
 	marker: "`" | "~";
