@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import {
 	mkdirSync,
 	mkdtempSync,
@@ -120,20 +120,24 @@ describe("scan excludes (DEV-5944, DEV-6206)", () => {
 		mkdirSync(join(project, ".agents"));
 		symlinkSync(outside, join(project, ".agents", "skills"), "dir");
 
-		try {
-			return execFileSync(biomeBin, ["check", "."], {
-				cwd: project,
-				encoding: "utf8",
-			});
-		} catch (error) {
-			// biome exits non-zero whenever it reports diagnostics, which is the
-			// expected path here — the output is what we assert on.
-			const { stdout = "", stderr = "" } = error as {
-				stdout?: string;
-				stderr?: string;
-			};
-			return `${stdout}${stderr}`;
-		}
+		// spawnSync, not execFileSync, for two reasons (DEV-6206 cycle-1 review):
+		//
+		// 1. Biome writes its diagnostics to STDERR. execFileSync's return value is
+		//    stdout only, so its success path returned the one stream that never
+		//    carries what we assert on — silently, since the fixture always exits
+		//    non-zero and took the catch path instead. spawnSync hands back both.
+		// 2. Without an explicit stdio, biome's diagnostics echo through to the
+		//    parent's stderr, printing red "× Formatter would have printed…" lines
+		//    in the middle of a PASSING suite. `pipe` captures them instead.
+		//
+		// Biome exits non-zero whenever it reports diagnostics, which is the
+		// expected path here — we assert on the output, never the exit code.
+		const result = spawnSync(biomeBin, ["check", "."], {
+			cwd: project,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		return `${result.stdout ?? ""}${result.stderr ?? ""}`;
 	}
 
 	it("biome really stops at an excluded link dir instead of following it out of the repo", () => {
