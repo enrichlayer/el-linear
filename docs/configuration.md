@@ -219,8 +219,9 @@ intended flow for the CLI.
     "goalSectionHeaders": ["Done when", "Acceptance criteria"],
     // OPT-IN intake-decision gate (default: off). "warn" advises and
     // "block" refuses issue creation until the description records, in order,
-    // whether the work is needed and worth doing, its canonical owner, its
-    // concrete placement, and a PROCEED decision. The narrow override
+    // whether the work is needed and worth doing, what existing/duplicate work
+    // was checked, its canonical owner, its concrete placement, and a PROCEED
+    // decision. The narrow override
     // --allow-missing-intake-decision is recorded.
     "intakeDecisionGate": false,
     // Section headers accepted for the intake decision. Default
@@ -327,6 +328,7 @@ that they appear in this exact order:
 ## Intake decision
 - Needed: Yes — <why this is needed>
 - Worth doing: Yes — <why the value exceeds the cost>
+- Existing work: <duplicate/search result and evidence>
 - Owner: <canonical owner or source of truth>
 - Placement: <team/project/repository/document path>
 - Decision: PROCEED

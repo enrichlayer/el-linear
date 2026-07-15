@@ -1561,7 +1561,7 @@ describe("issues commands", () => {
 			validation: { enabled: true, intakeDecisionGate: "block" },
 		};
 		const validDescription =
-			"Background long enough for validation.\n\n## Intake decision\n- Needed: Yes — the current workflow creates misplaced issues\n- Worth doing: Yes — a local gate prevents repeated cleanup\n- Owner: el-linear maintainers\n- Placement: el-linear src/config/intake-decision-validation.ts\n- Decision: PROCEED";
+			"Background long enough for validation.\n\n## Intake decision\n- Needed: Yes — the current workflow creates misplaced issues\n- Worth doing: Yes — a local gate prevents repeated cleanup\n- Existing work: No duplicate — searched current validation and issue-create work\n- Owner: el-linear maintainers\n- Placement: el-linear src/config/intake-decision-validation.ts\n- Decision: PROCEED";
 
 		beforeEach(() => {
 			mockSearchIssues.mockResolvedValue([]);

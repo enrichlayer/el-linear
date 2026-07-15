@@ -15,6 +15,7 @@ const VALID = `Background that explains the proposed work.
 ## Intake decision
 - Needed: Yes — support cannot find the current procedure
 - Worth doing: Yes — one maintained guide replaces repeated investigation
+- Existing work: No duplicate — searched current intake and issue-creation work
 - Owner: Customer Support internal documentation
 - Placement: customer-support/docs-mdx/tools/linear/intake.mdx
 - Decision: PROCEED`;
@@ -77,15 +78,25 @@ describe("evaluateIntakeDecision", () => {
 		});
 	});
 
+	it("rejects a missing existing-work check", () => {
+		expect(
+			evaluateIntakeDecision(VALID.replace(/^- Existing work:.*\n/m, "")),
+		).toEqual({
+			ok: false,
+			reason: "missing-field",
+			field: "Existing work",
+		});
+	});
+
 	it("rejects fields in the wrong order", () => {
 		const wrongOrder = VALID.replace(
-			/- Owner:.*\n- Placement:.*\n/,
-			"- Placement: customer-support/docs.mdx\n- Owner: Customer Support docs\n",
+			/- Existing work:.*\n- Owner:.*\n/,
+			"- Owner: Customer Support docs\n- Existing work: No duplicate — searched docs\n",
 		);
 		expect(evaluateIntakeDecision(wrongOrder)).toEqual({
 			ok: false,
 			reason: "out-of-order",
-			field: "Placement",
+			field: "Owner",
 		});
 	});
 
@@ -99,6 +110,25 @@ describe("evaluateIntakeDecision", () => {
 			reason: "invalid-field",
 			field: "Needed",
 		});
+	});
+
+	it("rejects placeholder reasons and non-specific owner or placement", () => {
+		expect(
+			evaluateIntakeDecision(
+				VALID.replace(
+					"Needed: Yes — support cannot find the current procedure",
+					"Needed: Yes — TBD",
+				),
+			),
+		).toEqual({ ok: false, reason: "invalid-field", field: "Needed" });
+		expect(
+			evaluateIntakeDecision(
+				VALID.replace(
+					"Owner: Customer Support internal documentation",
+					"Owner: Yes",
+				),
+			),
+		).toEqual({ ok: false, reason: "invalid-field", field: "Owner" });
 	});
 
 	it("rejects placeholder ownership", () => {
@@ -121,6 +151,23 @@ describe("evaluateIntakeDecision", () => {
 			decision: "REJECT",
 		});
 	});
+
+	it("rejects a contradictory duplicate decision field", () => {
+		expect(evaluateIntakeDecision(`${VALID}\n- Decision: REJECT`)).toEqual({
+			ok: false,
+			reason: "duplicate-field",
+			field: "Decision",
+		});
+	});
+
+	it("does not treat a fenced template as an operative decision", () => {
+		const fenced = `Background only.\n\n## Intake decision\n\`\`\`markdown\n${VALID.split("## Intake decision\n")[1]}\n\`\`\``;
+		expect(evaluateIntakeDecision(fenced)).toEqual({
+			ok: false,
+			reason: "missing-field",
+			field: "Needed",
+		});
+	});
 });
 
 describe("formatIntakeDecisionBlock", () => {
@@ -131,6 +178,7 @@ describe("formatIntakeDecisionBlock", () => {
 		});
 		expect(message).toContain("Needed: Yes");
 		expect(message).toContain("Worth doing: Yes");
+		expect(message).toContain("Existing work:");
 		expect(message).toContain("Owner:");
 		expect(message).toContain("Placement:");
 		expect(message).toContain("Decision: PROCEED");

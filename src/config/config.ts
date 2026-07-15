@@ -171,8 +171,9 @@ export interface ElLinearConfig {
 		/**
 		 * OPT-IN explicit intake gate (DEV-6163). When `"warn"` or `"block"`,
 		 * `issues create` requires an ordered `Intake decision` section recording
-		 * why the work is needed, why it is worth doing, its canonical owner,
-		 * concrete placement, and a `PROCEED` decision. Defaults to off for the
+		 * why the work is needed, why it is worth doing, the existing/duplicate
+		 * work checked, its canonical owner, concrete placement, and a `PROCEED`
+		 * decision. Defaults to off for the
 		 * open-source package. A narrow, recorded override is available through
 		 * `--allow-missing-intake-decision`.
 		 */
