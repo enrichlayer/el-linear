@@ -1542,6 +1542,113 @@ describe("issues commands", () => {
 		});
 	});
 
+	// DEV-6163: the intake gate must compose with the create command, not merely
+	// validate text in isolation. In block mode it runs before resolver/network
+	// work and is bypassed only by its narrow, recorded override.
+	describe("issues create — intake-decision gate (DEV-6163)", () => {
+		const createArgs = [
+			"--team",
+			"DEV",
+			"--labels",
+			"feature",
+			"--assignee",
+			"bob",
+			"--project",
+			"Infrastructure",
+		];
+		const blockConfig = {
+			...baseConfig,
+			validation: { enabled: true, intakeDecisionGate: "block" },
+		};
+		const validDescription =
+			"Background long enough for validation.\n\n## Intake decision\n- Needed: Yes — the current workflow creates misplaced issues\n- Worth doing: Yes — a local gate prevents repeated cleanup\n- Owner: el-linear maintainers\n- Placement: el-linear src/config/intake-decision-validation.ts\n- Decision: PROCEED";
+
+		beforeEach(() => {
+			mockSearchIssues.mockResolvedValue([]);
+			mockCreateIssue.mockResolvedValue({ id: "x", identifier: "DEV-999" });
+		});
+
+		it("blocks before the create POST when intake is absent", async () => {
+			mockLoadConfig.mockReturnValue(blockConfig);
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Create another workflow",
+				...createArgs,
+				"--description",
+				"A sufficiently long description without an intake decision.",
+			]);
+
+			expect(mockCreateIssue).not.toHaveBeenCalled();
+			expect(process.exit).toHaveBeenCalledWith(1);
+			expect(mockEmitGateEvent).toHaveBeenCalledWith(
+				"el-linear",
+				"issues create",
+				expect.objectContaining({
+					gate: "issues-create-intake-decision",
+					outcome: "blocked",
+				}),
+			);
+		});
+
+		it("is not silently bypassed by --skip-validation", async () => {
+			mockLoadConfig.mockReturnValue(blockConfig);
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Create another workflow",
+				...createArgs,
+				"--description",
+				"A sufficiently long description without an intake decision.",
+				"--skip-validation",
+			]);
+
+			expect(mockCreateIssue).not.toHaveBeenCalled();
+			expect(process.exit).toHaveBeenCalledWith(1);
+		});
+
+		it("creates with valid intake and records a narrow override when used", async () => {
+			mockLoadConfig.mockReturnValue(blockConfig);
+			const validProgram = createTestProgram();
+			setupIssuesCommands(validProgram);
+			await runCommand(validProgram, [
+				"issues",
+				"create",
+				"Create another workflow",
+				...createArgs,
+				"--description",
+				validDescription,
+			]);
+			expect(mockCreateIssue).toHaveBeenCalledTimes(1);
+
+			mockCreateIssue.mockClear();
+			const overrideProgram = createTestProgram();
+			setupIssuesCommands(overrideProgram);
+			await runCommand(overrideProgram, [
+				"issues",
+				"create",
+				"Create exceptional work",
+				...createArgs,
+				"--description",
+				"A sufficiently long exceptional description.",
+				"--allow-missing-intake-decision",
+			]);
+			expect(mockCreateIssue).toHaveBeenCalledTimes(1);
+			expect(mockEmitGateEvent).toHaveBeenCalledWith(
+				"el-linear",
+				"issues create",
+				expect.objectContaining({
+					gate: "issues-create-intake-decision",
+					outcome: "overridden",
+				}),
+			);
+		});
+	});
+
 	// DEV-5920: create-time goal-completion gate. These assert the real
 	// composition (resolve description → evaluate → warn/block/override), not
 	// just the pure evaluator (covered in goal-completion-validation.test.ts) —

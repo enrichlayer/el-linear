@@ -82,8 +82,10 @@ Each gate decision appends one JSON line to `gate-events.jsonl`:
 | `metadata.top_score` | Highest candidate similarity (0–1) that triggered the gate. |
 | `metadata.candidate_count` | How many candidates crossed the threshold. |
 
-`--skip-validation` is a blanket bypass and records **nothing** — it isn't a
-gate-specific override, so counting it would distort the override-rate.
+`--skip-validation` bypasses the general validation gates and records
+**nothing** — it isn't a gate-specific override, so counting it would distort
+the override-rate. The intake-decision gate is deliberately excluded from that
+blanket bypass; its `--allow-missing-intake-decision` override is recorded.
 
 Writes are best-effort: if the file can't be written, issue creation proceeds
 normally and no error is raised.

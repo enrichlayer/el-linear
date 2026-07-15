@@ -275,7 +275,11 @@ itself: `el-linear teams list --raw | jq '.[] | {key, id}'`, etc.
 [SOP-label parent gate](./docs/configuration.md#sop-label-parent-gate-validationsoplabelparentgate),
 and an opt-in
 [goal-completion gate](./docs/configuration.md#goal-completion-gate-validationgoalcompletiongate)
-(requires a falsifiable "Done when" / acceptance-criteria section).
+(requires a falsifiable "Done when" / acceptance-criteria section), plus an
+opt-in
+[intake-decision gate](./docs/configuration.md#intake-decision-gate-validationintakedecisiongate)
+that requires need, value, ownership, and placement to be decided before issue
+creation.
 el-linear can record each gate's fire/override decision to a local JSONL file so
 you can measure its **override-rate** and tell whether it's too aggressive. It is
 **off by default** and writes nothing unless you opt in (e.g.

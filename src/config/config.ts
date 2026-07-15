@@ -168,6 +168,17 @@ export interface ElLinearConfig {
 		 * "Acceptance criteria", "Success criteria"]`.
 		 */
 		goalSectionHeaders?: string[];
+		/**
+		 * OPT-IN explicit intake gate (DEV-6163). When `"warn"` or `"block"`,
+		 * `issues create` requires an ordered `Intake decision` section recording
+		 * why the work is needed, why it is worth doing, its canonical owner,
+		 * concrete placement, and a `PROCEED` decision. Defaults to off for the
+		 * open-source package. A narrow, recorded override is available through
+		 * `--allow-missing-intake-decision`.
+		 */
+		intakeDecisionGate?: false | "warn" | "block";
+		/** Headers accepted for the intake section. Defaults to `["Intake decision"]`. */
+		intakeSectionHeaders?: string[];
 	};
 	/**
 	 * Optional override for the Linear workspace URL key (the part after
