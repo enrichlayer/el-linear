@@ -18,11 +18,13 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 
-# Least privilege: read the code, comment on the PR. No write to contents, and
-# no id-token (we authenticate with a static ANTHROPIC_API_KEY, not OIDC/WIF).
+# Least privilege: read the code and comment on the PR. The static API key
+# authenticates Anthropic API calls; Claude's GitHub App uses this OIDC token to
+# authenticate its GitHub identity for review comments. It is not cloud WIF.
 permissions:
   contents: read
   pull-requests: write
+  id-token: write
 
 # One review per PR at a time; a new push cancels an in-flight review so we
 # don't stack reviews or spend on a diff that's already superseded.
