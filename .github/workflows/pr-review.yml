@@ -1,0 +1,110 @@
+name: pr-review
+
+# Automated advisory AI code review on every pull request (DEV-6160).
+#
+# Why this exists: el-linear is published from its own public GitHub repo and
+# does not carry the vertical-int/tools el-hook or `.githooks`, so the tools
+# auto-review cycle (which is hook-driven and GitLab-centric) never fires here.
+# This GitHub-native action fills that gap so every PR gets a review pass.
+#
+# SETUP PREREQUISITE (one-time, repo admin):
+#   Add an `ANTHROPIC_API_KEY` repository secret
+#   (Settings -> Secrets and variables -> Actions -> New repository secret).
+#   Without it the review step fails; see CONTRIBUTING.md.
+#
+# The review is ADVISORY: it posts comments, never approves or blocks a merge.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+# Least privilege: read the code, comment on the PR. No write to contents, and
+# no id-token (we authenticate with a static ANTHROPIC_API_KEY, not OIDC/WIF).
+permissions:
+  contents: read
+  pull-requests: write
+
+# One review per PR at a time; a new push cancels an in-flight review so we
+# don't stack reviews or spend on a diff that's already superseded.
+concurrency:
+  group: pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # SECURITY (public repo): this runs on `pull_request`, NOT
+    # `pull_request_target`, so a PR from a fork runs with NO repository secrets
+    # (`secrets.ANTHROPIC_API_KEY` is empty for forks). Gate on same-repo so
+    # fork PRs skip cleanly instead of failing on a missing key; a maintainer
+    # reviews those manually or re-runs after pushing the branch to this repo.
+    # Do NOT switch to `pull_request_target` — that would run untrusted fork
+    # code with the API key in scope (secret-exfiltration risk).
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # full history so the review can diff against the base
+
+      - name: AI review
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          track_progress: true
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            You are performing an ADVISORY code review of this pull request for
+            el-linear, an MIT-licensed, npm-published CLI that wraps the Linear
+            API. Your review does not approve or block the merge — it surfaces
+            findings for the author and maintainers.
+
+            Read the PR diff and the changed files, then review for:
+
+            1. Correctness & security
+               - Real bugs, unhandled errors, and edge cases.
+               - Input handling and any command that shells out or touches the
+                 filesystem/network.
+               - No secrets, tokens, or credentials committed.
+
+            2. el-linear conventions (these are the house rules — cite the file
+               and line for any violation):
+               - Strict TypeScript. No `any` without a written reason in a
+                 comment.
+               - American English in code, comments, docstrings, CHANGELOG,
+                 README, and commit messages (behavior/honor/color/serialize/
+                 recognize, not the British spellings).
+               - Open-source, collect-nothing-by-default: any new file write,
+                 cache, or telemetry MUST be opt-in, never opt-out. A fresh
+                 install must do nothing the user didn't ask for.
+               - Prefer the `@linear/sdk` over raw GraphQL when the SDK covers
+                 the call; raw GraphQL needs a docstring saying why.
+               - Deterministic CLI behavior over prose: truncation cues, typed
+                 ambiguous/not-found errors, and identifier-shape acceptance
+                 belong in code, not in skill markdown.
+               - Output is JSON by default via `utils/output.ts`
+                 (`outputSuccess`/`outputWarning`/`handleAsyncCommand`), never
+                 `console.log`.
+               - Don't change the JSON output shape of an existing command
+                 without a CHANGELOG entry (downstream scripts depend on it).
+               - Co-located tests: `foo.ts` next to `foo.test.ts`.
+
+            3. Tests
+               - Adequate coverage for new behavior; meaningful assertions on
+                 the real output shape, not mocks-of-mocks.
+
+            Post your review as PR comments: inline comments for specific
+            file/line issues, and one top-level summary comment. Label each
+            finding by severity (blocker / nit / question). If the diff is
+            clean, say so briefly rather than inventing findings.
+
+          # Cost-reasonable but strong reviewer; change the model here if you
+          # want a different tier. Tools: inline + top-level PR comments, and
+          # read-only git/gh for diffing.
+          claude_args: |
+            --model claude-sonnet-5
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git diff:*),Bash(git log:*),Read,Grep,Glob"
