@@ -14,6 +14,7 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Bug Fixes
 
+* **issues:** offer the `--parent` sub-issue path when the duplicate gate flags a candidate — the block previously presented only "comment on it instead" and "`--allow-duplicate`", omitting the common case where the new work is a *piece* of the match, which pushed operators into reusing multi-phase parent issues. The remedy is per-tier: the hard block names `--parent <id> --allow-duplicate` (a re-run), while the advisory tier names `issues update <new-id> --parent <id>`, since creation has already proceeded there and a re-run would file a second issue (DEV-6205)
 * **issues:** honor read options such as `--body` on the nested `issues read` and `issue read` routes (DEV-6141)
 * **quality:** restore a clean full-repository lint baseline (DEV-6142)
 * **labels:** resolve `labels create --team` keys and names before creating the label (DEV-5749)
