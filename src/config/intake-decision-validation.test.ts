@@ -168,6 +168,19 @@ describe("evaluateIntakeDecision", () => {
 			field: "Needed",
 		});
 	});
+
+	it.each([
+		["tilde fence", "~~~markdown", "~~~"],
+		["unclosed backtick fence", "```markdown", ""],
+		["six-backtick fence", "``````markdown", "``````"],
+	])("does not treat a %s template as operative", (_name, opener, closer) => {
+		const fenced = `Background only.\n\n## Intake decision\n${opener}\n${VALID.split("## Intake decision\n")[1]}${closer ? `\n${closer}` : ""}`;
+		expect(evaluateIntakeDecision(fenced)).toEqual({
+			ok: false,
+			reason: "missing-field",
+			field: "Needed",
+		});
+	});
 });
 
 describe("formatIntakeDecisionBlock", () => {

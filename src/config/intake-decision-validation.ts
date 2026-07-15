@@ -12,7 +12,7 @@
  * `"block"`.
  */
 
-import { extractField } from "../utils/extract-field.js";
+import { extractField, stripFencedCodeBlocks } from "../utils/extract-field.js";
 import { loadConfig } from "./config.js";
 
 export const DEFAULT_INTAKE_SECTION_HEADERS = ["Intake decision"];
@@ -102,7 +102,7 @@ export function evaluateIntakeDecision(
 
 	// A template/example fence is not an operative decision record. Remove all
 	// fenced examples before matching so copied guidance cannot satisfy intake.
-	const operativeSection = section.replace(/```[\s\S]*?```/g, "");
+	const operativeSection = stripFencedCodeBlocks(section);
 	const values = new Map<IntakeFieldKey, { value: string; index: number }>();
 	for (const match of operativeSection.matchAll(FIELD_LINE)) {
 		const key = normalizedKey(match[1] ?? "");
