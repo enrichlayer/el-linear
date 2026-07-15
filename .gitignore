@@ -34,3 +34,8 @@ tmp/
 # If you later want to commit team-shared skills/agents/hooks, un-ignore
 # specific subpaths (e.g. `!.claude/skills/`) below this line.
 .claude/
+
+# Agent-tooling runtime (agents-spec parallel of `.claude/`). Some setups fill
+# `.agents/skills/` with symlinks into a *separate* checkout, which is why the
+# scanners exclude it — see scan-excludes.test.ts.
+.agents/
