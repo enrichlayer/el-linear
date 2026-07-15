@@ -122,17 +122,25 @@ export async function readIssues(
 	const rootOpts = getRootOpts(command);
 	const { graphQLService, issuesService } = await createIssuesService(rootOpts);
 	const fileService = await createFileService(rootOpts);
+	// `issues` owns these options for its no-subcommand shorthand, while
+	// `issues read` registers the same options on the child command. Commander
+	// stores a duplicated flag on the parent even when it appears after `read`,
+	// so the action callback's local options can be empty. Merge the command
+	// hierarchy here, with local values winning, so every read route shares the
+	// same deterministic option contract.
+	const readOptions = { ...command.optsWithGlobals(), ...options };
 
-	const fieldName = typeof options.field === "string" ? options.field : null;
-	const bodyOnly = options.body === true;
+	const fieldName =
+		typeof readOptions.field === "string" ? readOptions.field : null;
+	const bodyOnly = readOptions.body === true;
 	const sectionsRaw =
-		typeof options.sections === "string" ? options.sections : null;
+		typeof readOptions.sections === "string" ? readOptions.sections : null;
 	// DEV-4476: --with opt-in includes (currently `relations`). Throws on
 	// unknown values via parseWithIncludes — fail fast in the CLI per the
 	// deterministic-CLI doctrine.
 	const includes: ParsedWithIncludes =
-		typeof options.with === "string"
-			? parseWithIncludes(options.with)
+		typeof readOptions.with === "string"
+			? parseWithIncludes(readOptions.with)
 			: { relations: false };
 
 	if (fieldName && sectionsRaw) {
