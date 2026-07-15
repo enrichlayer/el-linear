@@ -19,6 +19,19 @@ project adheres to [Semantic Versioning](https://semver.org/).
 * **quality:** restore a clean full-repository lint baseline (DEV-6142)
 * **labels:** resolve `labels create --team` keys and names before creating the label (DEV-5749)
 
+## [1.42.0](https://github.com/enrichlayer/el-linear/compare/v1.41.1...v1.42.0) (2026-07-15)
+
+
+### Features
+
+* add automated advisory PR review GitHub Action ([#259](https://github.com/enrichlayer/el-linear/issues/259)) ([711d4a1](https://github.com/enrichlayer/el-linear/commit/711d4a175bc823833b78972394c03fb7bb5ce699))
+* **config:** optional identity-resolver hook (DEV-5628) ([#256](https://github.com/enrichlayer/el-linear/issues/256)) ([0f91e8c](https://github.com/enrichlayer/el-linear/commit/0f91e8c26cf744bfcab88a388b02e70df501a855))
+
+
+### Bug Fixes
+
+* **ci:** grant Claude review action OIDC permission ([68c0050](https://github.com/enrichlayer/el-linear/commit/68c005085d0e61f9aae181c257f21eea09cce039))
+
 ## [1.41.1](https://github.com/enrichlayer/el-linear/compare/v1.41.0...v1.41.1) (2026-07-15)
 
 
