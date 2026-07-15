@@ -48,6 +48,7 @@ import type {
 	LinearPriority,
 } from "../types/linear.js";
 import {
+	bypassesDuplicateHardBlock,
 	DEFAULT_DUPLICATE_THRESHOLD,
 	DEFAULT_HARD_BLOCK_THRESHOLD,
 	formatDuplicateBlock,
@@ -822,7 +823,12 @@ async function enforceNoDuplicateIssue(
 	// The gate would hard-block. Record the decision so `el-telemetry gates`
 	// can compute override-rate (DEV-4834): `overridden` when the user passed
 	// --allow-duplicate and we proceed anyway, `blocked` when we stop creation.
-	if (options.allowDuplicate) {
+	//
+	// The escape set lives in `bypassesDuplicateHardBlock` rather than inline so
+	// the remedy copy in `formatDuplicateBlock` is derived from the same source
+	// this decision reads (DEV-6205 — the message previously named a flag the
+	// gate never consulted).
+	if (bypassesDuplicateHardBlock(options)) {
 		await emitGateEvent("el-linear", "issues create", {
 			...gateEvent,
 			outcome: "overridden",

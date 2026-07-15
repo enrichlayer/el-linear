@@ -1,6 +1,11 @@
 import { Command } from "commander";
 import { describe, expect, it } from "vitest";
 
+import {
+	bypassesDuplicateHardBlock,
+	formatDuplicateBlock,
+} from "../utils/duplicate-detection.js";
+
 import { setupAttachmentsCommands } from "./attachments.js";
 import { setupBatchCommands } from "./batch.js";
 import { setupCommentsCommands } from "./comments.js";
@@ -56,6 +61,87 @@ function collectSubcommands(
 	}
 	return result;
 }
+
+/**
+ * COMPOSITION test (DEV-6205) — the duplicate gate's remedy copy must actually
+ * clear the duplicate gate.
+ *
+ * Unit tests on `formatDuplicateBlock` assert the string contains `--parent
+ * <id>`; they cannot see that the gate never reads `parentTicket`. The first cut
+ * of DEV-6205 shipped exactly that: a message promising "re-run with --parent
+ * MAR-744 to file it as a sub-issue" against a gate whose escape set is
+ * `allowDuplicate` alone — so following the advice hit the identical block. The
+ * bug lived in the SEAM (message ⇄ gate), which is invisible to either side's
+ * own tests.
+ *
+ * This drives the real rendered copy through the real `issues create` option
+ * parser and asserts the resulting options satisfy the real gate predicate. It
+ * fails on that shipped bug.
+ */
+describe("duplicate-gate remedy ⇄ gate (DEV-6205 composition)", () => {
+	function findIssuesCreate(program: Command): Command {
+		const issues = program.commands.find((c) => c.name() === "issues");
+		const create = issues?.commands.find((c) => c.name() === "create");
+		if (!create) throw new Error("issues create not found");
+		return create;
+	}
+
+	/** The exact flags the block-mode message tells the operator to re-run with. */
+	function remedyFlagsFromMessage(): string[] {
+		const message = formatDuplicateBlock([
+			{
+				identifier: "MAR-744",
+				title: "Document and pilot the workflow",
+				state: "In Progress",
+				assignee: "Eishan",
+				score: 0.7,
+			},
+		]);
+		const match = message.match(/re-run with (.+?) to file it as a sub-issue/);
+		if (!match) {
+			throw new Error(
+				`block-mode message no longer names a sub-issue re-run command:\n${message}`,
+			);
+		}
+		return match[1].trim().split(/\s+/);
+	}
+
+	it("the sub-issue remedy it prints actually clears the gate", () => {
+		const flags = remedyFlagsFromMessage();
+		const program = buildProgram();
+		const create = findIssuesCreate(program);
+
+		// Replace the real action so parsing doesn't hit the network.
+		let captured: Record<string, unknown> | undefined;
+		create.exitOverride();
+		create.action(() => {
+			captured = create.opts();
+		});
+		program.parse(
+			["issues", "create", "Some title", "--team", "DEV", ...flags],
+			{
+				from: "user",
+			},
+		);
+
+		expect(
+			captured,
+			"issues create did not parse the remedy flags",
+		).toBeDefined();
+		// The whole point: the printed remedy must satisfy the gate's escape set.
+		expect(
+			bypassesDuplicateHardBlock(captured as { allowDuplicate?: unknown }),
+			`the block-mode remedy (${flags.join(" ")}) does not clear the duplicate gate — ` +
+				"the message promises an outcome the command refuses",
+		).toBe(true);
+		// ...and still actually name the parent, which is the remedy's purpose.
+		// Either key is correct here: `--parent` is an alias that the real action
+		// handler normalizes to `parentTicket`, and this test replaces that handler
+		// to stay offline — so assert the parent survived parsing under either name
+		// rather than coupling to where normalization happens.
+		expect(captured?.parentTicket ?? captured?.parent).toBe("MAR-744");
+	});
+});
 
 describe("CLI consistency", () => {
 	it("all list subcommands have a --limit option", () => {

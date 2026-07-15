@@ -148,6 +148,34 @@ const BOILERPLATE_STOPWORDS = new Set([
 	"update",
 ]);
 
+/**
+ * The one CLI flag that lets a HARD-BLOCKED create proceed.
+ *
+ * Exported so the remedy copy in {@link formatDuplicateBlock} is BUILT from the
+ * same constant the gate honors, rather than restating it. DEV-6205 shipped a
+ * remedy naming `--parent <id>` alone — a flag the gate never reads — so the
+ * message promised an outcome the command refused. Deriving the copy from this
+ * constant makes that class of drift a compile-time concern instead of a
+ * proofreading one.
+ */
+export const DUPLICATE_GATE_OVERRIDE_FLAG = "--allow-duplicate";
+
+/**
+ * Does this parsed option set clear the duplicate gate's HARD block?
+ *
+ * The single source of truth for the escape set, consumed by the gate itself
+ * (`enforceNoDuplicateIssue`) and asserted against the rendered remedy copy by
+ * the composition test. Note `--skip-validation` also bypasses, but it returns
+ * long before scoring (it skips ALL field validation), so it is not part of the
+ * hard-block decision this predicate models and is deliberately not offered as
+ * a remedy.
+ */
+export function bypassesDuplicateHardBlock(options: {
+	allowDuplicate?: unknown;
+}): boolean {
+	return Boolean(options.allowDuplicate);
+}
+
 /** A scored duplicate candidate, ready to print in the block. */
 export interface DuplicateCandidate {
 	identifier: string;
@@ -251,13 +279,28 @@ export function scoreDuplicateCandidates(
  *
  * Three remedies, not two (DEV-6205). "Same work → comment" and "distinct →
  * --allow-duplicate" leave out the most common real case: the new work is a
- * PIECE of the match — neither a duplicate of it nor unrelated to it. Offering
+ * piece of the match — neither a duplicate of it nor unrelated to it. Offering
  * only the two extremes pushes the operator toward reusing the matched issue,
  * which is actively harmful when that issue is a multi-phase parent: the branch
  * then carries the parent's id, and merging it auto-closes work that isn't done.
  * That is not hypothetical — it is what the omission cost on MAR-744, where a
  * findings pack was filed against a six-criterion parent because `--parent` was
- * never mentioned. The flag already existed; only the message was missing.
+ * never mentioned.
+ *
+ * The sub-issue remedy is per-tier, NOT shared, because the two tiers are at
+ * opposite sides of the create:
+ *
+ * - **block** — creation was refused, so the remedy is a re-run. `--parent`
+ *   alone does NOT satisfy the gate ({@link bypassesDuplicateHardBlock} reads
+ *   only `allowDuplicate`), so the copy is built from
+ *   {@link DUPLICATE_GATE_OVERRIDE_FLAG} and names both flags. A message that
+ *   names a command the gate then refuses is the DEV-6205 bug one level down;
+ *   the composition test parses this copy through the real CLI and asserts it
+ *   actually clears the gate.
+ * - **advisory** — creation ALREADY proceeded, so there is nothing to re-run
+ *   and a re-run would file a second issue (which then scores 1.0 against its
+ *   own twin and hard-blocks). The remedy is to attach the issue that now
+ *   exists, via `issues update`.
  */
 export function formatDuplicateBlock(
 	candidates: DuplicateCandidate[],
@@ -267,27 +310,29 @@ export function formatDuplicateBlock(
 		(c) =>
 			`    ${c.identifier} · ${c.title} · ${c.state} · ${c.assignee}  (similarity ${c.score})`,
 	);
-	const parentHint =
-		candidates.length === 1
-			? ` --parent ${candidates[0].identifier}`
-			: " --parent <id>";
+	// Name the parent when there is exactly one candidate; with several there is
+	// no single right parent, and silently picking the top score would invite a
+	// wrong one.
+	const parentRef = candidates.length === 1 ? candidates[0].identifier : "<id>";
 	const header =
 		`Possible duplicate issue${candidates.length > 1 ? "s" : ""} found ` +
 		"(by title-keyword overlap):\n" +
 		`${lines.join("\n")}\n\n` +
-		"  If one of these is the same work, comment on it instead of creating a new issue.\n" +
-		`  If this is a PIECE of one of them rather than a duplicate, re-run with${parentHint} ` +
-		"to file it as a sub-issue.\n";
+		"  If one of these is the same work, comment on it instead of creating a new issue.\n";
 	if (mode === "advisory") {
 		return (
 			header +
+			"  If this is a piece of one of them rather than a duplicate, attach it with " +
+			`\`issues update <new-id> --parent ${parentRef}\`.\n` +
 			"  This is advisory only (DEV-5590) — creation is proceeding. Pass " +
 			"--allow-duplicate to silence this notice next time."
 		);
 	}
 	return (
 		header +
-		"  If this is genuinely distinct, re-run with --allow-duplicate to proceed " +
+		"  If this is a piece of one of them rather than a duplicate, re-run with " +
+		`--parent ${parentRef} ${DUPLICATE_GATE_OVERRIDE_FLAG} to file it as a sub-issue.\n` +
+		`  If this is genuinely distinct, re-run with ${DUPLICATE_GATE_OVERRIDE_FLAG} to proceed ` +
 		"(and consider --related-to to link the related issue)."
 	);
 }

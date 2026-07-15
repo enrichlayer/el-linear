@@ -273,10 +273,15 @@ describe("formatDuplicateBlock", () => {
 			},
 		]);
 		expect(block).toContain("--parent MAR-744");
-		expect(block).toContain("PIECE of one of them");
 	});
 
-	it("offers the sub-issue path in advisory mode too", () => {
+	// The advisory tier runs PRE-POST but creation proceeds, so the issue exists
+	// by the time this is read. "Re-run" would file a second issue -- which then
+	// scores 1.0 against its own twin and hard-blocks. The remedy must attach the
+	// issue that now exists, not create another. Pins the JSDoc invariant
+	// ("no 're-run' -- there's nothing to re-run") that the first cut of DEV-6205
+	// broke by putting the hint in the shared header.
+	it("advisory mode says attach-the-existing-issue, never re-run", () => {
 		const block = formatDuplicateBlock(
 			[
 				{
@@ -289,11 +294,15 @@ describe("formatDuplicateBlock", () => {
 			],
 			"advisory",
 		);
-		expect(block).toContain("--parent MAR-744");
+		expect(block).toContain("issues update <new-id> --parent MAR-744");
+		expect(block).not.toContain("re-run");
 	});
 
 	// With several candidates there is no single right parent to name, so the
-	// hint stays a placeholder rather than arbitrarily picking the top score.
+	// hint stays a placeholder rather than arbitrarily picking one. Asserting
+	// against BOTH identifiers so an implementation that grabs the last (or the
+	// top-scoring) candidate fails too -- `not.toContain("--parent A")` alone
+	// would pass an implementation that picked B.
 	it("falls back to a placeholder --parent when several candidates match", () => {
 		const block = formatDuplicateBlock([
 			{ identifier: "A", title: "t", state: "s", assignee: "a", score: 0.5 },
@@ -301,6 +310,7 @@ describe("formatDuplicateBlock", () => {
 		]);
 		expect(block).toContain("--parent <id>");
 		expect(block).not.toContain("--parent A");
+		expect(block).not.toContain("--parent B");
 	});
 
 	// The three remedies are distinct: a genuine duplicate should still be
