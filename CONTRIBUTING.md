@@ -95,6 +95,21 @@ Use [Conventional Commits](https://www.conventionalcommits.org/):
 The commit subject becomes the changelog line, so write it as if the user
 will read it.
 
+## Automated PR review
+
+Every PR gets an automated advisory AI review (`.github/workflows/pr-review.yml`)
+that posts inline and summary comments covering correctness, security, and the
+conventions in this file. It's **advisory** — it never approves or blocks a
+merge; a green CI and a human review still gate landing.
+
+- It runs on `pull_request` (not `pull_request_target`), so a PR from a **fork**
+  runs without repository secrets and the review is skipped — a maintainer
+  reviews those by hand. Draft PRs are skipped until marked ready.
+- **Setup (one-time, repo admin):** add an `ANTHROPIC_API_KEY` repository secret
+  under *Settings → Secrets and variables → Actions*. Without it the review step
+  fails on same-repo PRs. Change the reviewer model in the workflow's
+  `claude_args` if you want a different tier.
+
 ## Code style
 
 - TypeScript, strict mode. No `any` without a written reason.
