@@ -14,6 +14,7 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Bug Fixes
 
+* **quality:** restore a clean full-repository lint baseline (DEV-6142)
 * **labels:** resolve `labels create --team` keys and names before creating the label (DEV-5749)
 
 ## [1.40.0](https://github.com/enrichlayer/el-linear/compare/v1.39.0...v1.40.0) (2026-07-14)

@@ -16,25 +16,22 @@ import * as output from "./output.js";
 
 describe("@enrichlayer/el-linear/output barrel", () => {
 	it("exposes the stable function surface", () => {
-		const fns: Array<keyof typeof output> = [
-			"getOutputFormat",
-			"handleAsyncCommand",
-			"outputList",
-			"outputSingle",
-			"outputSuccess",
-			"outputWarning",
-			"resetWarnings",
-			"setFieldsFilter",
-			"setJqFilter",
-			"setOutputFormat",
-			"setRawMode",
-			"warnIfTruncated",
+		const fns = [
+			["getOutputFormat", output.getOutputFormat],
+			["handleAsyncCommand", output.handleAsyncCommand],
+			["outputList", output.outputList],
+			["outputSingle", output.outputSingle],
+			["outputSuccess", output.outputSuccess],
+			["outputWarning", output.outputWarning],
+			["resetWarnings", output.resetWarnings],
+			["setFieldsFilter", output.setFieldsFilter],
+			["setJqFilter", output.setJqFilter],
+			["setOutputFormat", output.setOutputFormat],
+			["setRawMode", output.setRawMode],
+			["warnIfTruncated", output.warnIfTruncated],
 		];
-		for (const name of fns) {
-			expect(
-				typeof output[name],
-				`expected ${String(name)} to be a function`,
-			).toBe("function");
+		for (const [name, fn] of fns) {
+			expect(typeof fn, `expected ${name} to be a function`).toBe("function");
 		}
 	});
 
