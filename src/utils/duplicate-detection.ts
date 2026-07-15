@@ -248,6 +248,16 @@ export function scoreDuplicateCandidates(
  * "advisory"` is printed as a warning when the score is below the hard-block
  * threshold: creation already proceeded, so the trailing hint differs (no
  * "re-run" — there's nothing to re-run).
+ *
+ * Three remedies, not two (DEV-6205). "Same work → comment" and "distinct →
+ * --allow-duplicate" leave out the most common real case: the new work is a
+ * PIECE of the match — neither a duplicate of it nor unrelated to it. Offering
+ * only the two extremes pushes the operator toward reusing the matched issue,
+ * which is actively harmful when that issue is a multi-phase parent: the branch
+ * then carries the parent's id, and merging it auto-closes work that isn't done.
+ * That is not hypothetical — it is what the omission cost on MAR-744, where a
+ * findings pack was filed against a six-criterion parent because `--parent` was
+ * never mentioned. The flag already existed; only the message was missing.
  */
 export function formatDuplicateBlock(
 	candidates: DuplicateCandidate[],
@@ -257,11 +267,17 @@ export function formatDuplicateBlock(
 		(c) =>
 			`    ${c.identifier} · ${c.title} · ${c.state} · ${c.assignee}  (similarity ${c.score})`,
 	);
+	const parentHint =
+		candidates.length === 1
+			? ` --parent ${candidates[0].identifier}`
+			: " --parent <id>";
 	const header =
 		`Possible duplicate issue${candidates.length > 1 ? "s" : ""} found ` +
 		"(by title-keyword overlap):\n" +
 		`${lines.join("\n")}\n\n` +
-		"  If one of these is the same work, comment on it instead of creating a new issue.\n";
+		"  If one of these is the same work, comment on it instead of creating a new issue.\n" +
+		`  If this is a PIECE of one of them rather than a duplicate, re-run with${parentHint} ` +
+		"to file it as a sub-issue.\n";
 	if (mode === "advisory") {
 		return (
 			header +

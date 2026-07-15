@@ -256,6 +256,64 @@ describe("formatDuplicateBlock", () => {
 		expect(block).toContain("--allow-duplicate");
 	});
 
+	// DEV-6205: "same work → comment" and "distinct → --allow-duplicate" omit the
+	// most common real case — the new work is a PIECE of the match. Without the
+	// --parent path the operator reuses the matched issue, and when that issue is
+	// a multi-phase parent the branch inherits its id and merging auto-closes
+	// unfinished work (what it cost on MAR-744). Both tiers must offer it: the
+	// same misjudgement is available whether or not the gate blocked.
+	it("offers the sub-issue path, naming the candidate, in block mode", () => {
+		const block = formatDuplicateBlock([
+			{
+				identifier: "MAR-744",
+				title: "t",
+				state: "s",
+				assignee: "a",
+				score: 0.7,
+			},
+		]);
+		expect(block).toContain("--parent MAR-744");
+		expect(block).toContain("PIECE of one of them");
+	});
+
+	it("offers the sub-issue path in advisory mode too", () => {
+		const block = formatDuplicateBlock(
+			[
+				{
+					identifier: "MAR-744",
+					title: "t",
+					state: "s",
+					assignee: "a",
+					score: 0.4,
+				},
+			],
+			"advisory",
+		);
+		expect(block).toContain("--parent MAR-744");
+	});
+
+	// With several candidates there is no single right parent to name, so the
+	// hint stays a placeholder rather than arbitrarily picking the top score.
+	it("falls back to a placeholder --parent when several candidates match", () => {
+		const block = formatDuplicateBlock([
+			{ identifier: "A", title: "t", state: "s", assignee: "a", score: 0.5 },
+			{ identifier: "B", title: "u", state: "s", assignee: "a", score: 0.4 },
+		]);
+		expect(block).toContain("--parent <id>");
+		expect(block).not.toContain("--parent A");
+	});
+
+	// The three remedies are distinct: a genuine duplicate should still be
+	// commented on, never re-filed as a child.
+	it("keeps the comment-instead remedy alongside the sub-issue one", () => {
+		const block = formatDuplicateBlock([
+			{ identifier: "A", title: "t", state: "s", assignee: "a", score: 0.7 },
+		]);
+		expect(block).toContain("comment on it instead of creating a new issue");
+		expect(block).toContain("--parent A");
+		expect(block).toContain("--allow-duplicate");
+	});
+
 	it("uses singular vs plural wording", () => {
 		const one = formatDuplicateBlock([
 			{ identifier: "A", title: "t", state: "s", assignee: "a", score: 0.5 },
