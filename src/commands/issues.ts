@@ -11,6 +11,11 @@ import {
 	getGoalCompletionGateConfig,
 } from "../config/goal-completion-validation.js";
 import {
+	evaluateIntakeDecision,
+	formatIntakeDecisionBlock,
+	getIntakeDecisionGateConfig,
+} from "../config/intake-decision-validation.js";
+import {
 	enforceValidation,
 	validateIssueCreation,
 } from "../config/issue-validation.js";
@@ -1026,6 +1031,48 @@ async function enforceGoalCompletion(
 	throw new Error(`Issue creation blocked: ${message}`);
 }
 
+/**
+ * DEV-6163: require the intake judgment before any create-time resolution or
+ * mutation. Unlike general field validation, this gate is not silently
+ * bypassed by `--skip-validation`; only its narrow, recorded override applies.
+ */
+async function enforceIntakeDecision(
+	description: string,
+	options: OptionValues,
+): Promise<void> {
+	const { mode, headers } = getIntakeDecisionGateConfig();
+	if (mode === "off") {
+		return;
+	}
+	const evaluation = evaluateIntakeDecision(description, headers);
+	if (evaluation.ok) {
+		return;
+	}
+
+	const gateEvent = { gate: "issues-create-intake-decision" } as const;
+	if (options.allowMissingIntakeDecision) {
+		await emitGateEvent("el-linear", "issues create", {
+			...gateEvent,
+			outcome: "overridden",
+		});
+		return;
+	}
+	const message = formatIntakeDecisionBlock({ evaluation, headers });
+	if (mode === "warn") {
+		await emitGateEvent("el-linear", "issues create", {
+			...gateEvent,
+			outcome: "advisory",
+		});
+		outputWarning(message);
+		return;
+	}
+	await emitGateEvent("el-linear", "issues create", {
+		...gateEvent,
+		outcome: "blocked",
+	});
+	throw new Error(`Issue creation blocked: ${message}`);
+}
+
 async function handleCreateIssue(
 	title: string | undefined,
 	options: OptionValues,
@@ -1047,6 +1094,7 @@ async function handleCreateIssue(
 	// normalization) — re-resolving an inline copy would corrupt a file that
 	// intentionally contains backslash sequences.
 	const rawDescription = resolveDescription(options);
+	await enforceIntakeDecision(rawDescription ?? "", options);
 	const {
 		teamInput,
 		teamId,
@@ -1965,7 +2013,7 @@ export function setupIssuesCommands(program: Command): void {
 		)
 		.option(
 			"--skip-validation",
-			"skip all validation (labels, description, assignee, project, duplicate detection, SOP-parent gate, goal-completion gate)",
+			"skip general validation (labels, description, assignee, project, duplicate detection, SOP-parent gate, goal-completion gate); the intake-decision gate still requires its narrow override",
 		)
 		.option(
 			"--allow-duplicate",
@@ -1978,6 +2026,10 @@ export function setupIssuesCommands(program: Command): void {
 		.option(
 			"--allow-vague-goal",
 			'skip the goal-completion gate and create even without a falsifiable "Done when" / acceptance-criteria section',
+		)
+		.option(
+			"--allow-missing-intake-decision",
+			"create without a complete intake decision when an accountable human approved the exception (recorded as a gate override)",
 		)
 		.option(
 			"--no-auto-link",

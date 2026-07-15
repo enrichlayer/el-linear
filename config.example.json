@@ -57,6 +57,8 @@
 	"validation": {
 		"enabled": true,
 		"typeLabels": ["bug", "feature", "chore", "refactor", "spike"],
+		"intakeDecisionGate": false,
+		"intakeSectionHeaders": ["Intake decision"],
 		"sopLabelParentGate": false,
 		"sopLabels": ["SOP"]
 	},

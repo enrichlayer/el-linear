@@ -216,7 +216,17 @@ intended flow for the CLI.
     // accepted as the goal-completion section for `goalCompletionGate`.
     // Default ["Done when", "Done-when", "Acceptance criteria",
     // "Success criteria"].
-    "goalSectionHeaders": ["Done when", "Acceptance criteria"]
+    "goalSectionHeaders": ["Done when", "Acceptance criteria"],
+    // OPT-IN intake-decision gate (default: off). "warn" advises and
+    // "block" refuses issue creation until the description records, in order,
+    // whether the work is needed and worth doing, what existing/duplicate work
+    // was checked, its canonical owner, its concrete placement, and a PROCEED
+    // decision. The narrow override
+    // --allow-missing-intake-decision is recorded.
+    "intakeDecisionGate": false,
+    // Section headers accepted for the intake decision. Default
+    // ["Intake decision"].
+    "intakeSectionHeaders": ["Intake decision"]
   }
 }
 ```
@@ -306,6 +316,44 @@ local `--description` override, the description is instantiated server-side and
 is invisible to a client-side check, so the gate no-ops there (same
 client-side-visibility gap as the duplicate-detection gate on a
 template-resolved title).
+
+### Intake-decision gate (`validation.intakeDecisionGate`)
+
+An **opt-in** create-time gate that requires the issue author to finish intake
+before mutating Linear. It deliberately does not guess whether work is valuable
+or where it belongs. Instead, it makes those judgments explicit and checks
+that they appear in this exact order:
+
+```markdown
+## Intake decision
+- Needed: Yes — <why this is needed>
+- Worth doing: Yes — <why the value exceeds the cost>
+- Existing work: <duplicate/search result and evidence>
+- Owner: <canonical owner or source of truth>
+- Placement: <team/project/repository/document path>
+- Decision: PROCEED
+```
+
+`Needed` and `Worth doing` require an explicit `Yes` plus a reason. `Owner` and
+`Placement` reject empty and placeholder values such as `TBD`. Only `PROCEED`
+creates an issue; rejected work should not become backlog by default.
+
+Two modes (default off):
+
+```json
+{ "validation": { "enabled": true, "intakeDecisionGate": "block" } }
+```
+
+- `"warn"` — record an advisory and create the issue.
+- `"block"` — stop before resolver or service work and record a blocked gate.
+- absent / `false` — dormant for open-source consumers.
+
+`--allow-missing-intake-decision` is the only CLI override. It records an
+`overridden` gate event so exceptions remain visible. `--skip-validation` does
+not bypass this gate. On `--from-template`, a missing local description blocks
+when the gate is enabled because the server-side template body cannot be
+verified before creation; provide a local description or use the narrow
+override.
 
 A complete minimal config (token + defaultTeam only) is enough for most basic use:
 

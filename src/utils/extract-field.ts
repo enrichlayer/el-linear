@@ -30,7 +30,57 @@ const BOLD_PSEUDO_HEADER_RE = /^\*\*([^*\n]+?)(?::\s*)?\*\*\s*$/;
 // permitted as fence indent per the CommonMark spec). We toggle an inFence
 // flag while scanning so section headers inside code samples don't
 // terminate the real section.
-const FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
+const FENCE_DELIMITER_RE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+
+interface FenceState {
+	marker: "`" | "~";
+	length: number;
+}
+
+function fenceDelimiter(line: string): { run: string; rest: string } | null {
+	const match = line.match(FENCE_DELIMITER_RE);
+	const run = match?.[1] ?? "";
+	if (!run || new Set(run).size !== 1) return null;
+	return { run, rest: match?.[2] ?? "" };
+}
+
+function openFence(line: string): FenceState | null {
+	const delimiter = fenceDelimiter(line);
+	if (!delimiter) return null;
+	const marker = delimiter.run[0] as "`" | "~";
+	// CommonMark forbids backticks in the info string of a backtick fence.
+	if (marker === "`" && delimiter.rest.includes("`")) return null;
+	return { marker, length: delimiter.run.length };
+}
+
+function closesFence(line: string, state: FenceState): boolean {
+	const delimiter = fenceDelimiter(line);
+	return (
+		delimiter !== null &&
+		delimiter.run[0] === state.marker &&
+		delimiter.run.length >= state.length &&
+		delimiter.rest.trim().length === 0
+	);
+}
+
+/** Remove operative text inside CommonMark fenced code blocks, including an unclosed block through EOF. */
+export function stripFencedCodeBlocks(body: string): string {
+	const out: string[] = [];
+	let fence: FenceState | null = null;
+	for (const line of body.split("\n")) {
+		if (fence) {
+			if (closesFence(line, fence)) fence = null;
+			continue;
+		}
+		const opened = openFence(line);
+		if (opened) {
+			fence = opened;
+			continue;
+		}
+		out.push(line);
+	}
+	return out.join("\n");
+}
 
 function normalize(s: string): string {
 	return s.toLowerCase().trim().replace(/\s+/g, " ");
@@ -97,14 +147,18 @@ export function extractField(body: string, fieldName: string): string | null {
 	const target = normalize(fieldName);
 	const lines = body.split("\n");
 
-	let inFence = false;
+	let fence: FenceState | null = null;
 	let startIdx = -1;
 	for (let i = 0; i < lines.length; i++) {
-		if (FENCE_RE.test(lines[i])) {
-			inFence = !inFence;
+		if (fence) {
+			if (closesFence(lines[i], fence)) fence = null;
 			continue;
 		}
-		if (inFence) continue;
+		const opened = openFence(lines[i]);
+		if (opened) {
+			fence = opened;
+			continue;
+		}
 		const match = matchHeader(lines[i]);
 		if (!match) continue;
 		if (normalize(match.text) === target) {
@@ -115,14 +169,20 @@ export function extractField(body: string, fieldName: string): string | null {
 	if (startIdx === -1) return null;
 
 	const out: string[] = [];
-	let sectionInFence = false;
+	let sectionFence: FenceState | null = null;
 	for (let i = startIdx; i < lines.length; i++) {
-		if (FENCE_RE.test(lines[i])) {
-			sectionInFence = !sectionInFence;
+		if (sectionFence) {
+			if (closesFence(lines[i], sectionFence)) sectionFence = null;
 			out.push(lines[i]);
 			continue;
 		}
-		if (!sectionInFence && matchHeader(lines[i]) !== null) break;
+		const opened = openFence(lines[i]);
+		if (opened) {
+			sectionFence = opened;
+			out.push(lines[i]);
+			continue;
+		}
+		if (matchHeader(lines[i]) !== null) break;
 		out.push(lines[i]);
 	}
 	return out.join("\n").trim();
