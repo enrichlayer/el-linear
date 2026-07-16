@@ -2683,6 +2683,14 @@ describe("issues commands", () => {
 	});
 
 	describe("issues update", () => {
+		const issueEnvelope = JSON.stringify({
+			id: "issue-uuid",
+			identifier: "DEV-1",
+			url: "https://linear.app/acme/issue/DEV-1/test",
+			description: "## Real body",
+			state: { name: "Todo" },
+		});
+
 		it("errors when --delegate and --clear-delegate are both used", async () => {
 			const program = createTestProgram();
 			setupIssuesCommands(program);
@@ -2764,6 +2772,64 @@ describe("issues commands", () => {
 				}),
 				expect.anything(),
 			);
+		});
+
+		it("blocks an issue JSON envelope passed to update before any mutation", async () => {
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"update",
+				"DEV-1",
+				"--description",
+				issueEnvelope,
+			]);
+
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("own envelope"),
+			);
+			expect(mockUpdateIssue).not.toHaveBeenCalled();
+			expect(process.exit).toHaveBeenCalledWith(1);
+		});
+
+		it("blocks an issue JSON envelope passed to --append-description", async () => {
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"update",
+				"DEV-1",
+				"--append-description",
+				issueEnvelope,
+			]);
+
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("own envelope"),
+			);
+			expect(mockGraphQLService.rawRequest).not.toHaveBeenCalled();
+			expect(mockUpdateIssue).not.toHaveBeenCalled();
+			expect(process.exit).toHaveBeenCalledWith(1);
+		});
+
+		it("allows an intentional JSON envelope update with the override", async () => {
+			mockUpdateIssue.mockResolvedValue({
+				id: "issue-uuid",
+				identifier: "DEV-1",
+			});
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"update",
+				"DEV-1",
+				"--description",
+				issueEnvelope,
+				"--allow-json-description",
+			]);
+
+			expect(mockUpdateIssue).toHaveBeenCalledOnce();
+			expect(process.exit).not.toHaveBeenCalled();
 		});
 
 		it("normalizes literal newline escapes in appended descriptions", async () => {

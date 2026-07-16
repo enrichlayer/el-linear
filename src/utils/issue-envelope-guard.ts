@@ -17,13 +17,20 @@
  * See DEV-6315 (and the two victims it recovered, DEV-6092 / DEV-6042).
  */
 
-/** Sibling keys that, alongside `identifier`, mark a value as an issue envelope
- * rather than a description that merely happens to be JSON. */
-const ENVELOPE_SIBLING_KEYS = ["branchName", "state", "url", "description"];
+/** Strong issue-envelope keys that, alongside `identifier`, distinguish the
+ * CLI output from unrelated ticket JSON. `description` is deliberately absent:
+ * `{ identifier, description }` is common enough outside Linear to avoid a
+ * false positive, while real `issues get` output always carries `url` and
+ * normally also `state` / `branchName`. */
+const ENVELOPE_SIBLING_KEYS = ["branchName", "state", "url"];
 
 export interface IssueEnvelopeMatch {
 	/** The `identifier` field carried by the detected envelope (e.g. "DEV-123"). */
 	identifier: string;
+	/** UUID carried by the envelope, when present. Used for self-match messages. */
+	id?: string;
+	/** Linear URL carried by the envelope, when present. */
+	url?: string;
 	/** True when the envelope's `description` is itself a nested envelope — the
 	 * double-nesting signature of a re-corrupted body. */
 	nested: boolean;
@@ -68,7 +75,32 @@ export function detectIssueEnvelope(text: string): IssueEnvelopeMatch | null {
 		typeof obj.description === "string" &&
 		detectIssueEnvelope(obj.description) !== null;
 
-	return { identifier: obj.identifier, nested };
+	return {
+		identifier: obj.identifier,
+		...(typeof obj.id === "string" ? { id: obj.id } : {}),
+		...(typeof obj.url === "string" ? { url: obj.url } : {}),
+		nested,
+	};
+}
+
+/** Whether a raw CLI target (identifier, UUID, or Linear URL) names `match`. */
+function isSameIssueTarget(
+	match: IssueEnvelopeMatch,
+	targetIssueRef: string | undefined,
+): boolean {
+	if (!targetIssueRef) {
+		return false;
+	}
+	const target = targetIssueRef.toLowerCase();
+	if (
+		target === match.identifier.toLowerCase() ||
+		(match.id !== undefined && target === match.id.toLowerCase()) ||
+		(match.url !== undefined && target === match.url.toLowerCase())
+	) {
+		return true;
+	}
+	// Linear issue URLs carry the canonical identifier as a path segment.
+	return target.split(/[/?#]/).includes(match.identifier.toLowerCase());
 }
 
 /**
@@ -76,13 +108,13 @@ export function detectIssueEnvelope(text: string): IssueEnvelopeMatch | null {
  * envelope being used as a description body. No-op otherwise, or when the
  * caller passed the audited `--allow-json-description` override.
  *
- * `context` names the surface for the error ("create" / "update") and,
- * when known, the target identifier so the message can flag the exact
- * self-overwrite case.
+ * `context` carries the audited override and, when known, the raw update target
+ * (identifier, UUID, or URL) so the message can flag the exact self-overwrite
+ * case without making a network request.
  */
 export function assertNotIssueEnvelope(
 	text: string | undefined,
-	context: { allow?: boolean; targetIdentifier?: string } = {},
+	context: { allow?: boolean; targetIssueRef?: string } = {},
 ): void {
 	if (!text || context.allow) {
 		return;
@@ -92,9 +124,7 @@ export function assertNotIssueEnvelope(
 		return;
 	}
 
-	const isSelf =
-		context.targetIdentifier !== undefined &&
-		context.targetIdentifier.toLowerCase() === match.identifier.toLowerCase();
+	const isSelf = isSameIssueTarget(match, context.targetIssueRef);
 	const selfNote = isSelf
 		? ` This is ${match.identifier}'s own envelope — the update would overwrite its body with itself.`
 		: "";

@@ -1490,19 +1490,20 @@ async function handleUpdateIssue(
 	}
 	// Guard against overwriting this issue's body with its own JSON envelope
 	// (DEV-6315). The update path resolves description inline rather than via
-	// resolveDescription(), so the guard is applied here too; both --description
-	// and --append-description are checked (append would corrupt just as badly).
+	// resolveDescription(), so the guard is applied here too; --description,
+	// --description-file (normalized above), and --append-description are all
+	// checked (append would corrupt just as badly).
 	{
 		const allow = options.allowJsonDescription === true;
 		assertNotIssueEnvelope(
 			typeof options.description === "string" ? options.description : undefined,
-			{ allow, targetIdentifier: issueId },
+			{ allow, targetIssueRef: issueId },
 		);
 		assertNotIssueEnvelope(
 			typeof options.appendDescription === "string"
 				? options.appendDescription
 				: undefined,
-			{ allow, targetIdentifier: issueId },
+			{ allow, targetIssueRef: issueId },
 		);
 	}
 	validateUpdateOptions(options);

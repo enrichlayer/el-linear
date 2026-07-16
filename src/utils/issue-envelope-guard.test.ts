@@ -20,6 +20,8 @@ describe("detectIssueEnvelope", () => {
 		const match = detectIssueEnvelope(ENVELOPE);
 		expect(match).not.toBeNull();
 		expect(match?.identifier).toBe("DEV-6092");
+		expect(match?.id).toBe("uuid-1");
+		expect(match?.url).toBe("https://linear.app/verticalint/issue/DEV-6092/");
 		expect(match?.nested).toBe(false);
 	});
 
@@ -50,6 +52,13 @@ describe("detectIssueEnvelope", () => {
 		expect(detectIssueEnvelope('{"foo": "bar", "count": 3}')).toBeNull();
 		// An object with identifier but NO issue-only sibling key — not an envelope.
 		expect(detectIssueEnvelope('{"identifier": "DEV-1"}')).toBeNull();
+		// `identifier` + `description` is common ticket JSON outside Linear. It
+		// lacks the stronger url/state/branchName signature, so it must pass.
+		expect(
+			detectIssueEnvelope(
+				'{"identifier": "OTHER-1", "description": "portable data"}',
+			),
+		).toBeNull();
 		// Arrays and primitives.
 		expect(detectIssueEnvelope("[1, 2, 3]")).toBeNull();
 		expect(detectIssueEnvelope('"a string"')).toBeNull();
@@ -69,8 +78,19 @@ describe("assertNotIssueEnvelope", () => {
 
 	it("names the self-overwrite case when the identifier matches the target", () => {
 		expect(() =>
-			assertNotIssueEnvelope(ENVELOPE, { targetIdentifier: "dev-6092" }),
+			assertNotIssueEnvelope(ENVELOPE, { targetIssueRef: "dev-6092" }),
 		).toThrow(/own envelope/i);
+	});
+
+	it("recognizes UUID and URL update targets as the same issue", () => {
+		for (const targetIssueRef of [
+			"uuid-1",
+			"https://linear.app/verticalint/issue/DEV-6092/some-issue",
+		]) {
+			expect(() =>
+				assertNotIssueEnvelope(ENVELOPE, { targetIssueRef }),
+			).toThrow(/own envelope/i);
+		}
 	});
 
 	it("does not throw when the override is set", () => {
