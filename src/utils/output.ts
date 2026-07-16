@@ -502,6 +502,12 @@ export function outputSuccess(data: unknown): void {
  * current limit) so the agent doesn't have to derive it.
  */
 export function warnIfTruncated(count: number, limit: number): void {
+	// limit <= 0 means unlimited (--all / --limit 0, DEV-6312): a fully
+	// paginated result set can't be truncated, so never warn — and never
+	// emit the nonsensical "--limit 0" hint on an empty unlimited fetch.
+	if (limit <= 0) {
+		return;
+	}
 	if (count !== limit) {
 		return;
 	}

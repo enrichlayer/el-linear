@@ -153,9 +153,19 @@ export interface BatchGetIssuesResponse {
 	issues: { nodes: IssueWithCommentsNode[] };
 }
 
+/**
+ * Cursor-pagination page metadata (DEV-6312). Present on the connection
+ * responses the list/search enumeration paths chunk through so a large
+ * `--limit` / `--all` never blows Linear's GraphQL complexity ceiling.
+ */
+export interface IssuePageInfo {
+	hasNextPage: boolean;
+	endCursor: string | null;
+}
+
 /** Response shape for `GET_ISSUES_QUERY`. */
 export interface GetIssuesResponse {
-	issues: { nodes: IssueNode[] };
+	issues: { nodes: IssueNode[]; pageInfo?: IssuePageInfo };
 }
 
 /**
@@ -163,7 +173,7 @@ export interface GetIssuesResponse {
  * `team` is null when the resolved team UUID does not exist.
  */
 export interface TeamScopedFilteredIssuesResponse {
-	team: { issues: { nodes: IssueNode[] } } | null;
+	team: { issues: { nodes: IssueNode[]; pageInfo?: IssuePageInfo } } | null;
 }
 
 /** Response shape for `SEARCH_ISSUES_QUERY` (full-text). */

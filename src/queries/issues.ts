@@ -4,9 +4,10 @@ import {
 } from "./common.js";
 
 export const GET_ISSUES_QUERY = `
-  query GetIssues($first: Int!, $orderBy: PaginationOrderBy) {
+  query GetIssues($first: Int!, $after: String, $orderBy: PaginationOrderBy) {
     issues(
       first: $first
+      after: $after
       orderBy: $orderBy
       filter: {
         state: { type: { neq: "completed" } }
@@ -14,6 +15,10 @@ export const GET_ISSUES_QUERY = `
     ) {
       nodes {
         ${COMPLETE_ISSUE_FRAGMENT}
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
       }
     }
   }
@@ -32,17 +37,23 @@ export const SEARCH_ISSUES_QUERY = `
 export const FILTERED_SEARCH_ISSUES_QUERY = `
   query FilteredSearchIssues(
     $first: Int!
+    $after: String
     $filter: IssueFilter
     $orderBy: PaginationOrderBy
   ) {
     issues(
       first: $first
+      after: $after
       filter: $filter
       orderBy: $orderBy
       includeArchived: false
     ) {
       nodes {
         ${COMPLETE_ISSUE_FRAGMENT}
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
       }
     }
   }
@@ -70,18 +81,24 @@ export const TEAM_SCOPED_FILTERED_ISSUES_QUERY = `
   query TeamScopedFilteredIssues(
     $teamId: String!
     $first: Int!
+    $after: String
     $filter: IssueFilter
     $orderBy: PaginationOrderBy
   ) {
     team(id: $teamId) {
       issues(
         first: $first
+        after: $after
         filter: $filter
         orderBy: $orderBy
         includeArchived: false
       ) {
         nodes {
           ${COMPLETE_ISSUE_FRAGMENT}
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
         }
       }
     }

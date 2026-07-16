@@ -349,7 +349,11 @@ async function handleListIssues(
 		options.project ||
 		options.project === false ||
 		options.priority;
-	const limit = parsePositiveInt(options.limit, "--limit");
+	// DEV-6312: `--all` / `--limit 0` mean unlimited. Stored as `limit = 0`,
+	// which the service's chunked pagination interprets as "fetch the whole
+	// matching set in safe pages" — mirrors `projects list --all` (DEV-4175).
+	const unlimited = options.all === true || options.limit === "0";
+	const limit = unlimited ? 0 : parsePositiveInt(options.limit, "--limit");
 	// Route through searchIssues whenever the CLI needs to control the GraphQL
 	// state filter: any explicit filter, the default `excludeTerminalStates`,
 	// OR an explicit `--include-closed`. The last case is load-bearing —
@@ -1858,6 +1862,10 @@ export function setupIssuesCommands(program: Command): void {
 		.command("list")
 		.description("List issues.")
 		.option("-l, --limit <number>", "limit results", "25")
+		.option(
+			"--all",
+			"fetch every matching issue (paginates fully in safe chunks). Equivalent to --limit 0; overrides --limit when both are given.",
+		)
 		.option(
 			"--search <query>",
 			"full-text search term; composes with list filters",

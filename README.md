@@ -489,6 +489,16 @@ el-linear <command> --help       # detailed help for one command
 All `list` subcommands support `-l, --limit <n>`. All commands accept the
 top-level filters: `--format <json|summary>`, `--raw`, `--jq <expr>`, `--fields <list>`.
 
+`issues list` also accepts `--all` (equivalent to `--limit 0`) to fetch **every**
+matching issue. It paginates the full set in safe chunks under the hood, so
+enumerating a large team no longer trips Linear's GraphQL complexity ceiling
+(`Query too complex`) the way a single big `--limit` used to — no manual
+per-status / per-priority bucketing needed:
+
+```bash
+el-linear issues list --team DEV --all --format csv --fields identifier   # the whole open DEV backlog, one command
+```
+
 ### Open by default — `issues list` and `issues search` skip terminal states
 
 `el-linear issues list` and `el-linear issues search` **exclude issues in
