@@ -44,6 +44,7 @@ import type {
 	IssueArchiveEntity,
 	IssueClaimContextResponse,
 	IssueNode,
+	IssuePageInfo,
 	IssueStartContextResponse,
 	IssueWithCommentsNode,
 	ResolveLabelsByNameResponse,
@@ -69,6 +70,25 @@ import { logger } from "./logger.js";
 import { isUuid } from "./uuid.js";
 
 const TEAM_KEY_REGEX = /^[A-Z0-9]+$/i;
+
+/**
+ * Per-page cap for the chunked issue-enumeration paths (DEV-6312).
+ *
+ * The list/search queries embed the rich `COMPLETE_ISSUE_FRAGMENT`, so a single
+ * page's GraphQL complexity scales with `first`. Linear rejects any query above
+ * complexity 10000; empirically `first: 500` measured ~10900, i.e. ~21.8 per
+ * issue. 200 keeps a page near ~4400 — comfortably under the ceiling with
+ * headroom for the fragment growing — while still being few enough round-trips
+ * for large teams. A big `--limit` (or `--all`) is fetched as successive pages
+ * of this size rather than one oversized request that would be rejected.
+ */
+const SAFE_ISSUE_PAGE_SIZE = 200;
+
+/** One page of an issue connection: its nodes plus cursor metadata. */
+interface IssueConnectionPage {
+	nodes: IssueNode[];
+	pageInfo?: IssuePageInfo;
+}
 
 /**
  * Project filter for `SearchIssueArgs`. Discriminated on `kind` so the
@@ -294,15 +314,65 @@ export class GraphQLIssuesService {
 		this.linearService = linearService;
 	}
 
-	async getIssues(limit = 25): Promise<LinearIssue[]> {
-		const result = await this.graphQLService.rawRequest<GetIssuesResponse>(
-			GET_ISSUES_QUERY,
-			{ first: limit, orderBy: "updatedAt" },
-		);
-		const nodes = result.issues?.nodes;
-		if (!nodes?.length) {
-			return [];
+	/**
+	 * Chunked cursor pagination shared by every issue-enumeration path
+	 * (DEV-6312). Fetches successive pages of at most `SAFE_ISSUE_PAGE_SIZE`
+	 * via `fetchPage(first, after)` until the target is met or the connection
+	 * is exhausted, so a large `--limit` (or `--all`, passed as `target === 0`)
+	 * never issues one oversized request that Linear rejects as "Query too
+	 * complex".
+	 *
+	 * `target === 0` means unlimited (fetch the whole connection). A positive
+	 * target caps the total and trims any final-page overshoot. `fetchPage`
+	 * returns `null` when the connection root is absent (e.g. an unresolved
+	 * team) — treated as an empty result. A page that claims `hasNextPage` but
+	 * returns zero nodes terminates the loop rather than spinning forever.
+	 */
+	private async paginateIssueNodes(
+		target: number,
+		fetchPage: (
+			first: number,
+			after: string | null,
+		) => Promise<IssueConnectionPage | null>,
+	): Promise<IssueNode[]> {
+		const unlimited = target === 0;
+		const collected: IssueNode[] = [];
+		let after: string | null = null;
+		while (true) {
+			const remaining = unlimited
+				? SAFE_ISSUE_PAGE_SIZE
+				: Math.min(target - collected.length, SAFE_ISSUE_PAGE_SIZE);
+			if (!unlimited && remaining <= 0) {
+				break;
+			}
+			const page = await fetchPage(remaining, after);
+			const nodes = page?.nodes ?? [];
+			collected.push(...nodes);
+			if (!unlimited && collected.length >= target) {
+				break;
+			}
+			const pageInfo = page?.pageInfo;
+			if (!pageInfo?.hasNextPage || !pageInfo.endCursor) {
+				break;
+			}
+			// Defensive: an empty page that still claims hasNextPage would loop
+			// forever on the same cursor. Stop instead.
+			if (nodes.length === 0) {
+				break;
+			}
+			after = pageInfo.endCursor;
 		}
+		return unlimited ? collected : collected.slice(0, target);
+	}
+
+	async getIssues(limit = 25): Promise<LinearIssue[]> {
+		const nodes = await this.paginateIssueNodes(limit, async (first, after) => {
+			const result = await this.graphQLService.rawRequest<GetIssuesResponse>(
+				GET_ISSUES_QUERY,
+				{ first, after, orderBy: "updatedAt" },
+			);
+			return result.issues ?? null;
+		});
 		return nodes.map((issue) => this.transformIssueData(issue));
 	}
 
@@ -1030,12 +1100,21 @@ export class GraphQLIssuesService {
 		const limit = args.limit ?? 10;
 
 		if (args.query) {
+			// Full-text search is relevance-ranked and then filtered client-side,
+			// so it cannot promise exhaustive `--all` semantics. Keep it to one
+			// bounded candidate page: the query embeds COMPLETE_ISSUE_FRAGMENT and
+			// an explicit large --limit would otherwise recreate the GraphQL
+			// complexity failure that chunking prevents on enumeration paths.
+			const fullTextLimit =
+				limit === 0
+					? SAFE_ISSUE_PAGE_SIZE
+					: Math.min(limit, SAFE_ISSUE_PAGE_SIZE);
 			const searchResult =
 				await this.graphQLService.rawRequest<SearchIssuesResponse>(
 					SEARCH_ISSUES_QUERY,
 					{
 						term: args.query,
-						first: limit,
+						first: fullTextLimit,
 					},
 				);
 			const nodes = searchResult.searchIssues?.nodes;
@@ -1074,37 +1153,40 @@ export class GraphQLIssuesService {
 		const orderBy = args.orderBy ?? "updatedAt";
 
 		if (finalTeamId) {
-			const teamScoped =
-				await this.graphQLService.rawRequest<TeamScopedFilteredIssuesResponse>(
-					TEAM_SCOPED_FILTERED_ISSUES_QUERY,
+			const nodes = await this.paginateIssueNodes(
+				limit,
+				async (first, after) => {
+					const teamScoped =
+						await this.graphQLService.rawRequest<TeamScopedFilteredIssuesResponse>(
+							TEAM_SCOPED_FILTERED_ISSUES_QUERY,
+							{
+								teamId: finalTeamId,
+								first,
+								after,
+								filter: filterArg,
+								orderBy,
+							},
+						);
+					return teamScoped.team?.issues ?? null;
+				},
+			);
+			return nodes.map((issue) => this.transformIssueData(issue));
+		}
+
+		const nodes = await this.paginateIssueNodes(limit, async (first, after) => {
+			const searchResult =
+				await this.graphQLService.rawRequest<GetIssuesResponse>(
+					FILTERED_SEARCH_ISSUES_QUERY,
 					{
-						teamId: finalTeamId,
-						first: limit,
+						first,
+						after,
 						filter: filterArg,
 						orderBy,
 					},
 				);
-			const nodes = teamScoped.team?.issues?.nodes;
-			if (!nodes?.length) {
-				return [];
-			}
-			return nodes.map((issue) => this.transformIssueData(issue));
-		}
-
-		const searchResult =
-			await this.graphQLService.rawRequest<GetIssuesResponse>(
-				FILTERED_SEARCH_ISSUES_QUERY,
-				{
-					first: limit,
-					filter: filterArg,
-					orderBy,
-				},
-			);
-		const filteredIssues = searchResult.issues;
-		if (!filteredIssues?.nodes) {
-			return [];
-		}
-		return filteredIssues.nodes.map((issue) => this.transformIssueData(issue));
+			return searchResult.issues ?? null;
+		});
+		return nodes.map((issue) => this.transformIssueData(issue));
 	}
 
 	// --- Private helper methods for field resolution ---

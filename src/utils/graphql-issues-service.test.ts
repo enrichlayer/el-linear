@@ -1337,40 +1337,53 @@ describe("GraphQLIssuesService", () => {
 			expect(vars.filter?.state).toEqual({ name: { in: ["Todo"] } });
 		});
 
-		it("returns 100% matching-team rows across a paginated (limit > one page) result set — never falls through to the leaky top-level path", async () => {
+		it("keeps team scoping structural while cursor-paginating across multiple pages", async () => {
 			const graphQLService = new GraphQLService({ apiKey: "token" });
 			const linearService = new LinearService({ apiKey: "token" });
-			// 100-row (multi-page) DEV-only set for the team-scoped query.
-			const devNodes = Array.from({ length: 100 }, (_, i) =>
-				issueNode(i, "DEV"),
-			);
-			// If the code ever routes --team back through the top-level
-			// FilteredSearchIssues query, this contaminated set (other teams
-			// leaking in — the DEV-5578 bug) would surface and the assertion fails.
-			const contaminated = [
-				issueNode(1, "DEV"),
-				issueNode(2, "EMW"),
-				issueNode(3, "INF"),
-				issueNode(4, "FE"),
-			];
-			vi.spyOn(graphQLService, "rawRequest").mockImplementation((async (
-				q: string,
-			) => {
-				if (String(q).includes("TeamScopedFilteredIssues")) {
-					return { team: { issues: { nodes: devNodes } } };
-				}
-				return { issues: { nodes: contaminated } };
-			}) as never);
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValueOnce({
+					team: {
+						issues: {
+							nodes: Array.from({ length: 200 }, (_, i) => issueNode(i, "DEV")),
+							pageInfo: { hasNextPage: true, endCursor: "team-c1" },
+						},
+					},
+				})
+				.mockResolvedValueOnce({
+					team: {
+						issues: {
+							nodes: Array.from({ length: 100 }, (_, i) =>
+								issueNode(i + 200, "DEV"),
+							),
+							pageInfo: { hasNextPage: false, endCursor: null },
+						},
+					},
+				});
 			const service = new GraphQLIssuesService(graphQLService, linearService);
 
 			const result = await service.searchIssues({
 				teamId: TEAM_UUID,
 				status: ["Todo"],
-				limit: 100,
+				limit: 300,
 			});
 
-			expect(result).toHaveLength(100);
+			expect(result).toHaveLength(300);
 			expect(result.every((issue) => issue.team?.key === "DEV")).toBe(true);
+			expect(rawRequest).toHaveBeenCalledTimes(2);
+			for (const [query, variables] of rawRequest.mock.calls) {
+				expect(String(query)).toContain("TeamScopedFilteredIssues");
+				expect(String(query)).not.toContain("FilteredSearchIssues");
+				expect(variables).toEqual(
+					expect.objectContaining({ teamId: TEAM_UUID }),
+				);
+			}
+			expect(rawRequest.mock.calls[0][1]).toEqual(
+				expect.objectContaining({ first: 200, after: null }),
+			);
+			expect(rawRequest.mock.calls[1][1]).toEqual(
+				expect.objectContaining({ first: 100, after: "team-c1" }),
+			);
 		});
 
 		it("returns an empty list when the team-scoped connection yields no nodes", async () => {
@@ -1806,6 +1819,150 @@ describe("GraphQLIssuesService", () => {
 			expect(rawRequestSpy.mock.calls[0][1]).toEqual(
 				expect.objectContaining({ first: 100 }),
 			);
+		});
+	});
+
+	describe("chunked issue-enumeration pagination (DEV-6312)", () => {
+		// A COMPLETE_ISSUE_FRAGMENT-shaped node, minimal but enough to transform.
+		function node(seq: number): Record<string, unknown> {
+			return {
+				id: `issue-${seq}`,
+				identifier: `DEV-${seq}`,
+				title: `issue ${seq}`,
+				priority: 0,
+				labels: { nodes: [] },
+				state: { id: "s", name: "Todo", type: "unstarted" },
+				createdAt: "2026-01-01T00:00:00.000Z",
+				updatedAt: "2026-01-02T00:00:00.000Z",
+			};
+		}
+		const page = (
+			n: number,
+			hasNextPage: boolean,
+			endCursor: string | null,
+		) => ({
+			issues: {
+				nodes: Array.from({ length: n }, (_, i) => node(i)),
+				pageInfo: { hasNextPage, endCursor },
+			},
+		});
+
+		it("getIssues caps a large --limit into 200-issue pages and follows the cursor", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValueOnce(page(200, true, "c1"))
+				.mockResolvedValueOnce(page(200, true, "c2"))
+				.mockResolvedValueOnce(page(100, true, "c3"));
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			const result = await service.getIssues(500);
+
+			// 200 + 200 + 100 = 500 (target met); the fourth page is never fetched.
+			expect(result).toHaveLength(500);
+			expect(rawRequest).toHaveBeenCalledTimes(3);
+			// Page size is capped at 200, and the last page requests only the
+			// remainder (100), threading the cursor each hop.
+			expect(rawRequest.mock.calls[0][1]).toEqual(
+				expect.objectContaining({ first: 200, after: null }),
+			);
+			expect(rawRequest.mock.calls[1][1]).toEqual(
+				expect.objectContaining({ first: 200, after: "c1" }),
+			);
+			expect(rawRequest.mock.calls[2][1]).toEqual(
+				expect.objectContaining({ first: 100, after: "c2" }),
+			);
+		});
+
+		it("getIssues(--all → limit 0) paginates the whole set until hasNextPage is false", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValueOnce(page(200, true, "c1"))
+				.mockResolvedValueOnce(page(50, false, null));
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			const result = await service.getIssues(0);
+
+			expect(result).toHaveLength(250);
+			expect(rawRequest).toHaveBeenCalledTimes(2);
+			// Unlimited always requests full 200-issue pages.
+			expect(rawRequest.mock.calls[0][1]).toEqual(
+				expect.objectContaining({ first: 200, after: null }),
+			);
+		});
+
+		it("getIssues stops at a page that reports no next page (no over-fetch)", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValueOnce(page(30, false, null));
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			const result = await service.getIssues(500);
+
+			expect(result).toHaveLength(30);
+			expect(rawRequest).toHaveBeenCalledTimes(1);
+		});
+
+		it("getIssues does not spin forever on an empty page that still claims hasNextPage", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValue(page(0, true, "c1"));
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			const result = await service.getIssues(0);
+
+			expect(result).toHaveLength(0);
+			// The defensive zero-node guard terminates after the first page.
+			expect(rawRequest).toHaveBeenCalledTimes(1);
+		});
+
+		it("filtered searchIssues (no team) chunks a large limit the same way", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValueOnce(page(200, true, "c1"))
+				.mockResolvedValueOnce(page(100, false, null));
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			const result = await service.searchIssues({
+				excludeTerminalStates: true,
+				limit: 300,
+			});
+
+			expect(result).toHaveLength(300);
+			expect(rawRequest).toHaveBeenCalledTimes(2);
+			expect(String(rawRequest.mock.calls[0][0])).toContain(
+				"FilteredSearchIssues",
+			);
+			expect(rawRequest.mock.calls[1][1]).toEqual(
+				expect.objectContaining({ first: 100, after: "c1" }),
+			);
+		});
+
+		it("caps explicit large full-text searches to one safe ranked-candidate page", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValue({ searchIssues: { nodes: [] } });
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			await service.searchIssues({ query: "auth", limit: 500 });
+
+			expect(rawRequest).toHaveBeenCalledTimes(1);
+			expect(String(rawRequest.mock.calls[0][0])).toContain("SearchIssues");
+			expect(rawRequest.mock.calls[0][1]).toEqual({
+				term: "auth",
+				first: 200,
+			});
 		});
 	});
 });
