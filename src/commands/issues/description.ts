@@ -27,6 +27,7 @@ import {
 } from "../../utils/auto-link-references.js";
 import type { GraphQLService } from "../../utils/graphql-service.js";
 import { normalizeInlineTextInput } from "../../utils/inline-text-input.js";
+import { assertNotIssueEnvelope } from "../../utils/issue-envelope-guard.js";
 import { extractIssueReferences } from "../../utils/issue-reference-extractor.js";
 import { wrapIssueReferencesAsLinks } from "../../utils/issue-reference-wrapper.js";
 import type { LinearService } from "../../utils/linear-service.js";
@@ -68,11 +69,19 @@ export function resolveDescription(options: OptionValues): string | undefined {
 		);
 	}
 
+	// Guard both user-supplied paths (file + inline) against being handed an
+	// issue's own JSON envelope, which would silently overwrite the real body
+	// (DEV-6315). Template bodies are config-authored, so they're not checked.
+	const allow = options.allowJsonDescription === true;
 	if (hasFile) {
-		return readDescriptionFile(options.descriptionFile as string);
+		const body = readDescriptionFile(options.descriptionFile as string);
+		assertNotIssueEnvelope(body, { allow });
+		return body;
 	}
 	if (hasInline) {
-		return normalizeInlineTextInput(options.description as string);
+		const body = normalizeInlineTextInput(options.description as string);
+		assertNotIssueEnvelope(body, { allow });
+		return body;
 	}
 	if (hasTemplate) {
 		const templates = loadConfig().descriptionTemplates ?? {};

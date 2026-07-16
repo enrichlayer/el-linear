@@ -70,6 +70,7 @@ import {
 	type GraphQLService,
 } from "../utils/graphql-service.js";
 import { normalizeInlineTextInput } from "../utils/inline-text-input.js";
+import { assertNotIssueEnvelope } from "../utils/issue-envelope-guard.js";
 import { createIssuesService } from "../utils/issues-service-bootstrap.js";
 import {
 	createLinearService,
@@ -1487,6 +1488,23 @@ async function handleUpdateIssue(
 			options.appendDescription,
 		);
 	}
+	// Guard against overwriting this issue's body with its own JSON envelope
+	// (DEV-6315). The update path resolves description inline rather than via
+	// resolveDescription(), so the guard is applied here too; both --description
+	// and --append-description are checked (append would corrupt just as badly).
+	{
+		const allow = options.allowJsonDescription === true;
+		assertNotIssueEnvelope(
+			typeof options.description === "string" ? options.description : undefined,
+			{ allow, targetIdentifier: issueId },
+		);
+		assertNotIssueEnvelope(
+			typeof options.appendDescription === "string"
+				? options.appendDescription
+				: undefined,
+			{ allow, targetIdentifier: issueId },
+		);
+	}
 	validateUpdateOptions(options);
 	const rootOpts = getRootOpts(command);
 	const { graphQLService, linearService, issuesService } =
@@ -1953,6 +1971,10 @@ export function setupIssuesCommands(program: Command): void {
 			"use a named description template from config.descriptionTemplates",
 		)
 		.option(
+			"--allow-json-description",
+			"allow a --description / --description-file body that looks like an issue's JSON envelope (normally blocked to prevent silently overwriting a body with 'issues get --format json' output — DEV-6315)",
+		)
+		.option(
 			"--from-template <id>",
 			"instantiate the issue from a Linear server-side template (UUID from `el-linear templates list`). Sets templateId on the underlying issueCreate mutation; Linear copies the template's title, description, labels, priority, etc. as the new issue's defaults. Override any field with the matching --title / --description / --labels flag.",
 		)
@@ -2132,6 +2154,10 @@ export function setupIssuesCommands(program: Command): void {
 		.option(
 			"--description-file <path>",
 			"read description from file (use - for stdin)",
+		)
+		.option(
+			"--allow-json-description",
+			"allow a --description / --description-file body that looks like an issue's JSON envelope (normally blocked to prevent silently overwriting a body with 'issues get --format json' output — DEV-6315)",
 		)
 		.option(
 			"--append-description <text>",
