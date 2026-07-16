@@ -1337,40 +1337,53 @@ describe("GraphQLIssuesService", () => {
 			expect(vars.filter?.state).toEqual({ name: { in: ["Todo"] } });
 		});
 
-		it("returns 100% matching-team rows across a paginated (limit > one page) result set — never falls through to the leaky top-level path", async () => {
+		it("keeps team scoping structural while cursor-paginating across multiple pages", async () => {
 			const graphQLService = new GraphQLService({ apiKey: "token" });
 			const linearService = new LinearService({ apiKey: "token" });
-			// 100-row (multi-page) DEV-only set for the team-scoped query.
-			const devNodes = Array.from({ length: 100 }, (_, i) =>
-				issueNode(i, "DEV"),
-			);
-			// If the code ever routes --team back through the top-level
-			// FilteredSearchIssues query, this contaminated set (other teams
-			// leaking in — the DEV-5578 bug) would surface and the assertion fails.
-			const contaminated = [
-				issueNode(1, "DEV"),
-				issueNode(2, "EMW"),
-				issueNode(3, "INF"),
-				issueNode(4, "FE"),
-			];
-			vi.spyOn(graphQLService, "rawRequest").mockImplementation((async (
-				q: string,
-			) => {
-				if (String(q).includes("TeamScopedFilteredIssues")) {
-					return { team: { issues: { nodes: devNodes } } };
-				}
-				return { issues: { nodes: contaminated } };
-			}) as never);
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValueOnce({
+					team: {
+						issues: {
+							nodes: Array.from({ length: 200 }, (_, i) => issueNode(i, "DEV")),
+							pageInfo: { hasNextPage: true, endCursor: "team-c1" },
+						},
+					},
+				})
+				.mockResolvedValueOnce({
+					team: {
+						issues: {
+							nodes: Array.from({ length: 100 }, (_, i) =>
+								issueNode(i + 200, "DEV"),
+							),
+							pageInfo: { hasNextPage: false, endCursor: null },
+						},
+					},
+				});
 			const service = new GraphQLIssuesService(graphQLService, linearService);
 
 			const result = await service.searchIssues({
 				teamId: TEAM_UUID,
 				status: ["Todo"],
-				limit: 100,
+				limit: 300,
 			});
 
-			expect(result).toHaveLength(100);
+			expect(result).toHaveLength(300);
 			expect(result.every((issue) => issue.team?.key === "DEV")).toBe(true);
+			expect(rawRequest).toHaveBeenCalledTimes(2);
+			for (const [query, variables] of rawRequest.mock.calls) {
+				expect(String(query)).toContain("TeamScopedFilteredIssues");
+				expect(String(query)).not.toContain("FilteredSearchIssues");
+				expect(variables).toEqual(
+					expect.objectContaining({ teamId: TEAM_UUID }),
+				);
+			}
+			expect(rawRequest.mock.calls[0][1]).toEqual(
+				expect.objectContaining({ first: 200, after: null }),
+			);
+			expect(rawRequest.mock.calls[1][1]).toEqual(
+				expect.objectContaining({ first: 100, after: "team-c1" }),
+			);
 		});
 
 		it("returns an empty list when the team-scoped connection yields no nodes", async () => {
@@ -1932,6 +1945,24 @@ describe("GraphQLIssuesService", () => {
 			expect(rawRequest.mock.calls[1][1]).toEqual(
 				expect.objectContaining({ first: 100, after: "c1" }),
 			);
+		});
+
+		it("caps explicit large full-text searches to one safe ranked-candidate page", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValue({ searchIssues: { nodes: [] } });
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+
+			await service.searchIssues({ query: "auth", limit: 500 });
+
+			expect(rawRequest).toHaveBeenCalledTimes(1);
+			expect(String(rawRequest.mock.calls[0][0])).toContain("SearchIssues");
+			expect(rawRequest.mock.calls[0][1]).toEqual({
+				term: "auth",
+				first: 200,
+			});
 		});
 	});
 });

@@ -1939,7 +1939,11 @@ export function setupIssuesCommands(program: Command): void {
 			"json",
 		)
 		.option("--fields <fields>", "columns for table/csv output")
-		.option("-l, --limit <number>", "limit results", "10")
+		.option(
+			"-l, --limit <number>",
+			"limit results (full-text search reads at most 200 ranked candidates)",
+			"10",
+		)
 		.action(handleAsyncCommand(handleSearchIssues));
 
 	issues

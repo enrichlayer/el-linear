@@ -499,6 +499,12 @@ per-status / per-priority bucketing needed:
 el-linear issues list --team DEV --all --format csv --fields identifier   # the whole open DEV backlog, one command
 ```
 
+`issues search` intentionally has no `--all`: Linear's full-text search is a
+relevance-ranked candidate search whose results are filtered client-side, not
+an exhaustive enumeration. Its `--limit` reads at most 200 ranked candidates to
+keep the rich issue query below Linear's complexity ceiling. Use `issues list`
+with structured filters and `--all` when you need every matching issue.
+
 ### Open by default — `issues list` and `issues search` skip terminal states
 
 `el-linear issues list` and `el-linear issues search` **exclude issues in

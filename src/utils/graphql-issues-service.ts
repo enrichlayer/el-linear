@@ -1100,16 +1100,21 @@ export class GraphQLIssuesService {
 		const limit = args.limit ?? 10;
 
 		if (args.query) {
-			// The full-text `searchIssues` connection isn't chunk-paginated here
-			// (relevance-ranked, client-side filtered, and API-capped). `--all`
-			// (`limit === 0`) would send `first: 0`; clamp to a bounded page so
-			// an unlimited text search still returns a sensible top slice.
+			// Full-text search is relevance-ranked and then filtered client-side,
+			// so it cannot promise exhaustive `--all` semantics. Keep it to one
+			// bounded candidate page: the query embeds COMPLETE_ISSUE_FRAGMENT and
+			// an explicit large --limit would otherwise recreate the GraphQL
+			// complexity failure that chunking prevents on enumeration paths.
+			const fullTextLimit =
+				limit === 0
+					? SAFE_ISSUE_PAGE_SIZE
+					: Math.min(limit, SAFE_ISSUE_PAGE_SIZE);
 			const searchResult =
 				await this.graphQLService.rawRequest<SearchIssuesResponse>(
 					SEARCH_ISSUES_QUERY,
 					{
 						term: args.query,
-						first: limit === 0 ? SAFE_ISSUE_PAGE_SIZE : limit,
+						first: fullTextLimit,
 					},
 				);
 			const nodes = searchResult.searchIssues?.nodes;
