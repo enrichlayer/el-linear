@@ -19,6 +19,13 @@ project adheres to [Semantic Versioning](https://semver.org/).
 * **quality:** restore a clean full-repository lint baseline (DEV-6142)
 * **labels:** resolve `labels create --team` keys and names before creating the label (DEV-5749)
 
+## [1.43.0](https://github.com/enrichlayer/el-linear/compare/v1.42.0...v1.43.0) (2026-07-16)
+
+
+### Features
+
+* **issues:** auto-chunk issues list so large teams don't hit the GraphQL complexity cap (DEV-6312) ([#268](https://github.com/enrichlayer/el-linear/issues/268)) ([fe9046f](https://github.com/enrichlayer/el-linear/commit/fe9046fb5c3708bafd5fb98c64ff651b234f3845))
+
 ## [1.42.0](https://github.com/enrichlayer/el-linear/compare/v1.41.1...v1.42.0) (2026-07-15)
 
 
