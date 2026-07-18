@@ -72,6 +72,16 @@ describe("wrapIssueReferencesAsLinks", () => {
 		).toBe(`see \`DEV-100\` for context, also [DEV-200](${url("DEV-200")})`);
 	});
 
+	it("does not wrap identifiers inside HTML machine comments", () => {
+		const text =
+			'<!-- nit-waive: id="a1f" reason="tracked" linear="DEV-100" --> and DEV-200';
+		expect(
+			wrapIssueReferencesAsLinks(text, valid("DEV-100", "DEV-200"), W),
+		).toBe(
+			`<!-- nit-waive: id="a1f" reason="tracked" linear="DEV-100" --> and [DEV-200](${url("DEV-200")})`,
+		);
+	});
+
 	it("does not double-wrap an existing markdown link", () => {
 		const text = `already [DEV-100](${url("DEV-100")}), but DEV-200 is bare`;
 		expect(
