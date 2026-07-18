@@ -25,6 +25,12 @@ const FENCED_CODE_BLOCK_REGEX =
 // for spans containing backticks; we keep it simple and match
 // single-backtick spans, which covers the common case.
 const INLINE_CODE_REGEX = /`[^`\n]+?`/g;
+// HTML comments carry machine-readable metadata in Markdown documents (for
+// example, el-git's signed review and nit-disposition markers). They are not
+// rendered prose, so identifiers inside them must remain byte-for-byte stable.
+// Treat an unterminated comment as extending to EOF: preserving a malformed
+// marker is safer than inserting Markdown into its payload.
+const HTML_COMMENT_REGEX = /<!--[\s\S]*?(?:-->|$)/g;
 // Existing markdown links: [text](url). Both halves protected so
 // identifiers inside the URL or the text aren't reprocessed.
 const MARKDOWN_LINK_REGEX = /\[([^\]]*)\]\(([^)]*)\)/g;
@@ -119,8 +125,8 @@ export interface ProtectedRange {
 
 /**
  * Find ranges of `text` that should NOT have identifiers processed.
- * Covered: fenced code, inline backticks, existing markdown links,
- * Slack links, angle-bracket autolinks, bare URLs.
+ * Covered: fenced code, inline backticks, HTML comments, existing markdown
+ * links, Slack links, angle-bracket autolinks, bare URLs.
  *
  * The returned ranges may overlap; callers only test "is this position
  * inside any protected range" so overlap is harmless.
@@ -130,6 +136,7 @@ export function findProtectedRanges(text: string): ProtectedRange[] {
 	for (const re of [
 		FENCED_CODE_BLOCK_REGEX,
 		INLINE_CODE_REGEX,
+		HTML_COMMENT_REGEX,
 		MARKDOWN_LINK_REGEX,
 		// Slack links must be considered before generic angle-bracket
 		// autolinks — the autolink regex doesn't know about the `|label`

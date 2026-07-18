@@ -78,3 +78,20 @@ describe("findProtectedRanges — bare-URL trim integration", () => {
 		expect(ranges).toContain("https://cdn.example.com/{hash}/asset.js");
 	});
 });
+
+describe("findProtectedRanges — HTML comments", () => {
+	function rangesFor(text: string): string[] {
+		return findProtectedRanges(text).map((r) => text.slice(r.start, r.end));
+	}
+
+	it("protects complete machine-marker comments", () => {
+		const comment = '<!-- nit-waive: id="a1f" linear="DEV-100" -->';
+		expect(rangesFor(`before ${comment} after`)).toContain(comment);
+	});
+
+	it("protects an unterminated comment through EOF", () => {
+		expect(rangesFor("before <!-- marker DEV-100")).toContain(
+			"<!-- marker DEV-100",
+		);
+	});
+});
