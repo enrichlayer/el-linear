@@ -11,6 +11,45 @@ interface GraphQLRawClient {
 	) => Promise<{ data: T }>;
 }
 
+export interface GraphQLRequestOptions {
+	/**
+	 * Retry only an operation whose mutation is safe to repeat. Callers must
+	 * opt in; creates and comment writes intentionally retain one-shot
+	 * semantics because a transport failure can leave their server-side result
+	 * unknown.
+	 */
+	retrySafeMutation?: boolean;
+}
+
+interface GraphQLServiceRuntimeOptions {
+	retryDelaysMs?: readonly number[];
+	sleep?: (ms: number) => Promise<void>;
+}
+
+const DEFAULT_SAFE_MUTATION_RETRY_DELAYS_MS = [150, 400] as const;
+
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+/** True only for failures where retrying a known-idempotent request is useful. */
+export function isTransientGraphQLError(error: unknown): boolean {
+	const detail = error as {
+		response?: { status?: number; statusCode?: number };
+	};
+	const status = detail.response?.status ?? detail.response?.statusCode;
+	if (
+		status === 408 ||
+		status === 429 ||
+		(status !== undefined && status >= 500)
+	) {
+		return true;
+	}
+	return /\b(?:408|429|500|502|503|504)\b|(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|fetch failed|network error|connection termination)/i.test(
+		errorMessage(error),
+	);
+}
+
 /**
  * Constructor arg for `GraphQLService`. Re-exported alias of the shared
  * `LinearCredential` union (`{ apiKey } | { oauthToken }`). Kept as a
@@ -41,13 +80,23 @@ function buildLinearClient(auth: GraphQLServiceAuth): LinearClient {
 
 export class GraphQLService {
 	private readonly graphQLClient: GraphQLRawClient;
+	private readonly retryDelaysMs: readonly number[];
+	private readonly sleep: (ms: number) => Promise<void>;
 
-	constructor(auth: GraphQLServiceAuth) {
+	constructor(
+		auth: GraphQLServiceAuth,
+		options: GraphQLServiceRuntimeOptions = {},
+	) {
 		const client = buildLinearClient(auth);
 		// LinearClient stores a private graphql-request client — access via escape hatch
 		this.graphQLClient = (
 			client as unknown as { client: GraphQLRawClient }
 		).client;
+		this.retryDelaysMs =
+			options.retryDelaysMs ?? DEFAULT_SAFE_MUTATION_RETRY_DELAYS_MS;
+		this.sleep =
+			options.sleep ??
+			((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
 	}
 
 	// Default type allows property access on raw GraphQL responses.
@@ -55,10 +104,29 @@ export class GraphQLService {
 	async rawRequest<T = GraphQLResponseData>(
 		query: string,
 		variables?: GraphQLVariables,
+		options: GraphQLRequestOptions = {},
 	): Promise<T> {
+		let attempt = 0;
 		try {
-			const response = await this.graphQLClient.rawRequest<T>(query, variables);
-			return response.data;
+			while (true) {
+				try {
+					const response = await this.graphQLClient.rawRequest<T>(
+						query,
+						variables,
+					);
+					return response.data;
+				} catch (error) {
+					if (
+						!options.retrySafeMutation ||
+						attempt >= this.retryDelaysMs.length ||
+						!isTransientGraphQLError(error)
+					) {
+						throw error;
+					}
+					await this.sleep(this.retryDelaysMs[attempt]);
+					attempt += 1;
+				}
+			}
 		} catch (error: unknown) {
 			const err = error as {
 				response?: { errors?: Array<{ message?: string }> };

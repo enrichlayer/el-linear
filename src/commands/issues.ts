@@ -1799,6 +1799,18 @@ async function handleMarkBranch(
 			);
 		}
 	}
+	const branchIdentifier = extractIssueIdentifierFromBranch(branch);
+	if (
+		issueId &&
+		branchIdentifier &&
+		branchIdentifier !== identifier &&
+		options.allowBranchMismatch !== true
+	) {
+		throw new Error(
+			`Branch '${branch}' implies ${branchIdentifier}, but the requested marker is ${identifier}. ` +
+				"Run this command from the matching branch, or pass --allow-branch-mismatch for deliberate recovery.",
+		);
+	}
 
 	const previous = getBranchLinearIssue(branch);
 	setBranchLinearIssue(branch, identifier);
@@ -2363,6 +2375,10 @@ export function setupIssuesCommands(program: Command): void {
 		.option(
 			"--no-claim",
 			"only record git metadata; skip assigning the issue to the current Linear user and moving it to the first started state",
+		)
+		.option(
+			"--allow-branch-mismatch",
+			"allow an explicit issue identifier that conflicts with the current branch name",
 		)
 		.action(handleAsyncCommand(handleMarkBranch));
 }

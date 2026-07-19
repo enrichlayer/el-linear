@@ -819,6 +819,7 @@ export class GraphQLIssuesService {
 					id: resolvedIssueId,
 					input: updateInput,
 				},
+				{ retrySafeMutation: true },
 			);
 		} catch (error) {
 			const msg = error instanceof Error ? error.message : String(error);
