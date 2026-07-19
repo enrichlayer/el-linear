@@ -2149,6 +2149,55 @@ describe("issues commands", () => {
 			).toBe("DEV-4500");
 		});
 
+		it("refuses an explicit marker that conflicts with the current branch identifier", async () => {
+			execFileSync("git", ["checkout", "-B", "feature/DEV-999-other-work"], {
+				stdio: "pipe",
+			});
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, ["issues", "mark-branch", "DEV-4500"]);
+
+			expect(mockClaimIssue).not.toHaveBeenCalled();
+			expect(mockOutputSuccess).not.toHaveBeenCalled();
+			expect(process.exit).toHaveBeenCalledWith(1);
+		});
+
+		it("allows a deliberate mismatch only with --allow-branch-mismatch", async () => {
+			execFileSync("git", ["checkout", "-B", "feature/DEV-999-recovery"], {
+				stdio: "pipe",
+			});
+			mockClaimIssue.mockResolvedValue({
+				claimed: true,
+				assigned: true,
+				started: true,
+				assignee: {
+					id: "user-1",
+					name: "Nico Appel",
+					displayName: "Nico",
+					email: "nico@example.com",
+				},
+				issue: { id: "issue-1", identifier: "DEV-4500" },
+			});
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"mark-branch",
+				"DEV-4500",
+				"--allow-branch-mismatch",
+			]);
+
+			expect(
+				execFileSync(
+					"git",
+					["config", "--get", "branch.feature/DEV-999-recovery.linearIssue"],
+					{ stdio: "pipe" },
+				)
+					.toString()
+					.trim(),
+			).toBe("DEV-4500");
+		});
+
 		it("fails open when claiming fails after the marker is written", async () => {
 			mockClaimIssue.mockRejectedValue(new Error("Linear API unavailable"));
 

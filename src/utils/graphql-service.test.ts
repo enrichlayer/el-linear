@@ -72,6 +72,45 @@ describe("GraphQLService", () => {
 		);
 	});
 
+	it("retries a transient failure only when the caller marks the mutation safe", async () => {
+		const sleep = vi.fn().mockResolvedValue(undefined);
+		const callsBefore = mockRawRequest.mock.calls.length;
+		mockRawRequest
+			.mockRejectedValueOnce({
+				response: { status: 503 },
+				message: "upstream unavailable",
+			})
+			.mockResolvedValueOnce({ data: { issueUpdate: { success: true } } });
+		const service = new GraphQLService(
+			{ apiKey: "test-token" },
+			{ retryDelaysMs: [1], sleep },
+		);
+
+		await expect(
+			service.rawRequest(
+				"mutation Update { issueUpdate { success } }",
+				{},
+				{ retrySafeMutation: true },
+			),
+		).resolves.toEqual({ issueUpdate: { success: true } });
+		expect(sleep).toHaveBeenCalledWith(1);
+		expect(mockRawRequest.mock.calls.length - callsBefore).toBe(2);
+	});
+
+	it("does not retry a transient failure unless the caller opts in", async () => {
+		const callsBefore = mockRawRequest.mock.calls.length;
+		mockRawRequest.mockRejectedValue({
+			response: { status: 503 },
+			message: "upstream unavailable",
+		});
+		const service = new GraphQLService({ apiKey: "test-token" });
+
+		await expect(
+			service.rawRequest("mutation Create { commentCreate { success } }"),
+		).rejects.toThrow("GraphQL request failed: upstream unavailable");
+		expect(mockRawRequest.mock.calls.length - callsBefore).toBe(1);
+	});
+
 	it("string constructor passes apiKey to LinearClient (personal-token path)", () => {
 		linearClientCtorSpy.mockReset();
 		new GraphQLService({ apiKey: "personal-token" });
