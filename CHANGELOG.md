@@ -11,6 +11,7 @@ project adheres to [Semantic Versioning](https://semver.org/).
 * **issues:** add an opt-in intake-decision gate that requires explicit need, value, ownership, placement, and a `PROCEED` decision before creation; `--skip-validation` cannot silently bypass it (DEV-6163)
 * **issues:** add an opt-in create-time goal-completion gate — checks the description for a falsifiable "Done when" / acceptance-criteria section, `warn`/`block` modes via `validation.goalCompletionGate`, bypass with `--allow-vague-goal` (DEV-5920)
 * **projects:** add `projects update --name/--description/--content` for editing project metadata without raw GraphQL (DEV-5749)
+* **projects:** add `projects update --status <name>` to set a project's status via the proper `projectUpdate` mutation instead of a hand-written GraphQL call; resolves the workspace's configured statuses by name (case-insensitive) and lists the valid names on a miss (DEV-7021)
 
 ### Bug Fixes
 

@@ -26,10 +26,12 @@ const mockResolveProjectId = vi
 		Promise.resolve(`project-id-${project}`),
 	);
 const mockResolveTeamId = vi.fn();
+const mockResolveProjectStatusId = vi.fn();
 const mockService = {
 	getProjects: mockGetProjects,
 	resolveProjectId: mockResolveProjectId,
 	resolveTeamId: mockResolveTeamId,
+	resolveProjectStatusId: mockResolveProjectStatusId,
 };
 const mockCreateLinearService = vi.fn().mockReturnValue(mockService);
 const mockOutputSuccess = vi.fn();
@@ -537,6 +539,191 @@ describe("projects commands", () => {
 
 			expect(mockResolveProjectId).not.toHaveBeenCalled();
 			expect(mockGraphQLService.rawRequest).not.toHaveBeenCalled();
+			expect(mockOutputSuccess).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("projects update --status (DEV-7021)", () => {
+		it("resolves the status by name and sends the resulting statusId to the mutation", async () => {
+			mockResolveProjectStatusId.mockResolvedValue("status-uuid-completed");
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				projectUpdate: {
+					success: true,
+					project: {
+						id: "project-id-Launch",
+						name: "Launch",
+						description: "",
+						content: "",
+						status: { id: "status-uuid-completed", name: "Completed" },
+						progress: 1,
+						url: "https://linear.app/acme/project/launch-abc123",
+						teams: { nodes: [] },
+					},
+				},
+			});
+
+			const program = createTestProgram();
+			setupProjectsCommands(program);
+			await runCommand(program, [
+				"projects",
+				"update",
+				"Launch",
+				"--status",
+				"completed",
+			]);
+
+			expect(mockResolveProjectStatusId).toHaveBeenCalledWith("completed");
+			expect(mockGraphQLService.rawRequest).toHaveBeenCalledWith(
+				expect.stringContaining("projectUpdate"),
+				{
+					id: "project-id-Launch",
+					input: { statusId: "status-uuid-completed" },
+				},
+			);
+			expect(mockOutputSuccess).toHaveBeenCalledWith(
+				expect.objectContaining({
+					id: "project-id-Launch",
+					name: "Launch",
+					status: "Completed",
+					progress: 1,
+					url: "https://linear.app/acme/project/launch-abc123",
+				}),
+			);
+		});
+
+		it("combines --status with other update fields in a single mutation", async () => {
+			mockResolveProjectStatusId.mockResolvedValue("status-uuid-started");
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				projectUpdate: {
+					success: true,
+					project: {
+						id: "project-id-Launch",
+						name: "Launch v2",
+						description: "",
+						content: "",
+						status: { id: "status-uuid-started", name: "In Progress" },
+						progress: 0.2,
+						url: "https://linear.app/acme/project/launch-abc123",
+						teams: { nodes: [] },
+					},
+				},
+			});
+
+			const program = createTestProgram();
+			setupProjectsCommands(program);
+			await runCommand(program, [
+				"projects",
+				"update",
+				"Launch",
+				"--name",
+				"Launch v2",
+				"--status",
+				"In Progress",
+			]);
+
+			expect(mockGraphQLService.rawRequest).toHaveBeenCalledWith(
+				expect.stringContaining("projectUpdate"),
+				{
+					id: "project-id-Launch",
+					input: { name: "Launch v2", statusId: "status-uuid-started" },
+				},
+			);
+		});
+
+		it("treats a bare --status as work to do (does not hit the 'nothing to update' guard)", async () => {
+			mockResolveProjectStatusId.mockResolvedValue("status-uuid-planned");
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				projectUpdate: {
+					success: true,
+					project: {
+						id: "project-id-Launch",
+						name: "Launch",
+						description: "",
+						content: "",
+						status: { id: "status-uuid-planned", name: "Planned" },
+						progress: 0,
+						url: "https://linear.app/acme/project/launch-abc123",
+						teams: { nodes: [] },
+					},
+				},
+			});
+
+			const program = createTestProgram();
+			setupProjectsCommands(program);
+			await runCommand(program, [
+				"projects",
+				"update",
+				"Launch",
+				"--status",
+				"Planned",
+			]);
+
+			expect(mockResolveProjectId).toHaveBeenCalledWith("Launch");
+			expect(mockGraphQLService.rawRequest).toHaveBeenCalled();
+			expect(mockOutputSuccess).toHaveBeenCalled();
+		});
+
+		it("surfaces the unknown-status error and never calls the mutation", async () => {
+			// Mirrors LinearService.resolveProjectStatusId's real not-found shape
+			// (linear-service.test.ts covers the resolver itself in depth); this
+			// test locks in that the command layer propagates the rejection
+			// instead of calling the mutation with a bad/undefined statusId.
+			mockResolveProjectStatusId.mockRejectedValue(
+				new Error(
+					'Project status "Paused" not found.\n  Available statuses: Backlog, Planned, In Progress, Completed, Canceled',
+				),
+			);
+
+			const program = createTestProgram();
+			setupProjectsCommands(program);
+			await runCommand(program, [
+				"projects",
+				"update",
+				"Launch",
+				"--status",
+				"Paused",
+			]);
+
+			expect(mockResolveProjectStatusId).toHaveBeenCalledWith("Paused");
+			expect(mockGraphQLService.rawRequest).not.toHaveBeenCalled();
+			expect(mockOutputSuccess).not.toHaveBeenCalled();
+		});
+
+		it("propagates an API error thrown by the update mutation", async () => {
+			mockResolveProjectStatusId.mockResolvedValue("status-uuid-completed");
+			mockGraphQLService.rawRequest.mockRejectedValue(
+				new Error("Linear API unavailable"),
+			);
+
+			const program = createTestProgram();
+			setupProjectsCommands(program);
+			await runCommand(program, [
+				"projects",
+				"update",
+				"Launch",
+				"--status",
+				"Completed",
+			]);
+
+			expect(mockOutputSuccess).not.toHaveBeenCalled();
+		});
+
+		it("throws when the mutation reports success: false", async () => {
+			mockResolveProjectStatusId.mockResolvedValue("status-uuid-completed");
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				projectUpdate: { success: false, project: null },
+			});
+
+			const program = createTestProgram();
+			setupProjectsCommands(program);
+			await runCommand(program, [
+				"projects",
+				"update",
+				"Launch",
+				"--status",
+				"Completed",
+			]);
+
 			expect(mockOutputSuccess).not.toHaveBeenCalled();
 		});
 	});
