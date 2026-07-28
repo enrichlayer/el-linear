@@ -14,6 +14,7 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Bug Fixes
 
+* **config:** read intake-decision fields whose labels are bolded or italicized — `* **Needed:** …` previously left the closing `**` at the head of the value, so a complete, well-reasoned block was rejected, and the message blamed the content ("empty, a placeholder, or lacks an explicit yes-and-reason judgment") for what was a formatting mismatch. Field failures are now diagnosed specifically: an unreadable line, an absent field, an empty value, a placeholder, or a present-but-unjudged value, each with the value the author actually wrote. `evaluateIntakeDecision`'s `invalid-field` result gains `problem` and `value`, and adds an `unparsed-field` reason (DEV-7074)
 * **issues:** offer the `--parent` sub-issue path when the duplicate gate flags a candidate — the block previously presented only "comment on it instead" and "`--allow-duplicate`", omitting the common case where the new work is a *piece* of the match, which pushed operators into reusing multi-phase parent issues. The remedy is per-tier: the hard block names `--parent <id> --allow-duplicate` (a re-run), while the advisory tier names `issues update <new-id> --parent <id>`, since creation has already proceeded there and a re-run would file a second issue (DEV-6205)
 * **issues:** honor read options such as `--body` on the nested `issues read` and `issue read` routes (DEV-6141)
 * **quality:** restore a clean full-repository lint baseline (DEV-6142)
