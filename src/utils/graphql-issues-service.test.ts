@@ -701,7 +701,10 @@ describe("GraphQLIssuesService", () => {
 			const call = rawRequest.mock.calls.find(([q]: unknown[]) =>
 				String(q).includes("issueCreate"),
 			);
-			return (call?.[1] as { input: { teamId?: string } }).input.teamId;
+			if (!call) {
+				throw new Error("expected an issueCreate call");
+			}
+			return (call[1] as { input: { teamId?: string } }).input.teamId;
 		}
 
 		it("resolves a UUID --project by id, not a null name filter", async () => {
@@ -988,7 +991,10 @@ describe("GraphQLIssuesService", () => {
 			const call = rawRequest.mock.calls.find(([q]: unknown[]) =>
 				String(q).includes("issueUpdate"),
 			);
-			return (call?.[1] as { input: Record<string, unknown> }).input;
+			if (!call) {
+				throw new Error("expected an issueUpdate call");
+			}
+			return (call[1] as { input: Record<string, unknown> }).input;
 		}
 
 		it("resolves a UUID --project by id, not a null name filter", async () => {
@@ -1180,7 +1186,10 @@ describe("GraphQLIssuesService", () => {
 				String(q).includes("IssueFilter"),
 			);
 			expect(filteredCall).toBeDefined();
-			const filter = (filteredCall?.[1] as { filter: Record<string, unknown> })
+			if (!filteredCall) {
+				throw new Error("expected an IssueFilter call");
+			}
+			const filter = (filteredCall[1] as { filter: Record<string, unknown> })
 				.filter;
 			expect(filter.assignee).toEqual({ id: { eq: "assignee-uuid" } });
 		});
@@ -1204,7 +1213,10 @@ describe("GraphQLIssuesService", () => {
 			const filteredCall = rawRequest.mock.calls.find(([q]) =>
 				String(q).includes("IssueFilter"),
 			);
-			const filter = (filteredCall?.[1] as { filter: Record<string, unknown> })
+			if (!filteredCall) {
+				throw new Error("expected an IssueFilter call");
+			}
+			const filter = (filteredCall[1] as { filter: Record<string, unknown> })
 				.filter;
 			expect(filter.assignee).toEqual({ id: { eq: "registry-assignee-uuid" } });
 		});
@@ -1475,7 +1487,10 @@ describe("GraphQLIssuesService", () => {
 				String(q).includes("IssueFilter"),
 			);
 			expect(filteredCall).toBeDefined();
-			const filter = (filteredCall?.[1] as { filter: Record<string, unknown> })
+			if (!filteredCall) {
+				throw new Error("expected an IssueFilter call");
+			}
+			const filter = (filteredCall[1] as { filter: Record<string, unknown> })
 				.filter;
 			// Regression: the hardcoded ["completed","canceled"] list omitted the
 			// workspace's `duplicate`-typed state, so resolved duplicates leaked
@@ -1505,7 +1520,10 @@ describe("GraphQLIssuesService", () => {
 				String(q).includes("IssueFilter"),
 			);
 			expect(filteredCall).toBeDefined();
-			const filter = (filteredCall?.[1] as { filter: Record<string, unknown> })
+			if (!filteredCall) {
+				throw new Error("expected an IssueFilter call");
+			}
+			const filter = (filteredCall[1] as { filter: Record<string, unknown> })
 				.filter;
 			expect(filter.state).toBeUndefined();
 		});
