@@ -210,6 +210,53 @@ function formatCommentBodyBlocks(comments: Record<string, unknown>[]): string {
 		.join("\n\n---\n\n");
 }
 
+/**
+ * Why the `--body` list surface has nothing to print, or `null` when it does.
+ *
+ * Split out from the printer so the two "no text" cases stay distinguishable in
+ * the message: zero comments is a fact about the issue, while comments that all
+ * carry empty bodies is the shape a partially-dropped payload takes.
+ */
+function describeMissingCommentBodies(
+	comments: Record<string, unknown>[],
+): string | null {
+	if (comments.length === 0) {
+		return "has no comments";
+	}
+	const hasBody = comments.some(
+		(comment) => typeof comment.body === "string" && comment.body.trim() !== "",
+	);
+	if (!hasBody) {
+		return `has ${comments.length} comment${comments.length === 1 ? "" : "s"}, none with a body`;
+	}
+	return null;
+}
+
+/**
+ * List-surface sibling of `printRawCommentBody`. `--body` is a raw-text
+ * extraction contract, so writing a lone newline and exiting 0 would make "this
+ * issue has no comments" byte-identical to "the fetch or render silently
+ * dropped the list" — no caller could tell the two apart. Mirror the
+ * single-comment guard exactly: nothing on stdout, a stderr hint, exit 1, so
+ * scripts branch on the exit code (DEV-7160).
+ *
+ * The structured surfaces need no such guard — `--format summary` prints
+ * `(no results)` and the JSON envelope carries `meta.count`, both of which say
+ * "empty" in band.
+ */
+function printRawCommentBodyBlocks(
+	comments: Record<string, unknown>[],
+	label: string,
+): void {
+	const missing = describeMissingCommentBodies(comments);
+	if (missing === null) {
+		process.stdout.write(`${formatCommentBodyBlocks(comments)}\n`);
+		return;
+	}
+	process.stderr.write(`el-linear: ${label} ${missing}\n`);
+	process.exit(1);
+}
+
 interface PreparedCommentBody {
 	body: string;
 	preResolved: Map<string, string>;
@@ -506,7 +553,7 @@ async function handleListComments(
 		transformComment(comment, { fullBodySummary }),
 	);
 	if (options.body === true) {
-		process.stdout.write(`${formatCommentBodyBlocks(nodes)}\n`);
+		printRawCommentBodyBlocks(nodes, result.issue.identifier);
 		return;
 	}
 	outputSuccess({

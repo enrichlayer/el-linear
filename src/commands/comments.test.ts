@@ -1002,7 +1002,151 @@ describe("comments commands", () => {
 				"comment c1\n\nfirst body\n\n---\n\ncomment c2\n\nsecond body\nline two\n",
 			);
 			expect(mockOutputSuccess).not.toHaveBeenCalled();
+			expect(process.exit).not.toHaveBeenCalled();
 			stdoutSpy.mockRestore();
+		});
+
+		// DEV-7160: --body used to write a lone newline and exit 0 for an empty
+		// list, so "no comments" and "the payload was silently dropped" were
+		// indistinguishable. It now mirrors `comments read --body`'s guard.
+		it("exits non-zero with a stderr hint when the issue has no comments", async () => {
+			mockRawRequest.mockResolvedValue({
+				issue: {
+					id: "issue-1",
+					identifier: "DEV-1",
+					comments: { nodes: [] },
+				},
+			});
+			const stdoutSpy = vi
+				.spyOn(process.stdout, "write")
+				.mockImplementation(() => true);
+			const stderrSpy = vi
+				.spyOn(process.stderr, "write")
+				.mockImplementation(() => true);
+
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, ["comments", "list", "DEV-1", "--body"]);
+
+			expect(stdoutSpy).not.toHaveBeenCalled();
+			expect(stderrSpy).toHaveBeenCalledWith(
+				"el-linear: DEV-1 has no comments\n",
+			);
+			expect(process.exit).toHaveBeenCalledWith(1);
+			expect(mockOutputSuccess).not.toHaveBeenCalled();
+			stdoutSpy.mockRestore();
+			stderrSpy.mockRestore();
+		});
+
+		it("exits non-zero when every comment body is an empty string", async () => {
+			mockRawRequest.mockResolvedValue({
+				issue: {
+					id: "issue-1",
+					identifier: "DEV-1",
+					comments: {
+						nodes: [
+							{
+								id: "c1",
+								body: "",
+								user: { id: "u1", name: "Test User", url: null },
+								createdAt: "2026-01-01T00:00:00.000Z",
+								updatedAt: "2026-01-01T00:00:00.000Z",
+							},
+							{
+								id: "c2",
+								body: "   \n",
+								user: { id: "u2", name: "Other User", url: null },
+								createdAt: "2026-01-02T00:00:00.000Z",
+								updatedAt: "2026-01-02T00:00:00.000Z",
+							},
+						],
+					},
+				},
+			});
+			const stdoutSpy = vi
+				.spyOn(process.stdout, "write")
+				.mockImplementation(() => true);
+			const stderrSpy = vi
+				.spyOn(process.stderr, "write")
+				.mockImplementation(() => true);
+
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, ["comments", "list", "DEV-1", "--body"]);
+
+			expect(stdoutSpy).not.toHaveBeenCalled();
+			expect(stderrSpy).toHaveBeenCalledWith(
+				"el-linear: DEV-1 has 2 comments, none with a body\n",
+			);
+			expect(process.exit).toHaveBeenCalledWith(1);
+			stdoutSpy.mockRestore();
+			stderrSpy.mockRestore();
+		});
+
+		// A partially-empty list still has text to print, so it stays a success —
+		// the guard fires on "no renderable body at all", not on any empty body.
+		it("still prints blocks when only some comment bodies are empty", async () => {
+			mockRawRequest.mockResolvedValue({
+				issue: {
+					id: "issue-1",
+					identifier: "DEV-1",
+					comments: {
+						nodes: [
+							{
+								id: "c1",
+								body: "",
+								user: { id: "u1", name: "Test User", url: null },
+								createdAt: "2026-01-01T00:00:00.000Z",
+								updatedAt: "2026-01-01T00:00:00.000Z",
+							},
+							{
+								id: "c2",
+								body: "second body",
+								user: { id: "u2", name: "Other User", url: null },
+								createdAt: "2026-01-02T00:00:00.000Z",
+								updatedAt: "2026-01-02T00:00:00.000Z",
+							},
+						],
+					},
+				},
+			});
+			const stdoutSpy = vi
+				.spyOn(process.stdout, "write")
+				.mockImplementation(() => true);
+
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, ["comments", "list", "DEV-1", "--body"]);
+
+			expect(stdoutSpy).toHaveBeenCalledWith(
+				"comment c1\n\n\n\n---\n\ncomment c2\n\nsecond body\n",
+			);
+			expect(process.exit).not.toHaveBeenCalled();
+			stdoutSpy.mockRestore();
+		});
+
+		// The structured surfaces carry their own in-band "empty" signal, so the
+		// guard must not leak into them.
+		it("keeps the empty JSON envelope a success for the default format", async () => {
+			mockRawRequest.mockResolvedValue({
+				issue: {
+					id: "issue-1",
+					identifier: "DEV-1",
+					comments: { nodes: [] },
+				},
+			});
+
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, ["comments", "list", "DEV-1"]);
+
+			expect(mockOutputSuccess).toHaveBeenCalledWith(
+				expect.objectContaining({
+					data: [],
+					meta: { count: 0, issue: "DEV-1" },
+				}),
+			);
+			expect(process.exit).not.toHaveBeenCalled();
 		});
 	});
 
