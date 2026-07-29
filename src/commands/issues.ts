@@ -19,6 +19,7 @@ import {
 	enforceValidation,
 	validateIssueCreation,
 } from "../config/issue-validation.js";
+import { maybeEmitPinMismatchHint } from "../config/pin-hint.js";
 import {
 	resolveAssignee,
 	resolveLabels,
@@ -1090,6 +1091,10 @@ async function handleCreateIssue(
 	command: Command,
 ): Promise<void> {
 	const rootOpts = getRootOpts(command);
+	// DEV-7277: non-blocking nudge when this write is landing via the
+	// machine-global active profile in a repo that hasn't pinned a workspace.
+	// stderr only; never blocks; suppressed by --quiet / EL_LINEAR_NO_PIN_HINT.
+	maybeEmitPinMismatchHint({ hasProfileFlag: Boolean(rootOpts.profile) });
 	// DEV-5920 (cycle-2): resolve the description exactly ONCE, before anything
 	// else. On create, resolveDescription would otherwise run three times —
 	// field validation (inside resolveCreateInputs), the body build, and the

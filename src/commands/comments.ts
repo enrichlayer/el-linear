@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import type { Command, OptionValues } from "commander";
+import { maybeEmitPinMismatchHint } from "../config/pin-hint.js";
 import { resolveUserDisplayName } from "../config/resolver.js";
 import {
 	CREATE_COMMENT_MUTATION,
@@ -290,6 +291,9 @@ async function handleCreateComment(
 	command: Command,
 ): Promise<void> {
 	const rootOpts = getRootOpts(command);
+	// DEV-7277: non-blocking nudge when this comment is landing via the
+	// machine-global active profile in a repo that hasn't pinned a workspace.
+	maybeEmitPinMismatchHint({ hasProfileFlag: Boolean(rootOpts.profile) });
 	const graphQLService = await createGraphQLService(rootOpts);
 	const linearService = await createLinearService(rootOpts);
 	// Apply messageFooter (config or --footer flag) before any further
