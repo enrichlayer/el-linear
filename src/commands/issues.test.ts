@@ -3432,7 +3432,7 @@ describe("issues commands", () => {
 			);
 			expect(createCalls).toHaveLength(1);
 			expect(
-				(createCalls[0]?.[1] as { input: { relatedIssueId: string } }).input
+				(createCalls[0][1] as { input: { relatedIssueId: string } }).input
 					.relatedIssueId,
 			).toBe("uuid-100");
 		});
