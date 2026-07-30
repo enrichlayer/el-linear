@@ -221,14 +221,12 @@ describe("applyRepoLocalPin", () => {
 		expect(() => applyRepoLocalPin("{ bad", "x")).toThrow(/malformed JSON/);
 	});
 
-	it.each([
-		"[]",
-		"null",
-		'"keep"',
-		"   ",
-	])("refuses valid non-object or empty JSON instead of clobbering %j", (existing) => {
-		expect(() => applyRepoLocalPin(existing, "x")).toThrow(/malformed JSON/);
-	});
+	it.each(["[]", "null", '"keep"', "   "])(
+		"refuses valid non-object or empty JSON instead of clobbering %j",
+		(existing) => {
+			expect(() => applyRepoLocalPin(existing, "x")).toThrow(/malformed JSON/);
+		},
+	);
 });
 
 describe("removeRepoLocalPin", () => {
@@ -254,14 +252,12 @@ describe("removeRepoLocalPin", () => {
 		expect(removeRepoLocalPin(null)).toBeNull();
 	});
 
-	it.each([
-		"[]",
-		"null",
-		'"keep"',
-		"   ",
-	])("refuses valid non-object or empty JSON instead of deleting %j", (existing) => {
-		expect(() => removeRepoLocalPin(existing)).toThrow(/malformed JSON/);
-	});
+	it.each(["[]", "null", '"keep"', "   "])(
+		"refuses valid non-object or empty JSON instead of deleting %j",
+		(existing) => {
+			expect(() => removeRepoLocalPin(existing)).toThrow(/malformed JSON/);
+		},
+	);
 });
 
 describe("removeGlobalPin", () => {
@@ -325,14 +321,12 @@ describe("applyGlobalPin", () => {
 		expect(JSON.parse(out)).toEqual({ profiles: { "a/b": "two" } });
 	});
 
-	it.each([
-		"[]",
-		"null",
-		'"keep"',
-		"   ",
-	])("refuses valid non-object or empty JSON instead of clobbering %j", (existing) => {
-		expect(() => applyGlobalPin(existing, "a/b", "two")).toThrow(
-			/malformed JSON/,
-		);
-	});
+	it.each(["[]", "null", '"keep"', "   "])(
+		"refuses valid non-object or empty JSON instead of clobbering %j",
+		(existing) => {
+			expect(() => applyGlobalPin(existing, "a/b", "two")).toThrow(
+				/malformed JSON/,
+			);
+		},
+	);
 });
