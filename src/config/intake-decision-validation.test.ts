@@ -109,6 +109,8 @@ describe("evaluateIntakeDecision", () => {
 			ok: false,
 			reason: "invalid-field",
 			field: "Needed",
+			problem: "no-judgment",
+			value: "Yes",
 		});
 	});
 
@@ -120,7 +122,13 @@ describe("evaluateIntakeDecision", () => {
 					"Needed: Yes — TBD",
 				),
 			),
-		).toEqual({ ok: false, reason: "invalid-field", field: "Needed" });
+		).toEqual({
+			ok: false,
+			reason: "invalid-field",
+			field: "Needed",
+			problem: "placeholder-reason",
+			value: "Yes — TBD",
+		});
 		expect(
 			evaluateIntakeDecision(
 				VALID.replace(
@@ -128,7 +136,13 @@ describe("evaluateIntakeDecision", () => {
 					"Owner: Yes",
 				),
 			),
-		).toEqual({ ok: false, reason: "invalid-field", field: "Owner" });
+		).toEqual({
+			ok: false,
+			reason: "invalid-field",
+			field: "Owner",
+			problem: "non-specific",
+			value: "Yes",
+		});
 	});
 
 	it("rejects placeholder ownership", () => {
@@ -140,6 +154,8 @@ describe("evaluateIntakeDecision", () => {
 			ok: false,
 			reason: "invalid-field",
 			field: "Owner",
+			problem: "placeholder",
+			value: "TBD",
 		});
 	});
 
@@ -149,6 +165,26 @@ describe("evaluateIntakeDecision", () => {
 			ok: false,
 			reason: "not-proceeding",
 			decision: "REJECT",
+		});
+	});
+
+	it("does not erase literal underscores to manufacture a PROCEED decision", () => {
+		const misspelled = VALID.replace("Decision: PROCEED", "Decision: PRO_CEED");
+		expect(evaluateIntakeDecision(misspelled)).toEqual({
+			ok: false,
+			reason: "not-proceeding",
+			decision: "PRO_CEED",
+		});
+	});
+
+	it("still accepts paired inline emphasis around a semantic token", () => {
+		const emphasized = VALID.replace(
+			"Needed: Yes — support",
+			"Needed: **Yes** — support",
+		);
+		expect(evaluateIntakeDecision(emphasized)).toEqual({
+			ok: true,
+			header: "Intake decision",
 		});
 	});
 
@@ -181,6 +217,215 @@ describe("evaluateIntakeDecision", () => {
 			ok: false,
 			reason: "missing-field",
 			field: "Needed",
+		});
+	});
+});
+
+// DEV-7074: a well-formed decision block must parse whatever markdown the
+// author actually typed, and a field that genuinely fails must be diagnosed as
+// the failure it is — formatting or content, never one reported as the other.
+describe("evaluateIntakeDecision — label formatting tolerance (DEV-7074)", () => {
+	const FIELDS: ReadonlyArray<readonly [string, string]> = [
+		["Needed", "Yes — support cannot find the current procedure"],
+		[
+			"Worth doing",
+			"Yes — one maintained guide replaces repeated investigation",
+		],
+		[
+			"Existing work",
+			"No duplicate — searched current intake and issue-creation work",
+		],
+		["Owner", "Customer Support internal documentation"],
+		["Placement", "customer-support/docs-mdx/tools/linear/intake.mdx"],
+		["Decision", "PROCEED"],
+	];
+
+	function block(
+		render: (label: string, value: string, index: number) => string,
+	): string {
+		const body = FIELDS.map(([label, value], index) =>
+			render(label, value, index),
+		).join("\n");
+		return `Background that explains the proposed work.\n\n## Intake decision\n${body}`;
+	}
+
+	it.each([
+		["plain labels", (l: string, v: string) => `- ${l}: ${v}`],
+		[
+			"bolded labels with the colon inside the emphasis",
+			(l: string, v: string) => `- **${l}:** ${v}`,
+		],
+		[
+			"bolded labels with the colon outside the emphasis",
+			(l: string, v: string) => `- **${l}**: ${v}`,
+		],
+		[
+			"bolded labels under an asterisk list marker",
+			(l: string, v: string) => `* **${l}:** ${v}`,
+		],
+		["italic labels", (l: string, v: string) => `- *${l}*: ${v}`],
+		[
+			"underscore-emphasized labels",
+			(l: string, v: string) => `- __${l}:__ ${v}`,
+		],
+		["no list marker at all", (l: string, v: string) => `${l}: ${v}`],
+		[
+			"numbered list markers",
+			(l: string, v: string, i: number) => `${i + 1}. ${l}: ${v}`,
+		],
+		[
+			"labels mixed plain and bolded",
+			(l: string, v: string, i: number) =>
+				i % 2 === 0 ? `- ${l}: ${v}` : `* **${l}:** ${v}`,
+		],
+		["bolded values", (l: string, v: string) => `- ${l}: **${v}**`],
+	])("accepts %s", (_name, render) => {
+		expect(evaluateIntakeDecision(block(render))).toEqual({
+			ok: true,
+			header: "Intake decision",
+		});
+	});
+
+	it("accepts the bolded block that DEV-7074 reported as rejected", () => {
+		const reported = `## Intake decision
+
+* **Needed:** Yes — the intake-decision gate rejects a well-formed decision block for formatting reasons
+* **Worth doing:** Yes — the gate fires on every issue create
+* **Existing work:** Searched "intake decision gate" including closed; DEV-6163 built the gate
+* **Owner:** DEV — el-linear
+* **Placement:** Team DEV, project left unset for triage
+* **Decision:** PROCEED`;
+		expect(evaluateIntakeDecision(reported)).toEqual({
+			ok: true,
+			header: "Intake decision",
+		});
+	});
+
+	it("reports an absent field as absent, not as empty content", () => {
+		const evaluation = evaluateIntakeDecision(
+			block((l, v) => `- ${l}: ${v}`).replace(/^- Owner:.*\n/m, ""),
+		);
+		expect(evaluation).toEqual({
+			ok: false,
+			reason: "missing-field",
+			field: "Owner",
+		});
+		const message = formatIntakeDecisionBlock({
+			evaluation: evaluation as Exclude<typeof evaluation, { ok: true }>,
+			headers: DEFAULT_INTAKE_SECTION_HEADERS,
+		});
+		expect(message).toContain('missing the "Owner" field');
+		expect(message).toContain("no line records it");
+	});
+
+	it("reports an unreadable field line as a formatting mismatch", () => {
+		const evaluation = evaluateIntakeDecision(
+			block((l, v) => `- ${l}: ${v}`).replace(
+				"- Owner: Customer Support internal documentation",
+				"- Owner — Customer Support internal documentation",
+			),
+		);
+		expect(evaluation).toEqual({
+			ok: false,
+			reason: "unparsed-field",
+			field: "Owner",
+			line: "- Owner — Customer Support internal documentation",
+		});
+		const message = formatIntakeDecisionBlock({
+			evaluation: evaluation as Exclude<typeof evaluation, { ok: true }>,
+			headers: DEFAULT_INTAKE_SECTION_HEADERS,
+		});
+		expect(message).toContain("formatting mismatch, not missing content");
+		expect(message).toContain("- Owner — Customer Support internal");
+		expect(message).not.toContain("is empty");
+	});
+
+	it.each([
+		["a plain label", "- Owner:"],
+		["a bolded label", "* **Owner:**"],
+	])("reports empty content under %s as empty", (_name, replacement) => {
+		const evaluation = evaluateIntakeDecision(
+			block((l, v) => `- ${l}: ${v}`).replace(
+				"- Owner: Customer Support internal documentation",
+				replacement,
+			),
+		);
+		expect(evaluation).toEqual({
+			ok: false,
+			reason: "invalid-field",
+			field: "Owner",
+			problem: "empty",
+			value: "",
+		});
+		const message = formatIntakeDecisionBlock({
+			evaluation: evaluation as Exclude<typeof evaluation, { ok: true }>,
+			headers: DEFAULT_INTAKE_SECTION_HEADERS,
+		});
+		expect(message).toContain(
+			'The intake field "Owner" parsed, but has no content after the label.',
+		);
+	});
+
+	it("quotes a present-but-unjudged value instead of calling it empty", () => {
+		const evaluation = evaluateIntakeDecision(
+			block((l, v) => `- **${l}:** ${v}`).replace(
+				"Yes — support cannot find the current procedure",
+				"probably, we should discuss it",
+			),
+		);
+		expect(evaluation).toEqual({
+			ok: false,
+			reason: "invalid-field",
+			field: "Needed",
+			problem: "no-judgment",
+			value: "probably, we should discuss it",
+		});
+		const message = formatIntakeDecisionBlock({
+			evaluation: evaluation as Exclude<typeof evaluation, { ok: true }>,
+			headers: DEFAULT_INTAKE_SECTION_HEADERS,
+		});
+		expect(message).toContain('reads "probably, we should discuss it"');
+		expect(message).toContain('not an explicit "Yes — <reason>" judgment');
+	});
+
+	it("still rejects a non-PROCEED decision written with a bolded label", () => {
+		expect(
+			evaluateIntakeDecision(
+				block((l, v) => `* **${l}:** ${v}`).replace(
+					"**Decision:** PROCEED",
+					"**Decision:** REJECT",
+				),
+			),
+		).toEqual({ ok: false, reason: "not-proceeding", decision: "REJECT" });
+	});
+
+	it("still rejects a bolded duplicate field", () => {
+		expect(
+			evaluateIntakeDecision(
+				`${block((l, v) => `- ${l}: ${v}`)}\n* **Decision:** REJECT`,
+			),
+		).toEqual({ ok: false, reason: "duplicate-field", field: "Decision" });
+	});
+
+	it("still rejects bolded fields written out of order", () => {
+		const swapped = block((l, v) => `* **${l}:** ${v}`).replace(
+			/\* \*\*Existing work:\*\*.*\n\* \*\*Owner:\*\*.*\n/,
+			"* **Owner:** Customer Support docs\n* **Existing work:** No duplicate — searched docs\n",
+		);
+		expect(evaluateIntakeDecision(swapped)).toEqual({
+			ok: false,
+			reason: "out-of-order",
+			field: "Owner",
+		});
+	});
+
+	it("does not treat prose that merely mentions a label as a field", () => {
+		const prose = `## Intake decision\nThe owner question: we discussed it at length.\n${FIELDS.map(
+			([label, value]) => `- ${label}: ${value}`,
+		).join("\n")}`;
+		expect(evaluateIntakeDecision(prose)).toEqual({
+			ok: true,
+			header: "Intake decision",
 		});
 	});
 });

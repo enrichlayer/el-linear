@@ -438,6 +438,23 @@ that they appear in this exact order:
 `Placement` reject empty and placeholder values such as `TBD`. Only `PROCEED`
 creates an issue; rejected work should not become backlog by default.
 
+**Accepted formatting.** Only the label text and its colon are load-bearing —
+any list marker (`-`, `*`, `+`, `1.`) or none at all works, and the label may be
+bolded or italicized with the colon inside or outside the emphasis. These are
+all read the same way:
+
+```markdown
+- Needed: Yes — <reason>
+* **Needed:** Yes — <reason>
+- **Needed**: Yes — <reason>
+1. _Needed_: Yes — <reason>
+```
+
+When a field does fail, the message names which failure it is — a line that
+could not be read as `Label: value` (a formatting mismatch), an absent field, an
+empty value, a placeholder, or a value that is present but is not an explicit
+`Yes — <reason>` judgment — so the remedy matches the actual problem.
+
 Two modes (default off):
 
 ```json
