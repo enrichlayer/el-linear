@@ -22,6 +22,23 @@ project adheres to [Semantic Versioning](https://semver.org/).
 * **quality:** restore a clean full-repository lint baseline (DEV-6142)
 * **labels:** resolve `labels create --team` keys and names before creating the label (DEV-5749)
 
+## [1.44.0](https://github.com/enrichlayer/el-linear/compare/v1.43.1...v1.44.0) (2026-07-30)
+
+
+### Features
+
+* **profile:** add repo-aware workspace pinning ([#282](https://github.com/enrichlayer/el-linear/issues/282)) ([635360a](https://github.com/enrichlayer/el-linear/commit/635360a0954e15785b47601fce56f78a553e4721))
+* **projects:** add --status to projects update (DEV-7021) ([#279](https://github.com/enrichlayer/el-linear/issues/279)) ([d693548](https://github.com/enrichlayer/el-linear/commit/d6935481ee2b74c4fa2252c4a6220fba58b5c176))
+
+
+### Bug Fixes
+
+* **comments:** fail loudly when `comments list --body` has nothing to print (DEV-7160) ([#281](https://github.com/enrichlayer/el-linear/issues/281)) ([99bde7c](https://github.com/enrichlayer/el-linear/commit/99bde7c0a70de42c6103ad524e7a485601c758fc))
+* **config:** tolerate bolded intake-decision labels and report the real parse failure (DEV-7074) ([#278](https://github.com/enrichlayer/el-linear/issues/278)) ([058dbf6](https://github.com/enrichlayer/el-linear/commit/058dbf628290212a1d5d6bc510218a9395db19a6))
+* **deps:** bump @linear/sdk from 86.0.0 to 87.0.0 ([#277](https://github.com/enrichlayer/el-linear/issues/277)) ([7b483f8](https://github.com/enrichlayer/el-linear/commit/7b483f8e0ea1186eca2698d19e374d99456cbed1))
+* **lint:** restore biome 2.5.3 baseline in test files (DEV-7139) ([#280](https://github.com/enrichlayer/el-linear/issues/280)) ([f36bb22](https://github.com/enrichlayer/el-linear/commit/f36bb224ae123c711e69e0ccbb840e2a36646881))
+* make profile-pin XDG tests hermetic (DEV-7324) ([#284](https://github.com/enrichlayer/el-linear/issues/284)) ([cd0281e](https://github.com/enrichlayer/el-linear/commit/cd0281e96ac2291e72f4a88f5f0fde24846fe1df))
+
 ## [1.43.1](https://github.com/enrichlayer/el-linear/compare/v1.43.0...v1.43.1) (2026-07-19)
 
 
