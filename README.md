@@ -764,6 +764,15 @@ el-linear comments list DEV-123 --body
 # Full comment body...
 ```
 
+Both `--body` surfaces treat "no text to print" as a failure rather than an
+empty success, so a caller never has to guess whether silence meant "nothing is
+there" or "the fetch silently dropped it": `comments read --body` exits 1 when
+the comment has no body, and `comments list --body` exits 1 with
+`el-linear: DEV-123 has no comments` (or `… has N comments, none with a body`)
+and writes nothing to stdout. The structured surfaces need no such signal and
+stay exit 0 — `--format summary` prints `(no results)` and the JSON envelope
+carries `meta.count`.
+
 ### One-line write confirmations: `-q, --quiet`
 
 `issues create|update`, `issues relate`, and `comments create|update` accept

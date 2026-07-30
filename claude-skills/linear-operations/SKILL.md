@@ -121,6 +121,14 @@ el-linear comments list DEV-123 --format json 2>&1 | python3 -c "import json,sys
 `#comment-<hash>`. `comments list --format summary` includes each comment id
 so you can copy it straight into `comments read`.
 
+Empty output from a `--body` surface is never a silent success. `comments list
+--body` exits 1 with `el-linear: DEV-123 has no comments` on stderr when the
+issue has none (and `… has N comments, none with a body` when every body came
+back blank), matching `comments read --body`'s guard — so "no comments" stays
+distinguishable from "the fetch silently dropped the list". `--format summary`
+(`(no results)`) and the JSON envelope (`meta.count`) report emptiness in band
+and stay exit 0.
+
 ### Attachment reads and downloads
 
 List attachments first, then use the attachment ID or exact title. Text files
