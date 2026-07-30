@@ -46,6 +46,7 @@ import { outputSuccess } from "../utils/output.js";
 import { runProfilePin, runProfileUnpin } from "./profile.js";
 
 const realTmp = require("node:os").tmpdir() as string;
+const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
 let repoDir = "";
 let originalCwd = "";
 
@@ -60,6 +61,7 @@ function gitInitRepo(dir: string, origin: string | null): void {
 
 beforeEach(async () => {
 	originalCwd = process.cwd();
+	delete process.env.XDG_CONFIG_HOME;
 	await fs.rm(TEST_HOME, { recursive: true, force: true });
 	await fs.mkdir(TEST_HOME, { recursive: true });
 	repoDir = await fs.mkdtemp(path.join(realTmp, "el-linear-pin-repo-"));
@@ -72,6 +74,11 @@ beforeEach(async () => {
 
 afterEach(async () => {
 	process.chdir(originalCwd);
+	if (originalXdgConfigHome === undefined) {
+		delete process.env.XDG_CONFIG_HOME;
+	} else {
+		process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
+	}
 	await fs.rm(repoDir, { recursive: true, force: true });
 	await fs.rm(TEST_HOME, { recursive: true, force: true });
 });
@@ -127,6 +134,18 @@ describe("runProfilePin — global", () => {
 			"el-git",
 			"linear-profiles.json",
 		);
+		expect(JSON.parse(await fs.readFile(file, "utf8"))).toEqual({
+			profiles: { "enrichlayer/el-linear": "work" },
+		});
+	});
+
+	it("honors XDG_CONFIG_HOME instead of the home-directory fallback", async () => {
+		const xdgConfigHome = path.join(TEST_HOME, "xdg");
+		process.env.XDG_CONFIG_HOME = xdgConfigHome;
+
+		await runProfilePin("work", { global: true });
+
+		const file = path.join(xdgConfigHome, "el-git", "linear-profiles.json");
 		expect(JSON.parse(await fs.readFile(file, "utf8"))).toEqual({
 			profiles: { "enrichlayer/el-linear": "work" },
 		});
