@@ -146,6 +146,12 @@ export const UPDATE_PROJECT_FIELDS_MUTATION = `
         name
         description
         content
+        status {
+          id
+          name
+        }
+        progress
+        url
         teams {
           nodes {
             id

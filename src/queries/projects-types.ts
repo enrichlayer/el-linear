@@ -82,6 +82,12 @@ export interface UpdateProjectResponse {
 interface ProjectUpdateFieldsNode extends ProjectBaseNode {
 	description: string | null;
 	content: string | null;
+	// `status` (not the deprecated `state` scalar) — the workspace's actual
+	// configured ProjectStatus, matching what `--status <name>` resolves
+	// against (DEV-7021).
+	status?: { id: string; name: string };
+	progress: number;
+	url: string;
 }
 
 export interface UpdateProjectFieldsResponse {

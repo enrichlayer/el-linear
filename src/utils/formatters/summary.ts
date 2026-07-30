@@ -1537,6 +1537,13 @@ export function formatLine(payload: unknown): string {
 	if (kind === "comment" && obj) {
 		return `comment ${s(obj.id)}`;
 	}
+	if (kind === "project" && obj) {
+		// `projects update` (DEV-7021) is the current producer of a "project"
+		// quiet line; it carries the resolved `status` name. Other project
+		// payloads (read/list) carry the deprecated `state` scalar instead —
+		// fall back to that so this line degrades gracefully if reused.
+		return `${s(obj.name)}  ${s(obj.status ?? obj.state)}  ${s(obj.url)}`;
+	}
 	if (kind === "project-update" && obj) {
 		// create doesn't carry an identifier/title — health + url are the
 		// stable handles a caller needs (matches the summary header style).

@@ -385,6 +385,11 @@ function flattenProjectUpdate(
 		name: updatedProject.name,
 		description: updatedProject.description ?? undefined,
 		content: updatedProject.content ?? undefined,
+		// `?.` guards test fixtures/older callers whose mocked response omits
+		// the field — real API responses always carry it.
+		status: updatedProject.status?.name,
+		progress: updatedProject.progress,
+		url: updatedProject.url,
 		teams: updatedProject.teams.nodes.map((t) => ({
 			id: t.id,
 			key: t.key,
@@ -741,10 +746,14 @@ async function handleUpdateProject(
 	if (content !== undefined) {
 		input.content = content;
 	}
+	// --status resolves through a name lookup (network), unlike the other
+	// flags above — checked here only for the "nothing to update" guard so a
+	// bare `--status` still counts as work to do before we've made any calls.
+	const hasStatus = hasOption(options, "status");
 
-	if (Object.keys(input).length === 0) {
+	if (Object.keys(input).length === 0 && !hasStatus) {
 		throw new Error(
-			"Nothing to update. Pass at least one of --name, --description, --content, or --content-file.",
+			"Nothing to update. Pass at least one of --name, --description, --content, --content-file, or --status.",
 		);
 	}
 
@@ -752,6 +761,16 @@ async function handleUpdateProject(
 	const graphQLService = await createGraphQLService(rootOpts);
 	const linearService = await createLinearService(rootOpts);
 	const projectId = await linearService.resolveProjectId(projectNameOrId);
+	if (hasStatus) {
+		// DEV-7021: resolves the workspace's configured project statuses by
+		// name (case-insensitive) and throws a "Project status ... not found"
+		// error listing the valid names on a miss — see
+		// `LinearService.resolveProjectStatusId` for why this can't be a
+		// static enum the way `VALID_PROJECT_STATES` is.
+		input.statusId = await linearService.resolveProjectStatusId(
+			options.status as string,
+		);
+	}
 
 	const updateResult =
 		await graphQLService.rawRequest<UpdateProjectFieldsResponse>(
@@ -810,7 +829,9 @@ export function setupProjectsCommands(program: Command): void {
 
 	projects
 		.command("update <project>")
-		.description("Update project name, short description, or markdown content")
+		.description(
+			"Update project name, short description, markdown content, or status",
+		)
 		.option("--name <name>", "project name")
 		.option(
 			"-d, --description <text>",
@@ -823,6 +844,14 @@ export function setupProjectsCommands(program: Command): void {
 		.option(
 			"--content-file <path>",
 			"read the markdown body from a file (or '-' for stdin); mutually exclusive with --content",
+		)
+		.option(
+			"--status <name>",
+			"project status name (case-insensitive; workspace-configured, e.g. Backlog, Planned, In Progress, Completed, Canceled) — lists valid statuses on a miss",
+		)
+		.option(
+			"-q, --quiet",
+			"print one confirmation line (name, status, url) instead of the full JSON",
 		)
 		.action(handleAsyncCommand(handleUpdateProject));
 

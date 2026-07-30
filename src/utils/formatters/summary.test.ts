@@ -761,6 +761,17 @@ describe("inferKindFromPayload", () => {
 		).toBe("project");
 	});
 
+	it("identifies a project via name+progress+teams even without state (projects update --status shape, DEV-7021)", () => {
+		expect(
+			inferKindFromPayload({
+				name: "x",
+				progress: 0,
+				status: "In Progress",
+				teams: [{ id: "t1", key: "DEV", name: "Dev" }],
+			}),
+		).toBe("project");
+	});
+
 	it("identifies a comment by body+createdAt+user", () => {
 		expect(
 			inferKindFromPayload({
@@ -1136,6 +1147,32 @@ describe("formatLine (--quiet write confirmation, DEV-4650)", () => {
 			createdAt: "2026-01-01T00:00:00Z",
 		});
 		expect(out).toBe("comment c-123");
+	});
+
+	it("renders a project as NAME  STATUS  URL on one line (projects update --status, DEV-7021)", () => {
+		const out = formatLine({
+			id: "p-1",
+			name: "Launch v2",
+			progress: 0.4,
+			status: "In Progress",
+			url: "https://linear.app/acme/project/launch-v2-abc123",
+			teams: [{ id: "t1", key: "DEV", name: "Dev" }],
+		});
+		expect(out).toBe(
+			"Launch v2  In Progress  https://linear.app/acme/project/launch-v2-abc123",
+		);
+		expect(out).not.toContain("\n");
+	});
+
+	it("falls back to the legacy state scalar when a project payload has no status", () => {
+		const out = formatLine({
+			id: "p-2",
+			name: "Legacy Project",
+			progress: 0.1,
+			state: "started",
+			teams: [{ id: "t1", key: "DEV", name: "Dev" }],
+		});
+		expect(out).toBe("Legacy Project  started  —");
 	});
 
 	it("passes through extra envelope keys without breaking issue detection", () => {

@@ -9,6 +9,7 @@ const mockWorkflowStates = vi.fn();
 const mockCycles = vi.fn();
 const mockCycle = vi.fn();
 const mockProjects = vi.fn();
+const mockProjectStatuses = vi.fn();
 const mockIssueLabels = vi.fn();
 const mockIssueLabel = vi.fn();
 const mockCreateComment = vi.fn();
@@ -24,6 +25,7 @@ vi.mock("@linear/sdk", () => ({
 		cycles = mockCycles;
 		cycle = mockCycle;
 		projects = mockProjects;
+		projectStatuses = mockProjectStatuses;
 		issueLabels = mockIssueLabels;
 		issueLabel = mockIssueLabel;
 		createComment = mockCreateComment;
@@ -354,6 +356,57 @@ describe("LinearService", () => {
 					service.resolveProjectId("Nonexistent", "DEV"),
 				).rejects.toThrow('Project "Nonexistent" on team "DEV" not found.');
 			});
+		});
+	});
+
+	describe("resolveProjectStatusId", () => {
+		const workspaceStatuses = {
+			nodes: [
+				{ id: "backlog-uuid", name: "Backlog", type: "backlog" },
+				{ id: "planned-uuid", name: "Planned", type: "planned" },
+				{ id: "started-uuid", name: "In Progress", type: "started" },
+				{ id: "completed-uuid", name: "Completed", type: "completed" },
+				{ id: "canceled-uuid", name: "Canceled", type: "canceled" },
+			],
+		};
+
+		it("returns UUID directly without an API call", async () => {
+			const service = new LinearService({ apiKey: "token" });
+			const result = await service.resolveProjectStatusId(
+				"f47ac10b-58cc-4372-a567-0e02b2c3d479",
+			);
+			expect(result).toBe("f47ac10b-58cc-4372-a567-0e02b2c3d479");
+			expect(mockProjectStatuses).not.toHaveBeenCalled();
+		});
+
+		it("resolves by exact name", async () => {
+			mockProjectStatuses.mockResolvedValue(workspaceStatuses);
+			const service = new LinearService({ apiKey: "token" });
+			const result = await service.resolveProjectStatusId("Completed");
+			expect(result).toBe("completed-uuid");
+		});
+
+		it("resolves case-insensitively", async () => {
+			mockProjectStatuses.mockResolvedValue(workspaceStatuses);
+			const service = new LinearService({ apiKey: "token" });
+			const result = await service.resolveProjectStatusId("in progress");
+			expect(result).toBe("started-uuid");
+		});
+
+		it("throws when the status is not found and lists the workspace's valid statuses", async () => {
+			mockProjectStatuses.mockResolvedValue(workspaceStatuses);
+			const service = new LinearService({ apiKey: "token" });
+			// "Paused" is the natural word to reach for, but this workspace's
+			// configured set has no status of that name (DEV-7021's motivating trap).
+			// Substring match (not exact-string) mirrors resolveTeamId's sibling
+			// "Available teams:" assertion — notFoundError's exact whitespace
+			// between "not found." and the hint is an implementation detail.
+			await expect(service.resolveProjectStatusId("Paused")).rejects.toThrow(
+				'Project status "Paused"',
+			);
+			await expect(service.resolveProjectStatusId("Paused")).rejects.toThrow(
+				"Available statuses: Backlog, Planned, In Progress, Completed, Canceled",
+			);
 		});
 	});
 

@@ -731,6 +731,42 @@ export class LinearService {
 	}
 
 	/**
+	 * Resolve a `--status` value on `projects update` to a `ProjectStatus` id
+	 * (DEV-7021). Project statuses are a workspace-configurable set (Linear
+	 * Settings → Workflow → Projects) — there is no fixed enum to validate
+	 * against client-side, unlike `VALID_PROJECT_STATES` in `commands/projects.ts`
+	 * (which enumerates the *type* group, not the individual named statuses).
+	 * `client.projectStatuses()` has no server-side name filter, so we fetch the
+	 * workspace's full set (small in practice — a handful of statuses) and match
+	 * case-insensitively. On a miss, list the workspace's actual status names
+	 * rather than surfacing Linear's raw `statusId` mutation error, which names
+	 * the *type* (e.g. "paused") instead of a status a caller could have typed.
+	 *
+	 * Mirrors `resolveTeamId`'s not-found shape (`Available teams: ...`) rather
+	 * than `resolveStatusId`'s (which omits the list) — this is the "workspace-
+	 * configurable set with candidates on a miss" precedent to follow.
+	 */
+	async resolveProjectStatusId(statusName: string): Promise<string> {
+		if (isUuid(statusName)) {
+			return statusName;
+		}
+		const statuses = await this.client.projectStatuses({ first: 250 });
+		const match = statuses.nodes.find(
+			(s) => s.name.toLowerCase() === statusName.toLowerCase(),
+		);
+		if (!match) {
+			const available = statuses.nodes.map((s) => s.name);
+			throw notFoundError(
+				"Project status",
+				statusName,
+				undefined,
+				`\n  Available statuses: ${available.join(", ")}`,
+			);
+		}
+		return match.id;
+	}
+
+	/**
 	 * Normalize a user-supplied project input to a UUID when the input is
 	 * a URL or slug-id form. Pass-through for UUIDs and plain names — the
 	 * latter stays a name so downstream batch-resolve queries can fold the
