@@ -154,8 +154,8 @@ function normalizeFieldValue(raw: string, labelOpensEmphasis: boolean): string {
 /**
  * The value with inline emphasis removed, used for the SEMANTIC checks only.
  * `- Decision: **PROCEED**` and `- Needed: **Yes** — …` are the same judgments
- * as their unemphasized forms; the un-stripped value is what gets reported
- * back so the author sees what they actually wrote.
+ * as their unemphasized forms. Diagnostics report the parsed value, which
+ * normalizes a whole-value wrapper but preserves emphasis within longer prose.
  */
 function withoutEmphasis(value: string): string {
 	let normalized = value;
@@ -210,9 +210,8 @@ function classifyValue(
 			? "placeholder-reason"
 			: null;
 	}
-	// Length is measured on the value as written — `withoutEmphasis` also drops
-	// underscores that are part of a path or identifier, which must not count
-	// against a legitimate answer.
+	// Measure the parsed value rather than the semantic probe so removing inline
+	// emphasis markers cannot make substantive content look artificially short.
 	if (value.length < 3 || NON_SPECIFIC.test(probe)) return "non-specific";
 	return null;
 }
