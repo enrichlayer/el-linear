@@ -49,17 +49,19 @@ const biome = JSON.parse(
 ) as { files: { includes: string[] } };
 
 describe("scan excludes (DEV-5944, DEV-6206)", () => {
-	it.each(
-		SCAN_EXCLUDED_DIRS,
-	)("vitest excludes %s/ so foreign checkouts are not collected", (dir) => {
-		expect(vitestConfig.test?.exclude).toContain(`${dir}/**`);
-	});
+	it.each(SCAN_EXCLUDED_DIRS)(
+		"vitest excludes %s/ so foreign checkouts are not collected",
+		(dir) => {
+			expect(vitestConfig.test?.exclude).toContain(`${dir}/**`);
+		},
+	);
 
-	it.each(
-		SCAN_EXCLUDED_DIRS,
-	)("biome excludes %s/ so the scan cannot leave the repo", (dir) => {
-		expect(biome.files.includes).toContain(`!${dir}`);
-	});
+	it.each(SCAN_EXCLUDED_DIRS)(
+		"biome excludes %s/ so the scan cannot leave the repo",
+		(dir) => {
+			expect(biome.files.includes).toContain(`!${dir}`);
+		},
+	);
 
 	// The load-bearing premise of every exclude above is that these dirs hold NO
 	// TRACKED SOURCE — they are gitignored scratch space. If that ever stops being
@@ -67,20 +69,21 @@ describe("scan excludes (DEV-5944, DEV-6206)", () => {
 	// "skip the noise" into "silently skip real code": those files would be
 	// neither tested nor linted, and nothing would say so. The excludes are only safe
 	// BECAUSE of .gitignore, so assert the thing they depend on.
-	it.each(
-		SCAN_EXCLUDED_DIRS,
-	)("%s/ is gitignored — which is the only reason excluding it is safe", (dir) => {
-		const gitignore = readFileSync(join(repoRoot, ".gitignore"), "utf8")
-			.split("\n")
-			.map((line) => line.trim());
+	it.each(SCAN_EXCLUDED_DIRS)(
+		"%s/ is gitignored — which is the only reason excluding it is safe",
+		(dir) => {
+			const gitignore = readFileSync(join(repoRoot, ".gitignore"), "utf8")
+				.split("\n")
+				.map((line) => line.trim());
 
-		expect(
-			gitignore,
-			`${dir}/ is excluded from vitest + biome but is NOT gitignored — tracked source ` +
-				`under it would be silently unlinted and untested. Either gitignore it, or stop ` +
-				`excluding it from the scanners.`,
-		).toContain(`${dir}/`);
-	});
+			expect(
+				gitignore,
+				`${dir}/ is excluded from vitest + biome but is NOT gitignored — tracked source ` +
+					`under it would be silently unlinted and untested. Either gitignore it, or stop ` +
+					`excluding it from the scanners.`,
+			).toContain(`${dir}/`);
+		},
+	);
 
 	// The assertions above are string-matching on config. They prove `!.agents` is
 	// PRESENT; they cannot prove it WORKS — biome's `files.includes` glob semantics

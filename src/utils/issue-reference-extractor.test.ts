@@ -354,16 +354,14 @@ describe("composition: wrap → extract pipeline (DEV-3606 regression guard)", (
 		},
 	];
 
-	it.each(
-		cases,
-	)("$label keyword: pre-wrap text infers $expectedType correctly", ({
-		text,
-		expectedType,
-	}) => {
-		const refs = extractIssueReferences(text);
-		expect(refs).toHaveLength(1);
-		expect(refs[0].type).toBe(expectedType);
-	});
+	it.each(cases)(
+		"$label keyword: pre-wrap text infers $expectedType correctly",
+		({ text, expectedType }) => {
+			const refs = extractIssueReferences(text);
+			expect(refs).toHaveLength(1);
+			expect(refs[0].type).toBe(expectedType);
+		},
+	);
 
 	it("post-wrap text yields no extraction at all (markdown links are protected)", () => {
 		// Pre-fix behaviour: the wrap step inserted `[` before the

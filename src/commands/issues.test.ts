@@ -498,25 +498,25 @@ describe("issues commands", () => {
 			expect(mockOutputSuccess).toHaveBeenCalledWith(issueData);
 		});
 
-		it.each([
-			"issues",
-			"issue",
-		])("prints raw body through the %s read route", async (commandName) => {
-			const issueData = {
-				id: "uuid-1",
-				identifier: "DEV-123",
-				title: "My issue",
-				description: "## Done when\n\nShip it.",
-			};
-			mockGetIssueById.mockResolvedValue(issueData);
+		it.each(["issues", "issue"])(
+			"prints raw body through the %s read route",
+			async (commandName) => {
+				const issueData = {
+					id: "uuid-1",
+					identifier: "DEV-123",
+					title: "My issue",
+					description: "## Done when\n\nShip it.",
+				};
+				mockGetIssueById.mockResolvedValue(issueData);
 
-			const program = createTestProgram();
-			setupIssuesCommands(program);
-			await runCommand(program, [commandName, "read", "DEV-123", "--body"]);
+				const program = createTestProgram();
+				setupIssuesCommands(program);
+				await runCommand(program, [commandName, "read", "DEV-123", "--body"]);
 
-			expect(stdoutSpy).toHaveBeenCalledWith(`${issueData.description}\n`);
-			expect(mockOutputSuccess).not.toHaveBeenCalled();
-		});
+				expect(stdoutSpy).toHaveBeenCalledWith(`${issueData.description}\n`);
+				expect(mockOutputSuccess).not.toHaveBeenCalled();
+			},
+		);
 
 		it("preserves read-option mutual exclusion on the nested route", async () => {
 			mockGetIssueById.mockResolvedValue({
