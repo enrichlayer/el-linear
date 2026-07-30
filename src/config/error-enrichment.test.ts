@@ -301,28 +301,31 @@ describe("enrichValidationErrors", () => {
 		// type label. The team-scoped inference resolves the verb to the team's
 		// canonical type rather than the workspace default.
 		["Research GraphQL caching options", "research", "Research"],
-	])("infers type label from leading verb for title %s", async (title, expectedType, expectedVerb) => {
-		const result: ValidationResult = {
-			errors: ["Missing --labels. ..."],
-			warnings: [],
-			normalizedLabels: null,
-		};
-		const services = makeServices({
-			id: "team-dev-uuid",
-			key: "DEV",
-			name: "Dev",
-			labels: { nodes: labelsPayload(["bug", "feature", "backend"]) },
-		});
-		await enrichValidationErrors(
-			result,
-			{ team: "DEV", title },
-			asServices(services),
-		);
-		expect(result.errors[0]).toContain(
-			`Inferred from title: type label "${expectedType}"`,
-		);
-		expect(result.errors[0]).toContain(`title starts with "${expectedVerb}"`);
-	});
+	])(
+		"infers type label from leading verb for title %s",
+		async (title, expectedType, expectedVerb) => {
+			const result: ValidationResult = {
+				errors: ["Missing --labels. ..."],
+				warnings: [],
+				normalizedLabels: null,
+			};
+			const services = makeServices({
+				id: "team-dev-uuid",
+				key: "DEV",
+				name: "Dev",
+				labels: { nodes: labelsPayload(["bug", "feature", "backend"]) },
+			});
+			await enrichValidationErrors(
+				result,
+				{ team: "DEV", title },
+				asServices(services),
+			);
+			expect(result.errors[0]).toContain(
+				`Inferred from title: type label "${expectedType}"`,
+			);
+			expect(result.errors[0]).toContain(`title starts with "${expectedVerb}"`);
+		},
+	);
 
 	it("does not add inference hint when title verb is not recognized", async () => {
 		const result: ValidationResult = {

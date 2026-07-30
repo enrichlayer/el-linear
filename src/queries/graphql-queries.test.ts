@@ -276,12 +276,13 @@ function findConnectionFieldsWithoutNodes(
 }
 
 describe("GraphQL query validation", () => {
-	it.each(
-		ALL_QUERIES,
-	)("%s: connection fields use nodes wrapper", (name, query) => {
-		const violations = findConnectionFieldsWithoutNodes(name, query);
-		expect(violations).toEqual([]);
-	});
+	it.each(ALL_QUERIES)(
+		"%s: connection fields use nodes wrapper",
+		(name, query) => {
+			const violations = findConnectionFieldsWithoutNodes(name, query);
+			expect(violations).toEqual([]);
+		},
+	);
 
 	it("all queries parse without errors", () => {
 		for (const [name, query] of ALL_QUERIES) {
