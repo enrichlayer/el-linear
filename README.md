@@ -145,6 +145,33 @@ EL_LINEAR_PROFILE=forage el-linear teams list
 el-linear profile remove old-profile
 ```
 
+### Recommended for multiple workspaces: pin the repo
+
+If you work across several workspaces, **pin each repo to the profile it belongs to** instead of relying on `profile use`. A pin is scoped to the repo, so a write in that repo always targets the right workspace no matter what the machine-global default happens to be.
+
+```bash
+# In a repo, pin it to the profile it belongs to (defaults to the active one):
+el-linear profile pin forage
+
+# Show the resolved pin + where it came from:
+el-linear profile pin --show
+
+# Pin this exact origin owner/repo in your global user config instead:
+el-linear profile pin work --global
+
+# Remove the repo-local pin:
+el-linear profile unpin
+
+# Remove this repo's exact owner/repo entry from the global user config:
+el-linear profile unpin --global
+```
+
+A repo-local pin is stored in `.el-git.json` at the repo root as `{ "linearProfile": "<name>" }`. el-linear, el-git, and el-session read the same file and resolve the repo to the same workspace.
+
+`--global` writes the exact origin `owner/repo` entry into `~/.config/el-git/linear-profiles.json`; the resolver also honors manually configured `owner/*` wildcard entries. The repo-local file wins over the global table.
+
+When a write command (`issues create` / `comments create`) runs under the bare machine-global default in a repo with no effective pin, el-linear prints a one-line, non-blocking stderr hint suggesting `profile pin`. Silence it with `EL_LINEAR_NO_PIN_HINT=1` (or `--quiet`).
+
 Fix or clean up a single member's aliases/handles without hand-editing
 `config.json` — `profile members` operates directly on the active profile's
 on-disk config (no Linear API round-trip):
@@ -164,8 +191,11 @@ The active profile is selected by, in priority:
 
 1. `--profile <name>` flag (per-invocation)
 2. `EL_LINEAR_PROFILE` env var
-3. `~/.config/el-linear/active-profile` (one-line marker, written by `profile use`)
-4. Legacy single-file layout (`~/.config/el-linear/{token,config.json}`)
+3. **Repo pin** — `.el-git.json` at the repo root, else the `owner/repo` /
+   `owner/*` entry in `~/.config/el-git/linear-profiles.json` (see
+   [Recommended for multiple workspaces](#recommended-for-multiple-workspaces-pin-the-repo))
+4. `~/.config/el-linear/active-profile` (one-line marker, written by `profile use`)
+5. Legacy single-file layout (`~/.config/el-linear/{token,config.json}`)
 
 The legacy fallback means **existing single-profile users see no
 behavior change** — profiles are purely opt-in.
@@ -180,7 +210,10 @@ flag and env var are per-invocation and never touch the marker file, so they
 compose safely with any number of concurrent sessions each pinned to their
 own workspace. Reserve `profile use` for a human's own interactive default
 switch; `profile use`/`profile add` print a loud warning when they change the
-global marker so the blast radius is visible instead of silent.
+global marker so the blast radius is visible instead of silent. Better still
+for a human who works across workspaces: **`profile pin` each repo** (above) —
+the pin sits above the global marker in the precedence list, so the right
+workspace is selected automatically per-repo without any per-command flag.
 
 ## Migrating from v1.0–1.3
 

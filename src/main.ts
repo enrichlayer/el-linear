@@ -29,7 +29,11 @@ import { setupSearchCommands } from "./commands/search.js";
 import { setupTeamsCommands } from "./commands/teams.js";
 import { setupTemplatesCommands } from "./commands/templates.js";
 import { setupUsersCommands } from "./commands/users.js";
-import { setActiveProfileForSession } from "./config/paths.js";
+import {
+	isSafeProfileName,
+	setActiveProfileForSession,
+} from "./config/paths.js";
+import { resolveRepoLinearProfile } from "./config/repo-profile.js";
 import { initCliSentry } from "./sentry.js";
 import { logger } from "./utils/logger.js";
 import { applyIpv4Preference } from "./utils/network-preference.js";
@@ -83,7 +87,7 @@ program
 	.option("--api-token <token>", "Linear API token")
 	.option(
 		"--profile <name>",
-		"named profile (under ~/.config/el-linear/profiles/<name>/) for this invocation. Overrides EL_LINEAR_PROFILE env + the on-disk active-profile marker.",
+		"named profile (under ~/.config/el-linear/profiles/<name>/) for this invocation. Overrides EL_LINEAR_PROFILE, repo pins, and the on-disk active-profile marker.",
 	)
 	.option("--json", "output as JSON (default, accepted for compatibility)")
 	.option(
@@ -169,6 +173,25 @@ program.hook("preAction", (_thisCommand: Command, actionCommand: Command) => {
 	// right profile's token + config.
 	if (rootOpts.profile) {
 		setActiveProfileForSession(rootOpts.profile);
+	} else if (!process.env.EL_LINEAR_PROFILE?.trim()) {
+		// Repo pin (DEV-7277) slots BELOW --profile / $EL_LINEAR_PROFILE and
+		// ABOVE the machine-global active-profile marker. It is applied here,
+		// not inside the pure resolveActiveProfile, because reading it shells out
+		// to git. Setting the session override when a repo pin exists makes the
+		// rest of the run — token + config load — target the repo's workspace
+		// instead of whatever the global marker last selected.
+		//
+		// Fail-open: an unsafe/foreign name in an untrusted repo's `.el-git.json`
+		// is ignored rather than thrown, so a bad pin can never brick every
+		// command run inside that repo. Any resolution error is swallowed too.
+		try {
+			const pin = resolveRepoLinearProfile();
+			if (pin && isSafeProfileName(pin.profile)) {
+				setActiveProfileForSession(pin.profile);
+			}
+		} catch {
+			// Repo-pin resolution must never break a command.
+		}
 	}
 });
 

@@ -25,8 +25,9 @@ binary via named **profiles**. A profile is a directory under
 
 1. `--profile <name>` flag (per-invocation override)
 2. `EL_LINEAR_PROFILE` env var
-3. `~/.config/el-linear/active-profile` (single-line marker file)
-4. Legacy single-file paths (`~/.config/el-linear/{token,config.json}`)
+3. Repo pin (`.el-git.json`, then the user-level `owner/repo` mapping)
+4. `~/.config/el-linear/active-profile` (single-line marker file)
+5. Legacy single-file paths (`~/.config/el-linear/{token,config.json}`)
 
 The legacy fallback means existing single-profile users see no
 behavior change — multi-profile is purely opt-in.
@@ -52,7 +53,7 @@ radius isn't silent.
   paths, so `el-linear init` (and every `init <step>`) writes to the
   right place automatically.
 
-**Subcommands:** `el-linear profile {list,current,use,add,remove}`
+**Subcommands:** `el-linear profile {list,current,use,add,remove,pin,unpin}`
 (see `src/commands/profile.ts`).
 
 ## Conventions
