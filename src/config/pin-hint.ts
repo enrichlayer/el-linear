@@ -15,7 +15,7 @@
  */
 
 import { getQuietMode } from "../utils/output.js";
-import { readActiveProfileMarker } from "./paths.js";
+import { isSafeProfileName, readActiveProfileMarker } from "./paths.js";
 import {
 	type RepoLinearProfile,
 	resolveRepoLinearProfile,
@@ -67,8 +67,11 @@ export function maybeEmitPinMismatchHint(
 	if (deps.hasProfileFlag) return false;
 	// Came from `$EL_LINEAR_PROFILE` — also explicit.
 	if ((env.EL_LINEAR_PROFILE ?? "").trim()) return false;
-	// Repo already has a pin — nothing to nudge.
-	if (resolveRepoPin(cwd)) return false;
+	// Repo already has an effective pin — nothing to nudge. Startup ignores
+	// unsafe names, so the hint must apply the same predicate or a bad pin would
+	// suppress the warning while the write falls through to the global marker.
+	const pin = resolveRepoPin(cwd);
+	if (pin && isSafeProfileName(pin.profile)) return false;
 	// Only fire when the profile came from the BARE global marker. No marker =
 	// legacy single-profile default; that user hasn't opted into workspaces at
 	// all, so the nudge would be premature.

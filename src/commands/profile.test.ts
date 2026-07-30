@@ -328,6 +328,19 @@ describe("runProfileRemove", () => {
 		expect(marker).toBe("work\n");
 	});
 
+	it("preserves an unrelated global marker when a session override selects the removed profile", async () => {
+		const personal = profilePaths("personal");
+		await fs.mkdir(path.dirname(personal.configPath), { recursive: true });
+		await fs.writeFile(ACTIVE_PROFILE_FILE, "work\n");
+		// Mirrors preAction selecting a repo pin (or explicit --profile) for this
+		// process while the machine-global marker remains on another profile.
+		setActiveProfileForSession("personal");
+
+		await runProfileRemove("personal", true);
+
+		expect(await fs.readFile(ACTIVE_PROFILE_FILE, "utf8")).toBe("work\n");
+	});
+
 	it("prompts for confirmation when force=false; aborts on 'no'", async () => {
 		const work = profilePaths("work");
 		await fs.mkdir(path.dirname(work.configPath), { recursive: true });

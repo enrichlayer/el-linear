@@ -238,6 +238,30 @@ export function resolveRepoLinearProfile(
 // The pin/unpin commands do the actual fs I/O; these pure string→string helpers
 // hold the merge logic so it is unit-testable and can't clobber sibling keys.
 
+function parseMutableJsonObject(
+	existing: string | null,
+	fileName: string,
+): Record<string, unknown> {
+	if (existing === null) {
+		return {};
+	}
+	try {
+		const parsed = JSON.parse(existing);
+		if (
+			typeof parsed !== "object" ||
+			parsed === null ||
+			Array.isArray(parsed)
+		) {
+			throw new Error("expected a JSON object");
+		}
+		return parsed as Record<string, unknown>;
+	} catch {
+		throw new Error(
+			`Refusing to edit malformed JSON in ${fileName}. Fix or remove it, then retry.`,
+		);
+	}
+}
+
 /**
  * Merge `{ linearProfile: name }` into an existing `.el-git.json` body,
  * preserving every other key. `existing` is the current file text (or null when
@@ -247,25 +271,7 @@ export function applyRepoLocalPin(
 	existing: string | null,
 	name: string,
 ): string {
-	let obj: Record<string, unknown> = {};
-	if (existing?.trim()) {
-		try {
-			const parsed = JSON.parse(existing);
-			if (
-				typeof parsed === "object" &&
-				parsed !== null &&
-				!Array.isArray(parsed)
-			) {
-				obj = parsed as Record<string, unknown>;
-			}
-		} catch {
-			// Malformed sibling content is not ours to silently discard: refuse
-			// rather than clobber a file the user may still want to recover.
-			throw new Error(
-				`Refusing to overwrite malformed JSON in ${LINEAR_PROFILE_REPO_FILE}. Fix or remove it, then retry.`,
-			);
-		}
-	}
+	const obj = parseMutableJsonObject(existing, LINEAR_PROFILE_REPO_FILE);
 	obj.linearProfile = name;
 	return `${JSON.stringify(obj, null, 2)}\n`;
 }
@@ -276,25 +282,10 @@ export function applyRepoLocalPin(
  * should be deleted (it held only the pin / was absent / becomes empty).
  */
 export function removeRepoLocalPin(existing: string | null): string | null {
-	if (!existing?.trim()) {
+	if (existing === null) {
 		return null;
 	}
-	let obj: Record<string, unknown>;
-	try {
-		const parsed = JSON.parse(existing);
-		if (
-			typeof parsed !== "object" ||
-			parsed === null ||
-			Array.isArray(parsed)
-		) {
-			return null;
-		}
-		obj = parsed as Record<string, unknown>;
-	} catch {
-		throw new Error(
-			`Refusing to edit malformed JSON in ${LINEAR_PROFILE_REPO_FILE}. Fix or remove it, then retry.`,
-		);
-	}
+	const obj = parseMutableJsonObject(existing, LINEAR_PROFILE_REPO_FILE);
 	if (!("linearProfile" in obj)) {
 		// Nothing to remove; leave the file exactly as-is.
 		return existing;
@@ -315,23 +306,7 @@ export function applyGlobalPin(
 	fullpath: string,
 	name: string,
 ): string {
-	let obj: Record<string, unknown> = {};
-	if (existing?.trim()) {
-		try {
-			const parsed = JSON.parse(existing);
-			if (
-				typeof parsed === "object" &&
-				parsed !== null &&
-				!Array.isArray(parsed)
-			) {
-				obj = parsed as Record<string, unknown>;
-			}
-		} catch {
-			throw new Error(
-				`Refusing to overwrite malformed JSON in ${LINEAR_PROFILE_USER_CONFIG}. Fix or remove it, then retry.`,
-			);
-		}
-	}
+	const obj = parseMutableJsonObject(existing, LINEAR_PROFILE_USER_CONFIG);
 	const table =
 		typeof obj.profiles === "object" &&
 		obj.profiles !== null &&
@@ -340,5 +315,39 @@ export function applyGlobalPin(
 			: {};
 	table[fullpath] = name;
 	obj.profiles = table;
+	return `${JSON.stringify(obj, null, 2)}\n`;
+}
+
+/**
+ * Remove an exact `owner/repo` entry from the global pin table. Preserves
+ * wildcard entries and unrelated top-level keys. Returns null only when the
+ * file is absent or becomes empty after removal.
+ */
+export function removeGlobalPin(
+	existing: string | null,
+	fullpath: string,
+): string | null {
+	if (existing === null) {
+		return null;
+	}
+	const obj = parseMutableJsonObject(existing, LINEAR_PROFILE_USER_CONFIG);
+	if (
+		typeof obj.profiles !== "object" ||
+		obj.profiles === null ||
+		Array.isArray(obj.profiles)
+	) {
+		return existing;
+	}
+	const table = obj.profiles as Record<string, unknown>;
+	if (!(fullpath in table)) {
+		return existing;
+	}
+	delete table[fullpath];
+	if (Object.keys(table).length === 0) {
+		delete obj.profiles;
+	}
+	if (Object.keys(obj).length === 0) {
+		return null;
+	}
 	return `${JSON.stringify(obj, null, 2)}\n`;
 }

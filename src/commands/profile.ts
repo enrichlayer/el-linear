@@ -26,6 +26,7 @@ import path from "node:path";
 import { confirm } from "@inquirer/prompts";
 import type { Command } from "commander";
 
+import { atomicWrite, withFileLock } from "../auth/oauth-fs.js";
 import {
 	ACTIVE_PROFILE_FILE,
 	CONFIG_DIR,
@@ -44,6 +45,7 @@ import {
 	defaultRepoProfileOps,
 	globalPinTablePath,
 	LINEAR_PROFILE_REPO_FILE,
+	removeGlobalPin,
 	removeRepoLocalPin,
 	resolveRepoLinearProfile,
 } from "../config/repo-profile.js";
@@ -137,10 +139,14 @@ export function setupProfileCommands(program: Command): void {
 	profile
 		.command("unpin")
 		.description(
-			"Remove this repo's repo-local pin (drops linearProfile from .el-git.json).",
+			"Remove this repo's pin. Defaults to .el-git.json; --global removes its exact owner/repo mapping from the user-level table.",
 		)
-		.action(async () => {
-			await runProfileUnpin();
+		.option(
+			"--global",
+			"remove the exact origin owner/repo entry from ~/.config/el-git/linear-profiles.json",
+		)
+		.action(async (opts: ProfileUnpinOptions) => {
+			await runProfileUnpin(opts);
 		});
 
 	// `el-linear profile migrate-legacy` — registered alongside add/list/etc.
@@ -297,8 +303,8 @@ export async function runProfileRemove(
 
 	// If the just-removed profile was the active one, clear the marker
 	// so subsequent invocations fall back to the default paths.
-	const active = resolveActiveProfile();
-	if (active.name === trimmed && (await pathExists(ACTIVE_PROFILE_FILE))) {
+	const activeMarker = readActiveProfileMarker();
+	if (activeMarker === trimmed && (await pathExists(ACTIVE_PROFILE_FILE))) {
 		await fsp.rm(ACTIVE_PROFILE_FILE, { force: true });
 	}
 
@@ -312,11 +318,28 @@ export interface ProfilePinOptions {
 	show?: boolean;
 }
 
+export interface ProfileUnpinOptions {
+	global?: boolean;
+}
+
 async function readFileOrNull(p: string): Promise<string | null> {
 	try {
 		return await fsp.readFile(p, "utf8");
 	} catch (err) {
 		if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+		throw err;
+	}
+}
+
+async function assertNotSymbolicLink(p: string): Promise<void> {
+	try {
+		if ((await fsp.lstat(p)).isSymbolicLink()) {
+			throw new Error(
+				`Refusing to edit symbolic link ${p}. Replace it with a regular JSON file, then retry.`,
+			);
+		}
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
 		throw err;
 	}
 }
@@ -375,9 +398,11 @@ export async function runProfilePin(
 			);
 		}
 		const file = globalPinTablePath();
-		const next = applyGlobalPin(await readFileOrNull(file), fullpath, target);
 		await fsp.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-		await fsp.writeFile(file, next, { mode: 0o644 });
+		await withFileLock(file, async () => {
+			const next = applyGlobalPin(await readFileOrNull(file), fullpath, target);
+			await atomicWrite(file, next, 0o644);
+		});
 		outputSuccess({
 			data: { scope: "global", key: fullpath, profile: target, file },
 		});
@@ -385,16 +410,22 @@ export async function runProfilePin(
 	}
 
 	const file = path.join(root, LINEAR_PROFILE_REPO_FILE);
-	const next = applyRepoLocalPin(await readFileOrNull(file), target);
-	await fsp.writeFile(file, next, { mode: 0o644 });
+	await withFileLock(file, async () => {
+		await assertNotSymbolicLink(file);
+		const next = applyRepoLocalPin(await readFileOrNull(file), target);
+		await atomicWrite(file, next, 0o644);
+	});
 	outputSuccess({ data: { scope: "repo", profile: target, file } });
 }
 
 /**
- * `el-linear profile unpin` — remove the repo-local pin. Preserves any sibling
- * keys in `.el-git.json`; deletes the file only when the pin was its sole key.
+ * `el-linear profile unpin` — remove the repo-local pin, or the exact global
+ * owner/repo mapping with `--global`. Preserves sibling keys and wildcard
+ * mappings; deletes a config file only when the removed pin was its sole data.
  */
-export async function runProfileUnpin(): Promise<void> {
+export async function runProfileUnpin(
+	opts: ProfileUnpinOptions = {},
+): Promise<void> {
 	const ops = defaultRepoProfileOps();
 	const cwd = process.cwd();
 	const root = ops.repoRoot(cwd);
@@ -403,14 +434,42 @@ export async function runProfileUnpin(): Promise<void> {
 			"Not in a git repository. `profile unpin` operates on the repo-local .el-git.json.",
 		);
 	}
-	const file = path.join(root, LINEAR_PROFILE_REPO_FILE);
-	const existing = await readFileOrNull(file);
-	const next = removeRepoLocalPin(existing);
-	if (next === null) {
-		if (existing !== null) await fsp.rm(file, { force: true });
-	} else {
-		await fsp.writeFile(file, next, { mode: 0o644 });
+
+	if (opts.global) {
+		const fullpath = ops.originFullpath(cwd);
+		if (!fullpath) {
+			throw new Error(
+				"Cannot determine the origin owner/repo for a global unpin. Add an `origin` remote, or drop --global to remove the repo-local .el-git.json pin.",
+			);
+		}
+		const file = globalPinTablePath();
+		await fsp.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+		await withFileLock(file, async () => {
+			const existing = await readFileOrNull(file);
+			const next = removeGlobalPin(existing, fullpath);
+			if (next === null) {
+				if (existing !== null) await fsp.rm(file, { force: true });
+			} else if (next !== existing) {
+				await atomicWrite(file, next, 0o644);
+			}
+		});
+		outputSuccess({
+			data: { scope: "global", key: fullpath, unpinned: true, file },
+		});
+		return;
 	}
+
+	const file = path.join(root, LINEAR_PROFILE_REPO_FILE);
+	await withFileLock(file, async () => {
+		await assertNotSymbolicLink(file);
+		const existing = await readFileOrNull(file);
+		const next = removeRepoLocalPin(existing);
+		if (next === null) {
+			if (existing !== null) await fsp.rm(file, { force: true });
+		} else if (next !== existing) {
+			await atomicWrite(file, next, 0o644);
+		}
+	});
 	outputSuccess({ data: { scope: "repo", unpinned: true, file } });
 }
 

@@ -87,7 +87,7 @@ program
 	.option("--api-token <token>", "Linear API token")
 	.option(
 		"--profile <name>",
-		"named profile (under ~/.config/el-linear/profiles/<name>/) for this invocation. Overrides EL_LINEAR_PROFILE env + the on-disk active-profile marker.",
+		"named profile (under ~/.config/el-linear/profiles/<name>/) for this invocation. Overrides EL_LINEAR_PROFILE, repo pins, and the on-disk active-profile marker.",
 	)
 	.option("--json", "output as JSON (default, accepted for compatibility)")
 	.option(

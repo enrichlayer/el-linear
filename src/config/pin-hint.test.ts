@@ -55,6 +55,16 @@ describe("maybeEmitPinMismatchHint — suppressed", () => {
 		).toBe(false);
 	});
 
+	it("still hints when startup would ignore an unsafe pin", () => {
+		const pin: RepoLinearProfile = {
+			profile: "../bad",
+			source: "repo-file",
+		};
+		expect(
+			run({ hasProfileFlag: false, resolveRepoPin: () => pin }).emitted,
+		).toBe(true);
+	});
+
 	it("stays silent on the legacy default (no active-profile marker)", () => {
 		expect(run({ hasProfileFlag: false, readMarker: () => null }).emitted).toBe(
 			false,

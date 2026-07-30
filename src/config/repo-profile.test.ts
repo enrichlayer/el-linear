@@ -16,6 +16,7 @@ import {
 	LINEAR_PROFILE_REPO_FILE,
 	parseGitRemoteFullpath,
 	type RepoProfileOps,
+	removeGlobalPin,
 	removeRepoLocalPin,
 	resolveRepoLinearProfile,
 } from "./repo-profile.js";
@@ -219,6 +220,15 @@ describe("applyRepoLocalPin", () => {
 	it("throws rather than clobbering malformed JSON", () => {
 		expect(() => applyRepoLocalPin("{ bad", "x")).toThrow(/malformed JSON/);
 	});
+
+	it.each([
+		"[]",
+		"null",
+		'"keep"',
+		"   ",
+	])("refuses valid non-object or empty JSON instead of clobbering %j", (existing) => {
+		expect(() => applyRepoLocalPin(existing, "x")).toThrow(/malformed JSON/);
+	});
 });
 
 describe("removeRepoLocalPin", () => {
@@ -240,9 +250,52 @@ describe("removeRepoLocalPin", () => {
 		expect(removeRepoLocalPin(existing)).toBe(existing);
 	});
 
-	it("returns null for an absent / empty file", () => {
+	it("returns null for an absent file", () => {
 		expect(removeRepoLocalPin(null)).toBeNull();
-		expect(removeRepoLocalPin("   ")).toBeNull();
+	});
+
+	it.each([
+		"[]",
+		"null",
+		'"keep"',
+		"   ",
+	])("refuses valid non-object or empty JSON instead of deleting %j", (existing) => {
+		expect(() => removeRepoLocalPin(existing)).toThrow(/malformed JSON/);
+	});
+});
+
+describe("removeGlobalPin", () => {
+	it("removes only the exact owner/repo entry and preserves wildcards", () => {
+		const out = removeGlobalPin(
+			JSON.stringify({
+				profiles: {
+					"enrichlayer/el-linear": "work",
+					"enrichlayer/*": "default",
+				},
+				other: true,
+			}),
+			"enrichlayer/el-linear",
+		);
+		expect(JSON.parse(out as string)).toEqual({
+			profiles: { "enrichlayer/*": "default" },
+			other: true,
+		});
+	});
+
+	it("returns null when the removed mapping was the file's only data", () => {
+		expect(
+			removeGlobalPin(
+				JSON.stringify({
+					profiles: { "enrichlayer/el-linear": "work" },
+				}),
+				"enrichlayer/el-linear",
+			),
+		).toBeNull();
+	});
+
+	it("leaves an unrelated global table byte-identical", () => {
+		const existing = JSON.stringify({ profiles: { "a/b": "one" } });
+		expect(removeGlobalPin(existing, "c/d")).toBe(existing);
 	});
 });
 
@@ -270,5 +323,16 @@ describe("applyGlobalPin", () => {
 		const existing = JSON.stringify({ profiles: { "a/b": "one" } });
 		const out = applyGlobalPin(existing, "a/b", "two");
 		expect(JSON.parse(out)).toEqual({ profiles: { "a/b": "two" } });
+	});
+
+	it.each([
+		"[]",
+		"null",
+		'"keep"',
+		"   ",
+	])("refuses valid non-object or empty JSON instead of clobbering %j", (existing) => {
+		expect(() => applyGlobalPin(existing, "a/b", "two")).toThrow(
+			/malformed JSON/,
+		);
 	});
 });

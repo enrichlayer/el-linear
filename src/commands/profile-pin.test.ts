@@ -102,6 +102,20 @@ describe("runProfilePin — repo-local", () => {
 			/must contain only/,
 		);
 	});
+
+	it("refuses a repo-controlled symlink without reading or writing its target", async () => {
+		const target = path.join(TEST_HOME, "outside.json");
+		const file = path.join(repoDir, ".el-git.json");
+		await fs.writeFile(target, JSON.stringify({ keep: "outside" }));
+		await fs.symlink(target, file);
+
+		await expect(runProfilePin("forage", {})).rejects.toThrow(/symbolic link/);
+
+		expect((await fs.lstat(file)).isSymbolicLink()).toBe(true);
+		expect(JSON.parse(await fs.readFile(target, "utf8"))).toEqual({
+			keep: "outside",
+		});
+	});
 });
 
 describe("runProfilePin — global", () => {
@@ -116,6 +130,18 @@ describe("runProfilePin — global", () => {
 		expect(JSON.parse(await fs.readFile(file, "utf8"))).toEqual({
 			profiles: { "enrichlayer/el-linear": "work" },
 		});
+	});
+
+	it("removes the exact owner/repo entry via unpin --global", async () => {
+		await runProfilePin("work", { global: true });
+		await runProfileUnpin({ global: true });
+		const file = path.join(
+			TEST_HOME,
+			".config",
+			"el-git",
+			"linear-profiles.json",
+		);
+		await expect(fs.access(file)).rejects.toThrow();
 	});
 });
 
@@ -150,5 +176,13 @@ describe("runProfileUnpin", () => {
 		);
 		await runProfileUnpin();
 		expect(JSON.parse(await fs.readFile(file, "utf8"))).toEqual({ keep: "me" });
+	});
+
+	it("refuses non-object JSON without deleting the shared file", async () => {
+		const file = path.join(repoDir, ".el-git.json");
+		await fs.writeFile(file, "[]");
+
+		await expect(runProfileUnpin()).rejects.toThrow(/malformed JSON/);
+		expect(await fs.readFile(file, "utf8")).toBe("[]");
 	});
 });

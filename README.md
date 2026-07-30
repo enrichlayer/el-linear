@@ -147,10 +147,7 @@ el-linear profile remove old-profile
 
 ### Recommended for multiple workspaces: pin the repo
 
-If you work across several workspaces, **pin each repo to the profile it
-belongs to** instead of relying on `profile use`. A pin is scoped to the repo,
-so a write in that repo always targets the right workspace no matter what the
-machine-global default happens to be:
+If you work across several workspaces, **pin each repo to the profile it belongs to** instead of relying on `profile use`. A pin is scoped to the repo, so a write in that repo always targets the right workspace no matter what the machine-global default happens to be.
 
 ```bash
 # In a repo, pin it to the profile it belongs to (defaults to the active one):
@@ -159,25 +156,21 @@ el-linear profile pin forage
 # Show the resolved pin + where it came from:
 el-linear profile pin --show
 
-# Pin by origin owner/repo in your global user config instead of the repo file
-# (handy for repos you don't want to add a file to, or an owner-wide default):
+# Pin this exact origin owner/repo in your global user config instead:
 el-linear profile pin work --global
 
 # Remove the repo-local pin:
 el-linear profile unpin
+
+# Remove this repo's exact owner/repo entry from the global user config:
+el-linear profile unpin --global
 ```
 
-A repo-local pin is stored in `.el-git.json` at the repo root as
-`{ "linearProfile": "<name>" }` — the **same file** el-git and el-session read,
-so pinning once makes every Enrich Layer CLI agree on the repo's workspace.
-`--global` writes an `owner/repo` (or `owner/*` wildcard) entry into
-`~/.config/el-git/linear-profiles.json`. The repo-local file wins over the
-global table.
+A repo-local pin is stored in `.el-git.json` at the repo root as `{ "linearProfile": "<name>" }`. el-linear, el-git, and el-session read the same file and resolve the repo to the same workspace.
 
-When a write command (`issues create` / `comments create`) runs under the bare
-machine-global default in a repo with no pin, el-linear prints a one-line,
-non-blocking stderr hint suggesting `profile pin`. Silence it with
-`EL_LINEAR_NO_PIN_HINT=1` (or `--quiet`).
+`--global` writes the exact origin `owner/repo` entry into `~/.config/el-git/linear-profiles.json`; the resolver also honors manually configured `owner/*` wildcard entries. The repo-local file wins over the global table.
+
+When a write command (`issues create` / `comments create`) runs under the bare machine-global default in a repo with no effective pin, el-linear prints a one-line, non-blocking stderr hint suggesting `profile pin`. Silence it with `EL_LINEAR_NO_PIN_HINT=1` (or `--quiet`).
 
 Fix or clean up a single member's aliases/handles without hand-editing
 `config.json` — `profile members` operates directly on the active profile's
