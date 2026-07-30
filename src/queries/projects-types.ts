@@ -85,7 +85,7 @@ interface ProjectUpdateFieldsNode extends ProjectBaseNode {
 	// `status` (not the deprecated `state` scalar) — the workspace's actual
 	// configured ProjectStatus, matching what `--status <name>` resolves
 	// against (DEV-7021).
-	status: { id: string; name: string };
+	status?: { id: string; name: string };
 	progress: number;
 	url: string;
 }
