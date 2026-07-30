@@ -168,6 +168,26 @@ describe("evaluateIntakeDecision", () => {
 		});
 	});
 
+	it("does not erase literal underscores to manufacture a PROCEED decision", () => {
+		const misspelled = VALID.replace("Decision: PROCEED", "Decision: PRO_CEED");
+		expect(evaluateIntakeDecision(misspelled)).toEqual({
+			ok: false,
+			reason: "not-proceeding",
+			decision: "PRO_CEED",
+		});
+	});
+
+	it("still accepts paired inline emphasis around a semantic token", () => {
+		const emphasized = VALID.replace(
+			"Needed: Yes — support",
+			"Needed: **Yes** — support",
+		);
+		expect(evaluateIntakeDecision(emphasized)).toEqual({
+			ok: true,
+			header: "Intake decision",
+		});
+	});
+
 	it("rejects a contradictory duplicate decision field", () => {
 		expect(evaluateIntakeDecision(`${VALID}\n- Decision: REJECT`)).toEqual({
 			ok: false,

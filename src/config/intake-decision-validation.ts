@@ -71,7 +71,13 @@ const LEADING_EMPHASIS = /^[*_]{1,3}\s*/;
 const TRAILING_EMPHASIS = /\s*[*_]{1,3}$/;
 /** A value entirely wrapped in one emphasis run, e.g. `**PROCEED**`. */
 const WRAPPED_IN_EMPHASIS = /^([*_]{1,3})([^*_].*?)\1$/;
-const ANY_EMPHASIS = /[*_]{1,3}/g;
+/**
+ * A paired inline emphasis run at a token boundary. The boundaries are
+ * load-bearing: a literal underscore in `PRO_CEED` or `customer_support` is
+ * content, not markdown, and must not disappear during semantic validation.
+ */
+const INLINE_EMPHASIS =
+	/(^|[^\p{L}\p{N}])([*_]{1,3})(?=\S)(.+?\S)\2(?=$|[^\p{L}\p{N}])/gu;
 const PLACEHOLDER =
 	/^(?:tbd|todo|unknown|n\/?a|none|unsure|not decided|-)\.?$/i;
 const NON_SPECIFIC = /^(?:yes|no)$/i;
@@ -152,7 +158,13 @@ function normalizeFieldValue(raw: string, labelOpensEmphasis: boolean): string {
  * back so the author sees what they actually wrote.
  */
 function withoutEmphasis(value: string): string {
-	return value.replace(ANY_EMPHASIS, "").trim();
+	let normalized = value;
+	let previous: string;
+	do {
+		previous = normalized;
+		normalized = normalized.replace(INLINE_EMPHASIS, "$1$3");
+	} while (normalized !== previous);
+	return normalized.trim();
 }
 
 function parseFieldLine(
