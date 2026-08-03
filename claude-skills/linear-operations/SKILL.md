@@ -185,6 +185,14 @@ Every issue should communicate **why** the work matters and **what** success loo
 ### Example
 
 ```markdown
+## Intake decision
+- Needed: Yes — contact tracking is split across spreadsheets, Linear, and memory.
+- Worth doing: Yes — outbound scale makes the fragmentation costly now, not later.
+- Existing work: searched "CRM", "contact tracking" with --include-closed; no duplicate.
+- Owner: Nico (operations tooling).
+- Placement: OPS / Sales infrastructure; self-hosted on the Hetzner box.
+- Decision: PROCEED
+
 ## Set up a self-hosted CRM
 
 The team needs a CRM to replace fragmented contact tracking
@@ -202,6 +210,26 @@ and outreach tracked in one place.
 ```
 
 ---
+
+## Intake Decision Block (MANDATORY, blocking)
+
+**`el-linear issues create` refuses any description without a `## Intake decision` section.** It must open the description, and the six lines must appear in this order:
+
+```markdown
+## Intake decision
+- Needed: Yes — <why this is needed>
+- Worth doing: Yes — <why the value exceeds the cost>
+- Existing work: <duplicate/search result and evidence>
+- Owner: <canonical owner or source of truth>
+- Placement: <team/project/repository/document path>
+- Decision: PROCEED
+```
+
+Write it **before** composing the rest of the body. The gate runs before the create POST, so omitting it fails the call outright — nothing is written, and a finished issue body then has to be reassembled around a section you were never told to include.
+
+The point is that the decision is *recorded*, not merely reached: `Existing work` cites the search you actually ran, and `Owner`/`Placement` name a concrete destination rather than a plausible one. It is the same discipline the two gates below enforce mechanically, applied to the judgment they cannot check.
+
+Escape hatch: `--allow-missing-intake-decision`, which is recorded. It exists for an **accountable human** who has approved an exceptional create — not for an agent that would rather not write the block. `--skip-validation` also bypasses it but disables every other field check too, so prefer the narrow flag.
 
 ## Duplicate & Related Issues Check (MANDATORY)
 
@@ -374,6 +402,7 @@ Don't start implementation work on an unassigned issue — the assignee is the p
 
 Complete ALL items before creating any issue:
 
+- [ ] **Intake decision** — description opens with the `## Intake decision` block (above). Blocking.
 - [ ] **Duplicate & related check** — searched for existing issues, linked related ones (above).
 - [ ] **Team** — ask user if unclear (`el-linear teams list`).
 - [ ] **Assignee** — ask user if unclear (`el-linear users list --active`).
