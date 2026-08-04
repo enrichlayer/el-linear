@@ -81,7 +81,11 @@ const INLINE_EMPHASIS =
 const PLACEHOLDER =
 	/^(?:tbd|todo|unknown|n\/?a|none|unsure|not decided|-)\.?$/i;
 const NON_SPECIFIC = /^(?:yes|no)$/i;
-const AFFIRMATIVE_WITH_REASON = /^yes\s*(?:[-—:;,]|because)\s*(\S.{2,})$/i;
+// The gate exists to force an explicit verdict AND a reason. Which punctuation
+// joins the two carries no meaning, so every ordinary separator is accepted —
+// including `.`, which reads most naturally when the reason is a full sentence.
+// A bare verdict still fails: the trailing group requires real reason text.
+const AFFIRMATIVE_WITH_REASON = /^yes\s*(?:[-–—.:;,]|because)\s*(\S.{2,})$/i;
 
 /**
  * What is actually wrong with a field whose label parsed. Keeping these apart
@@ -327,7 +331,7 @@ function describeFieldProblem(
 		case "non-specific":
 			return `The intake field "${field}" reads "${quote(value)}", which is too short or too generic to be a specific answer.`;
 		case "no-judgment":
-			return `The intake field "${field}" reads "${quote(value)}" — the content is there, but it is not an explicit "Yes — <reason>" judgment.`;
+			return `The intake field "${field}" reads "${quote(value)}" — the verdict is there, but no reason follows it. Write both together, e.g. "Yes — <reason>" or "Yes. <reason>"; any ordinary separator works.`;
 		case "placeholder-reason":
 			return `The intake field "${field}" says Yes but gives the placeholder reason "${quote(value)}"; record the real reason.`;
 	}

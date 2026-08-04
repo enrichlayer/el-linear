@@ -114,6 +114,45 @@ describe("evaluateIntakeDecision", () => {
 		});
 	});
 
+	// The accepted separators, pinned as a set so they stay deliberate rather
+	// than incidental to one regex edit. Both tests below iterate THIS list, so
+	// the accept side and the reject side cannot drift apart: adding a separator
+	// here automatically requires it to reject a reason-free verdict too.
+	const VERDICT_SEPARATORS = ["—", "–", "-", ".", ":", ";", ",", " because"];
+
+	it("accepts any ordinary separator between the verdict and its reason", () => {
+		// The gate's purpose is an explicit verdict plus a reason; the punctuation
+		// joining them carries no meaning.
+		for (const separator of VERDICT_SEPARATORS) {
+			const description = VALID.replace(
+				"Needed: Yes — support cannot find the current procedure",
+				`Needed: Yes${separator} support cannot find the current procedure`,
+			);
+			expect(evaluateIntakeDecision(description)).toEqual({
+				ok: true,
+				header: "Intake decision",
+			});
+		}
+	});
+
+	it("still rejects a bare verdict whatever separator trails it", () => {
+		// The loosened separator set must not open a path to a verdict with no
+		// reason — that is the single case the gate exists for. Covers a bare
+		// "Yes" plus every separator with nothing after it.
+		for (const bare of ["Yes", ...VERDICT_SEPARATORS.map((s) => `Yes${s}`)]) {
+			const description = VALID.replace(
+				"Needed: Yes — support cannot find the current procedure",
+				`Needed: ${bare}`,
+			);
+			const result = evaluateIntakeDecision(description);
+			expect(result.ok).toBe(false);
+			expect(result).toMatchObject({
+				reason: "invalid-field",
+				field: "Needed",
+			});
+		}
+	});
+
 	it("rejects placeholder reasons and non-specific owner or placement", () => {
 		expect(
 			evaluateIntakeDecision(
@@ -385,7 +424,10 @@ describe("evaluateIntakeDecision — label formatting tolerance (DEV-7074)", () 
 			headers: DEFAULT_INTAKE_SECTION_HEADERS,
 		});
 		expect(message).toContain('reads "probably, we should discuss it"');
-		expect(message).toContain('not an explicit "Yes — <reason>" judgment');
+		// Names the actual defect (no reason) rather than prescribing one dash —
+		// the message must not imply the em dash is the only accepted separator.
+		expect(message).toContain("the verdict is there, but no reason follows it");
+		expect(message).toContain("any ordinary separator works");
 	});
 
 	it("still rejects a non-PROCEED decision written with a bolded label", () => {

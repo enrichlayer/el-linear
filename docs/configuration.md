@@ -450,10 +450,15 @@ all read the same way:
 1. _Needed_: Yes — <reason>
 ```
 
+`Needed` and `Worth doing` require a verdict *and* a reason, but the punctuation
+joining them carries no meaning, so any ordinary separator works — `Yes — <reason>`,
+`Yes. <reason>`, `Yes, <reason>`, `Yes: <reason>`, `Yes because <reason>`. What
+fails is a verdict with no reason after it (`Yes`, `Yes.`, `Yes —`).
+
 When a field does fail, the message names which failure it is — a line that
 could not be read as `Label: value` (a formatting mismatch), an absent field, an
-empty value, a placeholder, or a value that is present but is not an explicit
-`Yes — <reason>` judgment — so the remedy matches the actual problem.
+empty value, a placeholder, or a verdict with no reason following it — so the
+remedy matches the actual problem.
 
 Two modes (default off):
 
