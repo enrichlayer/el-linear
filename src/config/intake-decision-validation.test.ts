@@ -114,11 +114,16 @@ describe("evaluateIntakeDecision", () => {
 		});
 	});
 
+	// The accepted separators, pinned as a set so they stay deliberate rather
+	// than incidental to one regex edit. Both tests below iterate THIS list, so
+	// the accept side and the reject side cannot drift apart: adding a separator
+	// here automatically requires it to reject a reason-free verdict too.
+	const VERDICT_SEPARATORS = ["—", "–", "-", ".", ":", ";", ",", " because"];
+
 	it("accepts any ordinary separator between the verdict and its reason", () => {
 		// The gate's purpose is an explicit verdict plus a reason; the punctuation
-		// joining them carries no meaning. Pinned as a set so the accepted
-		// separators stay deliberate rather than incidental to one regex edit.
-		for (const separator of ["—", "–", "-", ".", ":", ";", ",", " because"]) {
+		// joining them carries no meaning.
+		for (const separator of VERDICT_SEPARATORS) {
 			const description = VALID.replace(
 				"Needed: Yes — support cannot find the current procedure",
 				`Needed: Yes${separator} support cannot find the current procedure`,
@@ -132,8 +137,9 @@ describe("evaluateIntakeDecision", () => {
 
 	it("still rejects a bare verdict whatever separator trails it", () => {
 		// The loosened separator set must not open a path to a verdict with no
-		// reason — that is the case the gate exists for.
-		for (const bare of ["Yes", "Yes.", "Yes —", "Yes:", "Yes because"]) {
+		// reason — that is the single case the gate exists for. Covers a bare
+		// "Yes" plus every separator with nothing after it.
+		for (const bare of ["Yes", ...VERDICT_SEPARATORS.map((s) => `Yes${s}`)]) {
 			const description = VALID.replace(
 				"Needed: Yes — support cannot find the current procedure",
 				`Needed: ${bare}`,
