@@ -1,0 +1,53 @@
+diff --git a/dist/cjs/core.d.cts b/dist/cjs/core.d.cts
+index 1a66733e13f1fb31baeb6962dbf27529211bbd86..6ee7363ca51feb2d2a232a73483fae63eee33422 100644
+--- a/dist/cjs/core.d.cts
++++ b/dist/cjs/core.d.cts
+@@ -92,6 +92,46 @@ export declare function createCodeTransformer(options: CodeTransformerPluginOpti
+     getCodeToInject: () => string | undefined;
+ };
+ export type { CustomTransform, InstrumentationConfig, ModuleMatcher, FunctionBehavior, FunctionQuery } from '@apm-js-collab/code-transformer';
+-export { serializeInstrumentations, deserializeInstrumentations } from './instrumentation-serde';
+-export type { SerializedRegExp, SerializableInstrumentationConfig, AnyInstrumentationConfig, } from './instrumentation-serde';
++
++/**
++ * A plain-object encoding of a `RegExp` that survives JSON serialization.
++ * Revive it with `new RegExp(source, flags)`.
++ */
++export interface SerializedRegExp {
++    type: 'RegExp';
++    source: string;
++    flags: string;
++}
++
++/**
++ * An `InstrumentationConfig` whose `module.filePath` is never a `RegExp`
++ * instance — regexes are encoded as {@link SerializedRegExp} — making the
++ * whole config a POJO that can cross serialization boundaries such as
++ * Turbopack's loader options.
++ */
++export type SerializableInstrumentationConfig = InstrumentationConfig extends infer T ? T extends {
++    module: InstrumentationConfig['module'];
++} ? Omit<T, 'module'> & {
++    module: Omit<T['module'], 'filePath'> & {
++        filePath: string | SerializedRegExp;
++    };
++} : never : never;
++
++/** Either the native config shape or its JSON-safe counterpart. */
++export type AnyInstrumentationConfig = InstrumentationConfig | SerializableInstrumentationConfig;
++
++/**
++ * Converts any `RegExp` `module.filePath` into a plain `{ source, flags }`
++ * object so the configs can be passed where only JSON-serializable values are
++ * allowed (e.g. Turbopack loader options). Configs that are already
++ * serializable are returned unchanged.
++ */
++export declare function serializeInstrumentations(configs: AnyInstrumentationConfig[]): SerializableInstrumentationConfig[];
++
++/**
++ * Revives serialized `{ source, flags }` file paths back into `RegExp`
++ * instances. Accepts a mix of serialized and native configs so callers can
++ * pass user-supplied options straight through.
++ */
++export declare function deserializeInstrumentations(configs: AnyInstrumentationConfig[]): InstrumentationConfig[];
+ //# sourceMappingURL=core.d.mts.map
