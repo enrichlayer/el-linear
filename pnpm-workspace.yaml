@@ -8,3 +8,11 @@ allowBuilds:
 # Matches the dependabot `cooldown.default-days: 7` in
 # .github/dependabot.yml. Bump both together if you change the policy.
 minimumReleaseAge: 10080
+
+# The @sentry/node 10.68.0 bump transitively pulls in
+# @apm-js-collab/code-transformer-bundler-plugins@0.7.1, whose
+# dist/cjs/core.d.cts imports './instrumentation-serde' but the package
+# does not ship that file under its exports map. Inline the declarations
+# via a patch so tsc does not fail with TS2307.
+patchedDependencies:
+  '@apm-js-collab/code-transformer-bundler-plugins@0.7.1': patches/@apm-js-collab__code-transformer-bundler-plugins@0.7.1.patch
