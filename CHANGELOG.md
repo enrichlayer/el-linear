@@ -23,6 +23,18 @@ project adheres to [Semantic Versioning](https://semver.org/).
 * **quality:** restore a clean full-repository lint baseline (DEV-6142)
 * **labels:** resolve `labels create --team` keys and names before creating the label (DEV-5749)
 
+## [1.44.1](https://github.com/enrichlayer/el-linear/compare/v1.44.0...v1.44.1) (2026-08-05)
+
+
+### Bug Fixes
+
+* **deps-dev:** bump @biomejs/biome from 2.5.4 to 2.5.5 in the dev-dependencies group ([#286](https://github.com/enrichlayer/el-linear/issues/286)) ([0a0d305](https://github.com/enrichlayer/el-linear/commit/0a0d305ae7e91ee4b013edfa3fee45958c5721c6))
+* **deps:** bump @linear/sdk from 87.0.0 to 88.0.0 ([#287](https://github.com/enrichlayer/el-linear/issues/287)) ([767cec0](https://github.com/enrichlayer/el-linear/commit/767cec0251f029c8a172d4dcf0487405098e34e4))
+* **deps:** bump @sentry/node from 10.66.0 to 10.68.0 ([#288](https://github.com/enrichlayer/el-linear/issues/288)) ([a721692](https://github.com/enrichlayer/el-linear/commit/a72169214035ae51d86c15d35084e6691735aa77))
+* **deps:** bump actions/setup-node from 4 to 7 ([#285](https://github.com/enrichlayer/el-linear/issues/285)) ([c008dcc](https://github.com/enrichlayer/el-linear/commit/c008dccc06a9f761f543ad4075ba75c1643d2847))
+* **deps:** patch broken @apm-js-collab/code-transformer-bundler-plugins declaration (DEV-7641) ([#292](https://github.com/enrichlayer/el-linear/issues/292)) ([9240e7a](https://github.com/enrichlayer/el-linear/commit/9240e7a9e00b500e76041874910307950fb52fdb))
+* **intake:** accept any verdict separator, not only an em dash ([#290](https://github.com/enrichlayer/el-linear/issues/290)) ([1f36747](https://github.com/enrichlayer/el-linear/commit/1f36747ea57aebae15a685907b622b8e798b3ce6))
+
 ## [1.44.0](https://github.com/enrichlayer/el-linear/compare/v1.43.1...v1.44.0) (2026-07-30)
 
 
