@@ -23,11 +23,15 @@ jobs:
         run: |
           git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
           # Fork PRs often have a base branch tip that is not an ancestor of HEAD,
-          # so a depth-1 fetch has no merge base. Deepen until git can find one.
-          for _ in $(seq 1 20); do
-            if git merge-base FETCH_HEAD HEAD >/dev/null 2>&1; then
-              break
-            fi
+          # so a depth-1 fetch has no merge base. Deepen until git can find one,
+          # then fail loudly if it never does.
+          attempts=0
+          while [ $attempts -lt 20 ] && ! git merge-base FETCH_HEAD HEAD >/dev/null 2>&1; do
             git fetch --no-tags --deepen=50 origin "$GITHUB_BASE_REF"
+            attempts=$((attempts + 1))
           done
+          if ! git merge-base FETCH_HEAD HEAD >/dev/null 2>&1; then
+            echo "Could not find a merge base between origin/$GITHUB_BASE_REF and HEAD after deepening $attempts times." >&2
+            exit 1
+          fi
           node bin/validate-pr-title.mjs --base FETCH_HEAD
