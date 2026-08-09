@@ -44,7 +44,7 @@ configured. Emission turns on only when:
 | neither is set | **On only if `~/.cache/el-telemetry/` already exists** (i.e. you already run the Enrich Layer telemetry tooling). A fresh install has no such directory, so nothing is written. |
 
 There is **no server and no database** — the ledger is a plain local JSONL file
-on your machine. Nothing is sent anywhere. Before appending a fresh event,
+on your machine. Nothing is sent anywhere. Enabling telemetry is only useful when you want to measure the duplicate-detection gate's override-rate or audit gate decisions locally. Before appending a fresh event,
 el-linear rotates an active ledger larger than 2 MiB to one backup generation
 named `gate-events.jsonl.old`; the next event starts a new active
 `gate-events.jsonl`.
