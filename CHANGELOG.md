@@ -23,6 +23,14 @@ project adheres to [Semantic Versioning](https://semver.org/).
 * **quality:** restore a clean full-repository lint baseline (DEV-6142)
 * **labels:** resolve `labels create --team` keys and names before creating the label (DEV-5749)
 
+## [1.44.2](https://github.com/enrichlayer/el-linear/compare/v1.44.1...v1.44.2) (2026-08-09)
+
+
+### Bug Fixes
+
+* **ci:** check merge base after final deepen and fail loudly if unreachable ([#297](https://github.com/enrichlayer/el-linear/issues/297)) ([a6f695d](https://github.com/enrichlayer/el-linear/commit/a6f695d3e1843542ea00081825c605ed2bccdeb7))
+* **ci:** deepen base fetch in pr-title workflow for fork PRs ([#295](https://github.com/enrichlayer/el-linear/issues/295)) ([70b50fc](https://github.com/enrichlayer/el-linear/commit/70b50fc3e259c60ffb7abe01ac5f6dd93d482f2b))
+
 ## [1.44.1](https://github.com/enrichlayer/el-linear/compare/v1.44.0...v1.44.1) (2026-08-05)
 
 
