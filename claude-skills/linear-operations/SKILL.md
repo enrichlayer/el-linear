@@ -99,6 +99,38 @@ el-linear issues read DEV-123 --format json 2>&1 | python3 -c "import json,sys; 
 
 `--body` is mutually exclusive with `--field` / `--sections` / `--with` (those extract named parts or extend the JSON envelope; `--body` is the whole thing as text).
 
+#### Citing an issue's stated rationale: `--body` or `--field`, never `--format summary`
+
+**`--format summary` truncates the description.** That is correct for scanning a board and wrong the moment you quote, cite, or reason from what an issue *says*. A research pass once read an issue with `--format summary`, saw a truncated description, and published the opposite of the design position that issue states outright — the fix was one command with a different flag, run twenty minutes too late.
+
+So: the moment a claim is about an issue's **stated rationale** — what a decision claimed at the time, why an approach was chosen, what a spec requires — read `--body` (or `--field <section>` for one section) and quote from that.
+
+```bash
+# ✅ Reasoning from what the issue actually says
+el-linear issues read DEV-123 --body 2>&1
+el-linear issues read DEV-123 --field "Why we need this" 2>&1
+
+# ❌ Citing a summary — the description you are quoting may be cut off
+el-linear issues read DEV-123 --format summary 2>&1
+```
+
+The scope is narrow and worth stating precisely: an issue body is a weak source for *system behavior* — it records what someone intended, not what the code does — but it is the **authoritative** artifact for what a decision claimed at the time. Use it for the second, not the first.
+
+#### An umbrella's status is not delivery evidence
+
+A parent or umbrella issue's own status says nothing reliable about whether the work shipped. Read its children and slices, then read the artifact.
+
+```bash
+el-linear issues related DEV-100 --format summary 2>&1
+```
+
+Neither direction is safe on its own:
+
+- **Canceled does not mean abandoned.** An umbrella is routinely closed as bookkeeping after its slices land — one was reported as "abandoned" in a research document while all six of its children were Done and the code was in production.
+- **Done children do not prove delivery either.** A child can be a duplicate, a rename, or an administrative closure.
+
+The tracker is a lead. The **merged MR or the deployed code** is the evidence — go look at it before writing "shipped" or "abandoned".
+
 ### Comment reads and full comment bodies
 
 When you need a specific comment, or the full text of a long comment, use the
