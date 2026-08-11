@@ -3,13 +3,22 @@ import type { LinearCredential } from "../auth/linear-credential.js";
 import { getActiveAuth } from "../auth/token-resolver.js";
 import type { GraphQLResponseData, GraphQLVariables } from "../types/linear.js";
 import type { AuthOptions } from "./auth.js";
-import { toLinearGraphQLError } from "./linear-graphql-error.js";
+import {
+	graphQLErrorCode,
+	graphQLErrorHttpStatus,
+	toLinearGraphQLError,
+} from "./linear-graphql-error.js";
+import { type RateLimitInfo, recordRateLimitInfo } from "./output.js";
+
+interface ResponseHeaders {
+	get(name: string): string | null;
+}
 
 interface GraphQLRawClient {
 	rawRequest: <T>(
 		query: string,
 		variables?: GraphQLVariables,
-	) => Promise<{ data: T }>;
+	) => Promise<{ data: T; headers?: ResponseHeaders; status?: number }>;
 }
 
 export interface GraphQLRequestOptions {
@@ -25,6 +34,7 @@ export interface GraphQLRequestOptions {
 interface GraphQLServiceRuntimeOptions {
 	retryDelaysMs?: readonly number[];
 	sleep?: (ms: number) => Promise<void>;
+	now?: () => number;
 }
 
 const DEFAULT_SAFE_MUTATION_RETRY_DELAYS_MS = [150, 400] as const;
@@ -33,32 +43,239 @@ function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
-/**
- * True only for failures where retrying a known-idempotent request is useful.
- *
- * Deliberately NOT the same predicate as the `errorDetail.retryable` this
- * CLI publishes (DEV-7987). They answer different questions. This one gates
- * an IMMEDIATE in-process retry, 150 ms then 400 ms later — a rate limit is
- * a terrible candidate for that, because the window resets minutes away.
- * `retryable` answers whether the failure is transient at all, for an
- * external caller that owns a real backoff (a Temporal activity), where a
- * rate limit is exactly what you want retried. Collapsing the two would
- * force one of them to be wrong.
- */
-export function isTransientGraphQLError(error: unknown): boolean {
-	const detail = error as {
-		response?: { status?: number; statusCode?: number };
-	};
-	const status = detail.response?.status ?? detail.response?.statusCode;
+interface GraphQLErrorDetail {
+	type?: string;
+	status?: number;
+	retryAfter?: number;
+	requestsLimit?: number;
+	requestsRemaining?: number;
+	requestsResetAt?: number;
+	response?: GraphQLErrorResponse;
+	raw?: { response?: GraphQLErrorResponse };
+	errors?: Array<{
+		message?: string;
+		type?: string;
+		extensions?: { code?: string; type?: string };
+	}>;
+}
+
+interface GraphQLErrorResponse {
+	status?: number;
+	statusCode?: number;
+	headers?: ResponseHeaders | Record<string, string | undefined>;
+	errors?: GraphQLErrorDetail["errors"];
+}
+
+function errorDetail(error: unknown): GraphQLErrorDetail {
+	return error as GraphQLErrorDetail;
+}
+
+function errorResponse(error: unknown): GraphQLErrorResponse | undefined {
+	const detail = errorDetail(error);
+	return detail.response ?? detail.raw?.response;
+}
+
+function headerValue(
+	headers: GraphQLErrorResponse["headers"] | undefined,
+	name: string,
+): string | undefined {
+	if (!headers) return undefined;
+	if ("get" in headers && typeof headers.get === "function") {
+		return headers.get(name) ?? undefined;
+	}
+	const expected = name.toLowerCase();
+	const entry = Object.entries(headers).find(
+		([key]) => key.toLowerCase() === expected,
+	);
+	return entry?.[1];
+}
+
+function finiteNumber(value: unknown): number | undefined {
+	if (value === undefined || value === null || value === "") return undefined;
+	const parsed = typeof value === "number" ? value : Number(value);
+	return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function resetAtFromRetryAfter(
+	value: string | number | undefined,
+	now: () => number,
+): string | undefined {
+	if (value === undefined) return undefined;
+	const seconds = finiteNumber(value);
+	if (seconds !== undefined) {
+		return new Date(now() + seconds * 1_000).toISOString();
+	}
+	if (typeof value === "string") {
+		const timestamp = Date.parse(value);
+		if (Number.isFinite(timestamp)) return new Date(timestamp).toISOString();
+	}
+	return undefined;
+}
+
+function extractRateLimitInfo(
+	source: unknown,
+	now: () => number,
+): RateLimitInfo | undefined {
+	const detail = errorDetail(source);
+	const response = errorResponse(source) ?? (source as GraphQLErrorResponse);
+	const headers = response?.headers;
+	const limit = finiteNumber(
+		detail.requestsLimit ?? headerValue(headers, "x-ratelimit-requests-limit"),
+	);
+	const remaining = finiteNumber(
+		detail.requestsRemaining ??
+			headerValue(headers, "x-ratelimit-requests-remaining"),
+	);
+	const resetTimestamp = finiteNumber(
+		detail.requestsResetAt ??
+			headerValue(headers, "x-ratelimit-requests-reset"),
+	);
+	const resetAt =
+		resetTimestamp !== undefined
+			? new Date(resetTimestamp).toISOString()
+			: resetAtFromRetryAfter(
+					detail.retryAfter ?? headerValue(headers, "retry-after"),
+					now,
+				);
+	const complexityCost = finiteNumber(headerValue(headers, "x-complexity"));
+	const complexityLimit = finiteNumber(
+		headerValue(headers, "x-ratelimit-complexity-limit"),
+	);
+	const complexityRemaining = finiteNumber(
+		headerValue(headers, "x-ratelimit-complexity-remaining"),
+	);
+	const complexityResetTimestamp = finiteNumber(
+		headerValue(headers, "x-ratelimit-complexity-reset"),
+	);
+	const endpointName = headerValue(headers, "x-ratelimit-endpoint-name");
+	const endpointLimit = finiteNumber(
+		headerValue(headers, "x-ratelimit-endpoint-requests-limit"),
+	);
+	const endpointRemaining = finiteNumber(
+		headerValue(headers, "x-ratelimit-endpoint-requests-remaining"),
+	);
+	const endpointResetTimestamp = finiteNumber(
+		headerValue(headers, "x-ratelimit-endpoint-requests-reset"),
+	);
+	const hasComplexity =
+		complexityCost !== undefined ||
+		complexityLimit !== undefined ||
+		complexityRemaining !== undefined ||
+		complexityResetTimestamp !== undefined;
+	const hasEndpoint =
+		endpointName !== undefined ||
+		endpointLimit !== undefined ||
+		endpointRemaining !== undefined ||
+		endpointResetTimestamp !== undefined;
+
 	if (
-		status === 408 ||
-		status === 429 ||
-		(status !== undefined && status >= 500)
+		limit === undefined &&
+		remaining === undefined &&
+		resetAt === undefined &&
+		!hasComplexity &&
+		!hasEndpoint
+	) {
+		return undefined;
+	}
+	return {
+		limit,
+		remaining,
+		resetAt,
+		observedRequests: 1,
+		minimumRemaining: remaining,
+		...(hasComplexity
+			? {
+					complexity: {
+						cost: complexityCost,
+						totalCost: complexityCost,
+						limit: complexityLimit,
+						remaining: complexityRemaining,
+						minimumRemaining: complexityRemaining,
+						resetAt:
+							complexityResetTimestamp === undefined
+								? undefined
+								: new Date(complexityResetTimestamp).toISOString(),
+					},
+				}
+			: {}),
+		...(hasEndpoint
+			? {
+					endpoints: {
+						[endpointName ?? "unknown"]: {
+							limit: endpointLimit,
+							remaining: endpointRemaining,
+							minimumRemaining: endpointRemaining,
+							resetAt:
+								endpointResetTimestamp === undefined
+									? undefined
+									: new Date(endpointResetTimestamp).toISOString(),
+							observedRequests: 1,
+						},
+					},
+				}
+			: {}),
+	};
+}
+
+/** True for both HTTP and GraphQL representations of Linear rate limiting. */
+export function isRateLimitGraphQLError(error: unknown): boolean {
+	const detail = errorDetail(error);
+	if (
+		graphQLErrorHttpStatus(error) === 429 ||
+		graphQLErrorCode(error)?.toUpperCase() === "RATELIMITED" ||
+		detail.type?.toLowerCase() === "ratelimited"
 	) {
 		return true;
 	}
-	return /\b(?:408|429|500|502|503|504)\b|(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|fetch failed|network error|connection termination)/i.test(
+	return /\b(?:429|rate[- ]?limit(?:ed| exceeded))\b/i.test(
 		errorMessage(error),
+	);
+}
+
+/**
+ * True only for failures where retrying a known-idempotent request immediately
+ * is useful. This deliberately differs from published `errorDetail.retryable`:
+ * a rate limit is transient for an external caller with reset-aware backoff,
+ * but must never enter this CLI's 150 ms / 400 ms retry loop.
+ */
+export function isTransientGraphQLError(error: unknown): boolean {
+	if (isRateLimitGraphQLError(error)) return false;
+	const status = graphQLErrorHttpStatus(error);
+	if (status === 408 || (status !== null && status >= 500)) {
+		return true;
+	}
+	return /\b(?:408|500|502|503|504)\b|(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|fetch failed|network error|connection termination)/i.test(
+		errorMessage(error),
+	);
+}
+
+function isMutationOperation(query: string): boolean {
+	const withoutLeadingComments = query.replace(/^(?:\s*#[^\n]*(?:\n|$))*/, "");
+	return /^\s*mutation\b/i.test(withoutLeadingComments);
+}
+
+function rateLimitError(
+	error: unknown,
+	query: string,
+	now: () => number,
+): Error {
+	const rateLimit = extractRateLimitInfo(error, now);
+	const details: string[] = [];
+	if (rateLimit?.remaining !== undefined && rateLimit.limit !== undefined) {
+		details.push(
+			`${rateLimit.remaining}/${rateLimit.limit} requests remain in the current window`,
+		);
+	}
+	if (rateLimit?.resetAt) {
+		details.push(`the request limit resets at ${rateLimit.resetAt}`);
+	}
+	const suffix = details.length > 0 ? ` ${details.join("; ")}.` : "";
+	const ambiguity = isMutationOperation(query)
+		? " This mutation may have been applied; verify its outcome before retrying."
+		: "";
+	return toLinearGraphQLError(
+		error,
+		`GraphQL request failed: Rate limit exceeded.${suffix}${ambiguity}`,
 	);
 }
 
@@ -94,6 +311,7 @@ export class GraphQLService {
 	private readonly graphQLClient: GraphQLRawClient;
 	private readonly retryDelaysMs: readonly number[];
 	private readonly sleep: (ms: number) => Promise<void>;
+	private readonly now: () => number;
 
 	constructor(
 		auth: GraphQLServiceAuth,
@@ -109,6 +327,7 @@ export class GraphQLService {
 		this.sleep =
 			options.sleep ??
 			((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+		this.now = options.now ?? Date.now;
 	}
 
 	// Default type allows property access on raw GraphQL responses.
@@ -126,8 +345,12 @@ export class GraphQLService {
 						query,
 						variables,
 					);
+					const rateLimit = extractRateLimitInfo(response, this.now);
+					if (rateLimit) recordRateLimitInfo(rateLimit);
 					return response.data;
 				} catch (error) {
+					const rateLimit = extractRateLimitInfo(error, this.now);
+					if (rateLimit) recordRateLimitInfo(rateLimit);
 					if (
 						!options.retrySafeMutation ||
 						attempt >= this.retryDelaysMs.length ||
@@ -140,6 +363,9 @@ export class GraphQLService {
 				}
 			}
 		} catch (error: unknown) {
+			if (isRateLimitGraphQLError(error)) {
+				throw rateLimitError(error, query, this.now);
+			}
 			const err = error as {
 				response?: { errors?: Array<{ message?: string }> };
 				message?: string;

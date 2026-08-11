@@ -558,6 +558,48 @@ list-shaped reads — single-issue `issues read DEV-123` is unaffected.
 
 ## Output formats
 
+Commands whose request path exposes Linear response headers include aggregate
+quota observations as optional `_rateLimit` metadata in JSON output:
+
+```json
+{
+  "identifier": "DEV-123",
+  "_rateLimit": {
+    "limit": 2500,
+    "remaining": 2498,
+    "resetAt": "2026-08-11T10:00:00.000Z",
+    "observedRequests": 2,
+    "minimumRemaining": 2498,
+    "complexity": {
+      "cost": 30,
+      "totalCost": 50,
+      "limit": 2000000,
+      "remaining": 1999950,
+      "minimumRemaining": 1999950,
+      "resetAt": "2026-08-11T10:00:00.000Z"
+    },
+    "endpoints": {
+      "Issue": {
+        "limit": 1000,
+        "remaining": 998,
+        "minimumRemaining": 998,
+        "resetAt": "2026-08-11T10:00:00.000Z",
+        "observedRequests": 2
+      }
+    }
+  }
+}
+```
+
+Summary output renders the same information as an `_rateLimit:` line. With a
+bare-array output such as `--raw`, the line goes to stderr so stdout remains
+valid JSON. Current remaining/reset values come from the most recent response;
+`observedRequests`, `minimumRemaining`, `complexity.totalCost`, and each
+endpoint entry expose the command's aggregate cost and lowest observed
+headroom. Rate-limited error envelopes include the same metadata. Commands
+served entirely from cache or SDK paths that do not expose response headers
+omit it.
+
 Every command accepts `--format <kind>` at the root:
 
 - `--format json` (default) — emits the full structured envelope. Stable

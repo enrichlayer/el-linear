@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { LinearGraphQLError } from "./linear-graphql-error.js";
+import { outputSuccess, resetWarnings } from "./output.js";
 
 const mockRawRequest = vi.fn();
 const linearClientCtorSpy = vi.fn();
@@ -14,7 +15,8 @@ vi.mock("@linear/sdk", () => ({
 	},
 }));
 
-const { GraphQLService } = await import("./graphql-service.js");
+const { GraphQLService, isRateLimitGraphQLError, isTransientGraphQLError } =
+	await import("./graphql-service.js");
 
 describe("GraphQLService", () => {
 	it("returns response data from rawRequest", async () => {
@@ -25,6 +27,66 @@ describe("GraphQLService", () => {
 
 		const result = await service.rawRequest("query { issue { id title } }");
 		expect(result).toEqual({ issue: { id: "123", title: "Test" } });
+	});
+
+	it("surfaces successful response headers on normal JSON output", async () => {
+		resetWarnings();
+		const stdoutSpy = vi
+			.spyOn(process.stdout, "write")
+			.mockImplementation(() => true);
+		mockRawRequest.mockResolvedValue({
+			data: { viewer: { id: "user-1" } },
+			headers: new Headers({
+				"x-complexity": "42",
+				"x-ratelimit-complexity-limit": "2000000",
+				"x-ratelimit-complexity-remaining": "1999958",
+				"x-ratelimit-complexity-reset": String(
+					Date.parse("2026-08-11T10:00:00.000Z"),
+				),
+				"x-ratelimit-endpoint-name": "Issue",
+				"x-ratelimit-endpoint-requests-limit": "1000",
+				"x-ratelimit-endpoint-requests-remaining": "998",
+				"x-ratelimit-endpoint-requests-reset": String(
+					Date.parse("2026-08-11T10:00:00.000Z"),
+				),
+				"x-ratelimit-requests-limit": "2500",
+				"x-ratelimit-requests-remaining": "2498",
+				"x-ratelimit-requests-reset": String(
+					Date.parse("2026-08-11T10:00:00.000Z"),
+				),
+			}),
+		});
+		const service = new GraphQLService({ apiKey: "test-token" });
+
+		const result = await service.rawRequest("query { viewer { id } }");
+		outputSuccess(result);
+
+		const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+		expect(parsed._rateLimit).toEqual({
+			limit: 2500,
+			remaining: 2498,
+			resetAt: "2026-08-11T10:00:00.000Z",
+			observedRequests: 1,
+			minimumRemaining: 2498,
+			complexity: {
+				cost: 42,
+				totalCost: 42,
+				limit: 2_000_000,
+				remaining: 1_999_958,
+				minimumRemaining: 1_999_958,
+				resetAt: "2026-08-11T10:00:00.000Z",
+			},
+			endpoints: {
+				Issue: {
+					limit: 1000,
+					remaining: 998,
+					minimumRemaining: 998,
+					resetAt: "2026-08-11T10:00:00.000Z",
+					observedRequests: 1,
+				},
+			},
+		});
+		stdoutSpy.mockRestore();
 	});
 
 	it("passes variables to the underlying client", async () => {
@@ -216,6 +278,128 @@ describe("GraphQLService", () => {
 		expect(error.httpStatus).toBe(503);
 		expect(error.retryable).toBe(true);
 		expect(error.message).toBe("Service unavailable");
+	});
+
+	it("does not retry a 429 even when the mutation is otherwise retry-safe", async () => {
+		const sleep = vi.fn().mockResolvedValue(undefined);
+		const callsBefore = mockRawRequest.mock.calls.length;
+		mockRawRequest.mockRejectedValue({
+			response: {
+				status: 429,
+				headers: new Headers({
+					"x-ratelimit-requests-limit": "2500",
+					"x-ratelimit-requests-remaining": "0",
+					"x-ratelimit-requests-reset": String(
+						Date.parse("2026-08-11T10:00:00.000Z"),
+					),
+				}),
+			},
+			message: "Rate limit exceeded",
+		});
+		const service = new GraphQLService(
+			{ apiKey: "test-token" },
+			{ retryDelaysMs: [1, 2], sleep },
+		);
+
+		await expect(
+			service.rawRequest(
+				"mutation Update { issueUpdate { success } }",
+				{},
+				{ retrySafeMutation: true },
+			),
+		).rejects.toThrow("the request limit resets at 2026-08-11T10:00:00.000Z");
+		expect(mockRawRequest.mock.calls.length - callsBefore).toBe(1);
+		expect(sleep).not.toHaveBeenCalled();
+	});
+
+	it("records quota headers from a rejected rate-limited response", async () => {
+		resetWarnings();
+		const stdoutSpy = vi
+			.spyOn(process.stdout, "write")
+			.mockImplementation(() => true);
+		mockRawRequest.mockRejectedValue({
+			response: {
+				status: 429,
+				headers: new Headers({
+					"x-complexity": "7",
+					"x-ratelimit-requests-limit": "2500",
+					"x-ratelimit-requests-remaining": "0",
+				}),
+			},
+			message: "Rate limit exceeded",
+		});
+		const service = new GraphQLService({ apiKey: "test-token" });
+
+		await service.rawRequest("query Read { viewer { id } }").catch(() => {});
+		outputSuccess({ caught: true });
+
+		const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+		expect(parsed._rateLimit).toMatchObject({
+			limit: 2500,
+			remaining: 0,
+			observedRequests: 1,
+			complexity: { cost: 7, totalCost: 7 },
+		});
+		stdoutSpy.mockRestore();
+	});
+
+	it("warns that a rate-limited mutation may already have been applied", async () => {
+		mockRawRequest.mockRejectedValue({
+			type: "Ratelimited",
+			requestsLimit: 2500,
+			requestsRemaining: 0,
+			requestsResetAt: Date.parse("2026-08-11T10:00:00.000Z"),
+			message: "Rate limit exceeded",
+		});
+		const service = new GraphQLService({ apiKey: "test-token" });
+
+		await expect(
+			service.rawRequest("mutation Create { issueCreate { success } }"),
+		).rejects.toThrow(
+			"This mutation may have been applied; verify its outcome before retrying.",
+		);
+	});
+
+	it("does not add mutation ambiguity text to a rate-limited query", async () => {
+		mockRawRequest.mockRejectedValue({
+			type: "Ratelimited",
+			requestsResetAt: Date.parse("2026-08-11T10:00:00.000Z"),
+			message: "Rate limit exceeded",
+		});
+		const service = new GraphQLService({ apiKey: "test-token" });
+
+		await expect(
+			service.rawRequest("query Read { viewer { id } }"),
+		).rejects.not.toThrow("may have been applied");
+	});
+
+	it("uses Retry-After when the absolute reset header is unavailable", async () => {
+		mockRawRequest.mockRejectedValue({
+			type: "Ratelimited",
+			retryAfter: 90,
+			message: "Rate limit exceeded",
+		});
+		const service = new GraphQLService(
+			{ apiKey: "test-token" },
+			{ now: () => Date.parse("2026-08-11T09:00:00.000Z") },
+		);
+
+		await expect(
+			service.rawRequest("query Read { viewer { id } }"),
+		).rejects.toThrow("the request limit resets at 2026-08-11T09:01:30.000Z");
+	});
+
+	it("recognizes Linear's GraphQL RATELIMITED error shape and keeps 408/5xx transient", () => {
+		const graphqlRateLimit = {
+			response: {
+				status: 400,
+				errors: [{ extensions: { code: "RATELIMITED" } }],
+			},
+		};
+		expect(isRateLimitGraphQLError(graphqlRateLimit)).toBe(true);
+		expect(isTransientGraphQLError(graphqlRateLimit)).toBe(false);
+		expect(isTransientGraphQLError({ response: { status: 408 } })).toBe(true);
+		expect(isTransientGraphQLError({ response: { status: 503 } })).toBe(true);
 	});
 
 	it("string constructor passes apiKey to LinearClient (personal-token path)", () => {
