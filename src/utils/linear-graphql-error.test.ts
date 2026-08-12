@@ -7,6 +7,7 @@ import {
 	isRetryableHttpStatus,
 	LinearGraphQLError,
 	readGraphQLErrorDetail,
+	toLinearGraphQLError,
 } from "./linear-graphql-error.js";
 
 /**
@@ -147,6 +148,33 @@ describe("LinearGraphQLError", () => {
 			code: "SERVICE_UNAVAILABLE",
 			retryable: true,
 		});
+	});
+});
+
+describe("toLinearGraphQLError", () => {
+	it("classifies from the rejection while keeping the composed message", () => {
+		const wrapped = toLinearGraphQLError(
+			sdkRejection(429, "RATELIMITED"),
+			"GraphQL request failed: Rate limit exceeded. Resets at 10:00Z.",
+		);
+		expect(wrapped.message).toBe(
+			"GraphQL request failed: Rate limit exceeded. Resets at 10:00Z.",
+		);
+		expect(wrapped.detail).toEqual({
+			httpStatus: 429,
+			code: "RATELIMITED",
+			retryable: true,
+		});
+	});
+
+	it("classifies off the rejection's own text, not the composed message", () => {
+		// A composed message can lose the transport wording the classifier
+		// needs; the original rejection is the authority.
+		const wrapped = toLinearGraphQLError(
+			new Error("fetch failed"),
+			"GraphQL request failed: something went wrong",
+		);
+		expect(wrapped.retryable).toBe(true);
 	});
 });
 

@@ -131,7 +131,13 @@ export function isRetryableGraphQLCode(code: string | null): boolean {
 }
 
 /**
- * The single retryable verdict, from the status, the code, and the message.
+ * The retryable verdict, from the status, the code, and the message.
+ *
+ * "Retryable" here means *the failure is transient* — a caller that waits
+ * an appropriate interval could succeed. It is NOT the same question as
+ * `isTransientGraphQLError` in `graphql-service.ts`, which gates this CLI's
+ * own immediate 150 ms / 400 ms retry: a rate limit is transient (so
+ * `retryable: true`) but a terrible candidate for an immediate retry.
  *
  * The last arm is the one that is easy to get wrong: a rejection carrying
  * NEITHER a status NOR a code never got an answer out of Linear at all —
@@ -141,10 +147,6 @@ export function isRetryableGraphQLCode(code: string | null): boolean {
  * this arm cannot swallow a permanent schema or permission error. Leaving
  * it to the message regex alone would misclassify any transport failure
  * whose wording is not in the list, which is unbounded.
- *
- * `isTransientGraphQLError` delegates here, so this CLI's in-process retry
- * loop and the `errorDetail.retryable` field it publishes can never
- * disagree — one predicate, two consumers.
  */
 export function classifyGraphQLFailure(
 	httpStatus: number | null,
@@ -187,6 +189,36 @@ export class LinearGraphQLError extends Error {
 			retryable: this.retryable,
 		};
 	}
+}
+
+/**
+ * Wrap a rejection from the Linear GraphQL client in a classified error,
+ * keeping `message` exactly as the caller composed it.
+ *
+ * This is the seam every throw out of `GraphQLService.rawRequest` must pass
+ * through. A branch that builds its own message and throws a bare `Error`
+ * instead — a rate-limit path with a friendlier wording, say — produces a
+ * failure with NO `errorDetail` on the envelope, which is precisely the
+ * blindness DEV-7987 exists to remove, and it fails silently.
+ */
+export function toLinearGraphQLError(
+	error: unknown,
+	message: string,
+): LinearGraphQLError {
+	const httpStatus = graphQLErrorHttpStatus(error);
+	const code = graphQLErrorCode(error);
+	return new LinearGraphQLError(message, {
+		httpStatus,
+		code,
+		// Classify off the ORIGINAL rejection's text, not the composed
+		// `message`: the transport arm needs the client's own wording
+		// (`fetch failed`), which a composed message may have replaced.
+		retryable: classifyGraphQLFailure(
+			httpStatus,
+			code,
+			error instanceof Error ? error.message : String(error),
+		),
+	});
 }
 
 /**

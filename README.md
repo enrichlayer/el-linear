@@ -692,7 +692,7 @@ Linear GraphQL API. Its fields:
 | ------------ | ---------------- | ----------------------------------------------------------------------- |
 | `httpStatus` | `number \| null` | HTTP status of Linear's response; `null` when no response arrived.      |
 | `code`       | `string \| null` | The first GraphQL error's `extensions.code`; `null` when absent.        |
-| `retryable`  | `boolean`        | Whether retrying the identical request could plausibly succeed.         |
+| `retryable`  | `boolean`        | Whether the failure is transient — retrying after an appropriate wait could succeed. |
 
 `retryable` is `true` for HTTP 408 / 429 / 5xx, for the `RATELIMITED`,
 `INTERNAL_SERVER_ERROR` and `SERVICE_UNAVAILABLE` GraphQL codes, and for a
@@ -700,6 +700,10 @@ transport failure that never reached a response (`fetch failed`,
 `ECONNRESET`, …). Reading `code` separately matters: Linear can answer a
 rate limit under a status that would otherwise read as permanent, so
 `httpStatus` alone is not the whole verdict.
+
+`retryable: true` says the failure is transient — **not** that retrying
+immediately is a good idea. A rate limit is transient and reported as such,
+but its window may be minutes away; the wait is the caller's policy.
 
 **A missing `errorDetail` is not "not retryable".** It means the failure
 was not a Linear GraphQL request at all — a bad argument, an unreadable

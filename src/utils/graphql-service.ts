@@ -3,12 +3,7 @@ import type { LinearCredential } from "../auth/linear-credential.js";
 import { getActiveAuth } from "../auth/token-resolver.js";
 import type { GraphQLResponseData, GraphQLVariables } from "../types/linear.js";
 import type { AuthOptions } from "./auth.js";
-import {
-	classifyGraphQLFailure,
-	graphQLErrorCode,
-	graphQLErrorHttpStatus,
-	LinearGraphQLError,
-} from "./linear-graphql-error.js";
+import { toLinearGraphQLError } from "./linear-graphql-error.js";
 
 interface GraphQLRawClient {
 	rawRequest: <T>(
@@ -41,17 +36,28 @@ function errorMessage(error: unknown): string {
 /**
  * True only for failures where retrying a known-idempotent request is useful.
  *
- * Delegates the verdict to `classifyGraphQLFailure` so this in-process
- * retry loop and the `errorDetail.retryable` field the CLI publishes on
- * its error envelope (DEV-7987) can never diverge — one predicate, two
- * consumers. The `extensions.code` arm is what makes a Linear rate limit
- * classify as transient even when it arrives under a status that would
- * otherwise read as permanent.
+ * Deliberately NOT the same predicate as the `errorDetail.retryable` this
+ * CLI publishes (DEV-7987). They answer different questions. This one gates
+ * an IMMEDIATE in-process retry, 150 ms then 400 ms later — a rate limit is
+ * a terrible candidate for that, because the window resets minutes away.
+ * `retryable` answers whether the failure is transient at all, for an
+ * external caller that owns a real backoff (a Temporal activity), where a
+ * rate limit is exactly what you want retried. Collapsing the two would
+ * force one of them to be wrong.
  */
 export function isTransientGraphQLError(error: unknown): boolean {
-	return classifyGraphQLFailure(
-		graphQLErrorHttpStatus(error),
-		graphQLErrorCode(error),
+	const detail = error as {
+		response?: { status?: number; statusCode?: number };
+	};
+	const status = detail.response?.status ?? detail.response?.statusCode;
+	if (
+		status === 408 ||
+		status === 429 ||
+		(status !== undefined && status >= 500)
+	) {
+		return true;
+	}
+	return /\b(?:408|429|500|502|503|504)\b|(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|fetch failed|network error|connection termination)/i.test(
 		errorMessage(error),
 	);
 }
@@ -144,21 +150,12 @@ export class GraphQLService {
 			const message = err.response?.errors
 				? err.response.errors[0]?.message || "GraphQL query failed"
 				: `GraphQL request failed: ${err.message}`;
-			const httpStatus = graphQLErrorHttpStatus(error);
-			const code = graphQLErrorCode(error);
-			throw new LinearGraphQLError(message, {
-				httpStatus,
-				code,
-				// Classify off the ORIGINAL rejection, not the new message: the
-				// status and code live on the rejection, and the transport-message
-				// arm needs the SDK's own text (`fetch failed`), which the
-				// GraphQL-error branch above replaces.
-				retryable: classifyGraphQLFailure(
-					httpStatus,
-					code,
-					errorMessage(error),
-				),
-			});
+			// This is the ONLY place a Linear GraphQL failure leaves the
+			// service, so it is the only place that has to attach the
+			// classification. Any future branch that throws its own shaped
+			// message from here must go through `toLinearGraphQLError` too, or
+			// that failure silently loses its `errorDetail` on the envelope.
+			throw toLinearGraphQLError(error, message);
 		}
 	}
 }
