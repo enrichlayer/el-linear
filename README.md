@@ -430,6 +430,38 @@ preferences; those stay in personal config. Example team file:
 Run `el-linear config show` to see the resolved config and confirm which team
 config path is active (`teamConfig` field in the output).
 
+#### Using more than one Linear workspace
+
+Most of a team config is identity: `members`, `teams`, `teamAliases`, `labels`,
+`defaultTeam`, `defaultAssignee` are UUIDs and team keys that exist in exactly
+one workspace. A profile pointed at a second workspace that inherits them sends
+identifiers the API has never seen, and Linear answers with
+`Entity not found in validateAccess` — a message naming a field, but neither the
+value nor the file it came from. Auto-discovery makes this easy to hit: the
+marker applies the same shared file to *every* profile on the machine.
+
+Declare the workspace on both sides and el-linear sorts it out:
+
+```json
+// the shared team config — which workspace its identifiers came from
+{ "workspaceUrlKey": "acme", "teams": { "ENG": "<uuid>" }, "validation": { "enabled": true } }
+
+// ~/.config/el-linear/profiles/side-project/config.json
+{ "workspaceUrlKey": "widgets" }
+```
+
+When the two disagree, the team layer's workspace-specific keys are dropped and
+you get a warning naming both workspaces and the file. What survives is the half
+that travels — `validation`, `terms`, `statusDefaults`, `footer`, cache settings
+— so a shared config still contributes its rules to every workspace.
+
+Both sides must declare it. A team config with no `workspaceUrlKey` cannot be
+shown to belong elsewhere, so it is applied unchanged; that keeps every existing
+single-workspace setup working exactly as before.
+
+To switch the layer off for a profile entirely — including marker
+auto-discovery — set `"teamConfigPath": ""` in that profile's config.
+
 #### Migrating a personal-heavy config
 
 Before the team-config split, members typically carried full local copies of

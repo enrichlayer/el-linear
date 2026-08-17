@@ -97,6 +97,13 @@ intended flow for the CLI.
   // Optional override for the workspace URL key (the segment after `linear.app/`).
   // When omitted, el-linear fetches it from `viewer.organization.urlKey` once
   // per session and caches in memory.
+  //
+  // In a shared TEAM config this also declares which workspace that file's
+  // identifiers belong to. Set it there and in each profile, and a team layer
+  // from another workspace has its `members` / `teams` / `teamAliases` /
+  // `labels` / `defaultTeam` / `defaultAssignee` dropped rather than resolving
+  // to UUIDs the target workspace has never seen. See "Using more than one
+  // Linear workspace" in the README.
   "workspaceUrlKey": "enrichlayer",
 
   // Status defaults for issues create. Either string is the human-readable
