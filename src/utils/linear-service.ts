@@ -22,6 +22,12 @@ import { isUuid } from "./uuid.js";
 
 const DEFAULT_CYCLE_PAGINATION_LIMIT = 250;
 
+// Linear's workspace-level team connection becomes too complex when callers
+// ask for the whole workspace in one request (DEV-8300). Keep each page at the
+// known-safe default and let callers request a larger bounded window by
+// following cursors instead of widening one query past the API complexity cap.
+const SAFE_TEAM_PAGE_SIZE = 100;
+
 // The Linear SDK types don't accept string orderBy values, but the API does.
 // This helper avoids repeating the double-cast at every call site.
 function sdkOrderBy<T>(field: string): T {
@@ -50,6 +56,12 @@ function nonEmptyFilter(
  * legacy arm was dropped in DEV-4068 T7.
  */
 export type LinearServiceAuth = LinearCredential;
+
+export interface LinearTeamListResult {
+	teams: LinearTeam[];
+	/** More teams exist beyond the requested window. */
+	truncated: boolean;
+}
 
 function buildLinearClient(auth: LinearServiceAuth): LinearClient {
 	if ("oauthToken" in auth) {
@@ -86,15 +98,58 @@ export class LinearService {
 		return issues.nodes[0].id;
 	}
 
+	async getTeam(key: string): Promise<LinearTeam | null> {
+		const normalizedKey = key.trim().toUpperCase();
+		const teamsConnection = await this.client.teams({
+			filter: { key: { eq: normalizedKey } },
+			first: 1,
+		});
+		const team = teamsConnection.nodes[0];
+		return team ? this.toLinearTeam(team) : null;
+	}
+
+	/**
+	 * Fetch a bounded team window without treating a full page as complete.
+	 * Each request stays at or below SAFE_TEAM_PAGE_SIZE; a larger requested
+	 * limit is satisfied by following cursors. `truncated` is exact because it
+	 * is derived from pageInfo (and from over-fetching the final safe page), not
+	 * from the count-equals-limit heuristic.
+	 */
+	async getTeamsWindow(limit = 100): Promise<LinearTeamListResult> {
+		const first = Math.min(limit, SAFE_TEAM_PAGE_SIZE);
+		let teamsConnection = await this.client.teams({ first });
+		const nodes = [...teamsConnection.nodes];
+
+		while (nodes.length < limit && teamsConnection.pageInfo.hasNextPage) {
+			teamsConnection = await teamsConnection.fetchNext();
+			nodes.push(...teamsConnection.nodes);
+		}
+
+		return {
+			teams: nodes
+				.slice(0, limit)
+				.map((team) => this.toLinearTeam(team))
+				.sort((a, b) => a.name.localeCompare(b.name)),
+			truncated: nodes.length > limit || teamsConnection.pageInfo.hasNextPage,
+		};
+	}
+
 	async getTeams(limit = 100): Promise<LinearTeam[]> {
-		const teamsConnection = await this.client.teams({ first: limit });
-		const teams = teamsConnection.nodes.map((team) => ({
+		return (await this.getTeamsWindow(limit)).teams;
+	}
+
+	private toLinearTeam(team: {
+		description?: string | null;
+		id: string;
+		key: string;
+		name: string;
+	}): LinearTeam {
+		return {
 			id: team.id,
 			key: team.key,
 			name: team.name,
 			description: team.description || null,
-		}));
-		return teams.sort((a, b) => a.name.localeCompare(b.name));
+		};
 	}
 
 	async resolveUserId(nameOrEmailOrId: string): Promise<string> {

@@ -444,11 +444,96 @@ describe("LinearService", () => {
 					{ id: "2", key: "FE", name: "Frontend", description: null },
 					{ id: "1", key: "BE", name: "Backend", description: "Core API" },
 				],
+				pageInfo: { hasNextPage: false },
+				fetchNext: vi.fn(),
 			});
 			const service = new LinearService({ apiKey: "token" });
 			const result = await service.getTeams();
 			expect(result[0].name).toBe("Backend");
 			expect(result[1].name).toBe("Frontend");
+		});
+	});
+
+	describe("getTeam", () => {
+		it("looks up an exact key without scanning the team connection", async () => {
+			mockTeams.mockResolvedValue({
+				nodes: [{ id: "dev-id", key: "DEV", name: "Dev", description: null }],
+			});
+			const service = new LinearService({ apiKey: "token" });
+
+			const result = await service.getTeam("dev");
+
+			expect(mockTeams).toHaveBeenCalledWith({
+				filter: { key: { eq: "DEV" } },
+				first: 1,
+			});
+			expect(result).toEqual({
+				id: "dev-id",
+				key: "DEV",
+				name: "Dev",
+				description: null,
+			});
+		});
+
+		it("returns null for an exact-key miss", async () => {
+			mockTeams.mockResolvedValue({ nodes: [] });
+			const service = new LinearService({ apiKey: "token" });
+
+			expect(await service.getTeam("ZZZ")).toBeNull();
+		});
+	});
+
+	describe("getTeamsWindow", () => {
+		it("follows safe pages to find a team beyond the first page", async () => {
+			const firstPage = {
+				nodes: Array.from({ length: 100 }, (_, index) => ({
+					id: `team-${index}`,
+					key: `T${index}`,
+					name: `Team ${index}`,
+					description: null,
+				})),
+				pageInfo: { hasNextPage: true },
+				fetchNext: vi.fn(),
+			};
+			const secondPage = {
+				nodes: [
+					{ id: "forage-id", key: "FD", name: "Forage", description: null },
+				],
+				pageInfo: { hasNextPage: false },
+				fetchNext: vi.fn(),
+			};
+			firstPage.fetchNext.mockResolvedValue(secondPage);
+			mockTeams.mockResolvedValue(firstPage);
+			const service = new LinearService({ apiKey: "token" });
+
+			const result = await service.getTeamsWindow(101);
+
+			expect(mockTeams).toHaveBeenCalledWith({ first: 100 });
+			expect(firstPage.fetchNext).toHaveBeenCalledTimes(1);
+			expect(result.teams).toHaveLength(101);
+			expect(result.teams).toContainEqual(secondPage.nodes[0]);
+			expect(result.truncated).toBe(false);
+		});
+
+		it("marks a full first page as truncated when another page exists", async () => {
+			const fetchNext = vi.fn();
+			mockTeams.mockResolvedValue({
+				nodes: Array.from({ length: 100 }, (_, index) => ({
+					id: `team-${index}`,
+					key: `T${index}`,
+					name: `Team ${index}`,
+					description: null,
+				})),
+				pageInfo: { hasNextPage: true },
+				fetchNext,
+			});
+			const service = new LinearService({ apiKey: "token" });
+
+			const result = await service.getTeamsWindow(100);
+
+			expect(fetchNext).not.toHaveBeenCalled();
+			expect(result.teams).toHaveLength(100);
+			expect(result.truncated).toBe(true);
 		});
 	});
 

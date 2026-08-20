@@ -12,6 +12,7 @@ project adheres to [Semantic Versioning](https://semver.org/).
 * **issues:** add an opt-in create-time goal-completion gate — checks the description for a falsifiable "Done when" / acceptance-criteria section, `warn`/`block` modes via `validation.goalCompletionGate`, bypass with `--allow-vague-goal` (DEV-5920)
 * **projects:** add `projects update --name/--description/--content` for editing project metadata without raw GraphQL (DEV-5749)
 * **projects:** add `projects update --status <name>` to set a project's status via the proper `projectUpdate` mutation instead of a hand-written GraphQL call; resolves the workspace's configured statuses by name (case-insensitive), lists the valid names on a miss, supports `--quiet`, and adds `status`, `progress`, and `url` to the JSON result (DEV-7021)
+* **teams:** add exact-key `teams lookup <KEY>` / `teams read <KEY>` and make `teams list` follow safe pages with explicit `truncated` and `availability` metadata, so callers never infer team absence from a capped page (DEV-8300)
 
 ### Bug Fixes
 
