@@ -517,10 +517,18 @@ el-linear <command> --help       # detailed help for one command
 | Search | `search <query>` (semantic, cross-resource) |
 | Refs | `refs wrap` (rewrite issue identifiers in arbitrary text as links) |
 | Escape hatch | `graphql [query]` (with `--introspect`) |
-| Config | `config show`, `users {list, read}`, `teams list`, `templates list` |
+| Config | `config show`, `users {list, read}`, `teams {list, lookup, read}`, `templates list` |
 
 All `list` subcommands support `-l, --limit <n>`. All commands accept the
 top-level filters: `--format <json|summary>`, `--raw`, `--jq <expr>`, `--fields <list>`.
+
+For an exact team-key check, use `el-linear teams lookup DEV` (or
+`teams read DEV`). It uses a server-side key filter and returns
+`meta.status: "found"` or `"not-found"` with `availability.status: "complete"`;
+a transport or malformed-response failure exits non-zero instead of becoming a
+false not-found result. `teams list` follows safe 100-item pages when a larger
+`--limit` is requested and reports `meta.truncated` plus
+`meta.availability.status: "partial"` when more teams remain beyond the result.
 
 `issues list` also accepts `--all` (equivalent to `--limit 0`) to fetch **every**
 matching issue. It paginates the full set in safe chunks under the hood, so

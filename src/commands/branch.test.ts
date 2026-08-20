@@ -5,8 +5,8 @@ import {
 	suppressExit,
 } from "../__tests__/test-helpers.js";
 
-const mockGetTeams = vi.fn();
-const mockService = { getTeams: mockGetTeams };
+const mockGetTeam = vi.fn();
+const mockService = { getTeam: mockGetTeam };
 const mockCreateLinearService = vi.fn().mockReturnValue(mockService);
 const mockOutputSuccess = vi.fn();
 
@@ -35,12 +35,6 @@ vi.mock("../config/config.js", () => ({
 
 const { setupBranchCommands } = await import("./branch.js");
 
-const REAL_TEAMS = [
-	{ id: "1", key: "EMW", name: "Endpoints middleware", description: null },
-	{ id: "2", key: "DEV", name: "Dev", description: null },
-	{ id: "3", key: "PYT", name: "Python App", description: null },
-];
-
 async function validate(branch: string, extra: string[] = []) {
 	const program = createTestProgram();
 	setupBranchCommands(program);
@@ -52,7 +46,11 @@ describe("branch validate", () => {
 		vi.clearAllMocks();
 		suppressExit();
 		process.exitCode = 0;
-		mockGetTeams.mockResolvedValue(REAL_TEAMS);
+		mockGetTeam.mockImplementation((key: string) =>
+			Promise.resolve(
+				key === "EMW" ? { id: "1", key, name: "Endpoints middleware" } : null,
+			),
+		);
 	});
 
 	it("passes a branch on a real team (exit 0)", async () => {
@@ -77,7 +75,7 @@ describe("branch validate", () => {
 
 	it("exempts protected branches without calling the API (exit 0)", async () => {
 		await validate("main");
-		expect(mockGetTeams).not.toHaveBeenCalled();
+		expect(mockGetTeam).not.toHaveBeenCalled();
 		expect(mockOutputSuccess).toHaveBeenCalledWith(
 			expect.objectContaining({ valid: true, reason: "exempt" }),
 		);
@@ -86,7 +84,7 @@ describe("branch validate", () => {
 
 	it("fails a branch with no Linear ID (exit 1), no API call", async () => {
 		await validate("scratch-no-id");
-		expect(mockGetTeams).not.toHaveBeenCalled();
+		expect(mockGetTeam).not.toHaveBeenCalled();
 		expect(mockOutputSuccess).toHaveBeenCalledWith(
 			expect.objectContaining({ valid: false, reason: "no-linear-id" }),
 		);
@@ -94,7 +92,7 @@ describe("branch validate", () => {
 	});
 
 	it("returns indeterminate (exit 2) when the team set can't be loaded", async () => {
-		mockGetTeams.mockRejectedValue(new Error("offline"));
+		mockGetTeam.mockRejectedValue(new Error("offline"));
 		await validate("feature/EMW-349-pricing-panel");
 		expect(mockOutputSuccess).toHaveBeenCalledWith(
 			expect.objectContaining({ valid: null, reason: "teams-unavailable" }),
@@ -111,7 +109,7 @@ describe("branch validate", () => {
 	});
 
 	it("--exit-zero suppresses exit 2 when teams can't be loaded", async () => {
-		mockGetTeams.mockRejectedValue(new Error("offline"));
+		mockGetTeam.mockRejectedValue(new Error("offline"));
 		await validate("feature/EMW-349-pricing-panel", ["--exit-zero"]);
 		expect(mockOutputSuccess).toHaveBeenCalledWith(
 			expect.objectContaining({ valid: null, reason: "teams-unavailable" }),
