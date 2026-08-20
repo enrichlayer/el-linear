@@ -773,6 +773,10 @@ and writes nothing to stdout. The structured surfaces need no such signal and
 stay exit 0 — `--format summary` prints `(no results)` and the JSON envelope
 carries `meta.count`.
 
+For file-backed comment writes, `--body-file <path>` is the canonical option.
+`comments create` and `comments update` also accept `--file <path>` as a
+backwards-compatible alias. Do not pass both spellings in one command.
+
 ### One-line write confirmations: `-q, --quiet`
 
 `issues create|update`, `issues relate`, and `comments create|update` accept
