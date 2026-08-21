@@ -306,6 +306,53 @@ describe("comments commands", () => {
 			);
 		});
 
+		it("accepts --file as an alias for --body-file", async () => {
+			tmpDir = mkdtempSync(join(tmpdir(), "comments-test-"));
+			const filePath = join(tmpDir, "body.md");
+			writeFileSync(filePath, "Body from --file alias");
+
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, [
+				"comments",
+				"create",
+				"ENG-123",
+				"--file",
+				filePath,
+			]);
+
+			expect(mockRawRequest).toHaveBeenCalledWith(
+				expect.stringContaining("commentCreate"),
+				expect.objectContaining({
+					input: expect.objectContaining({ body: "Body from --file alias" }),
+				}),
+			);
+		});
+
+		it("does not call API when both file aliases are given", async () => {
+			tmpDir = mkdtempSync(join(tmpdir(), "comments-test-"));
+			const filePath = join(tmpDir, "body.md");
+			writeFileSync(filePath, "Body from file");
+			const infoSpy = vi.spyOn(logger, "info");
+
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, [
+				"comments",
+				"create",
+				"ENG-123",
+				"--body-file",
+				filePath,
+				"--file",
+				filePath,
+			]);
+
+			expect(mockRawRequest).not.toHaveBeenCalled();
+			expect(infoSpy).toHaveBeenCalledWith(
+				expect.stringContaining("are aliases"),
+			);
+		});
+
 		it("does not call API when --body-file path does not exist", async () => {
 			const program = createTestProgram();
 			setupCommentsCommands(program);
@@ -385,6 +432,29 @@ describe("comments commands", () => {
 					input: expect.objectContaining({
 						body: "Updated from file with literal \\n",
 					}),
+				}),
+			);
+		});
+
+		it("accepts --file as an alias for --body-file", async () => {
+			tmpDir = mkdtempSync(join(tmpdir(), "comments-test-"));
+			const filePath = join(tmpDir, "body.md");
+			writeFileSync(filePath, "Updated from --file alias");
+
+			const program = createTestProgram();
+			setupCommentsCommands(program);
+			await runCommand(program, [
+				"comments",
+				"update",
+				"comment-uuid",
+				"--file",
+				filePath,
+			]);
+
+			expect(mockRawRequest).toHaveBeenCalledWith(
+				expect.stringContaining("commentUpdate"),
+				expect.objectContaining({
+					input: expect.objectContaining({ body: "Updated from --file alias" }),
 				}),
 			);
 		});
