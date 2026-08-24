@@ -123,7 +123,7 @@ export function isRetryableGraphQLCode(code: string | null): boolean {
 }
 
 /**
- * The retryable verdict, from the status, the code, and the message.
+ * The retryable verdict from the authoritative response status and GraphQL code.
  *
  * "Retryable" here means *the failure is transient* — a caller that waits
  * an appropriate interval could succeed. It is NOT the same question as
@@ -136,14 +136,13 @@ export function isRetryableGraphQLCode(code: string | null): boolean {
  * DNS, a refused connection, a dropped socket — and those are exactly the
  * failures worth retrying. Every failure Linear itself produced arrives
  * with a status (`LinearError.status` is set from the HTTP response), so
- * this arm cannot swallow a permanent schema or permission error. Leaving
- * it to the message regex alone would misclassify any transport failure
- * whose wording is not in the list, which is unbounded.
+ * this arm cannot swallow a permanent schema or permission error. Message
+ * text is deliberately excluded: a permanent response may legitimately
+ * mention a transient-looking number such as a validation limit of 500.
  */
 export function classifyGraphQLFailure(
 	httpStatus: number | null,
 	code: string | null,
-	_message: string,
 ): boolean {
 	if (isRetryableHttpStatus(httpStatus) || isRetryableGraphQLCode(code)) {
 		return true;
@@ -205,14 +204,7 @@ export function toLinearGraphQLError(
 	return new LinearGraphQLError(message, {
 		httpStatus,
 		code,
-		// Classify off the ORIGINAL rejection's text, not the composed
-		// `message`: the transport arm needs the client's own wording
-		// (`fetch failed`), which a composed message may have replaced.
-		retryable: classifyGraphQLFailure(
-			httpStatus,
-			code,
-			error instanceof Error ? error.message : String(error),
-		),
+		retryable: classifyGraphQLFailure(httpStatus, code),
 	});
 }
 

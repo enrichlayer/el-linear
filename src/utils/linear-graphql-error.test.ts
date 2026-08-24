@@ -98,44 +98,29 @@ describe("isRetryableGraphQLCode", () => {
 
 describe("classifyGraphQLFailure", () => {
 	it("classifies a 429 and a 400 differently", () => {
-		expect(classifyGraphQLFailure(429, null, "Too many requests")).toBe(true);
-		expect(classifyGraphQLFailure(400, null, "Unknown field 'nope'")).toBe(
-			false,
-		);
+		expect(classifyGraphQLFailure(429, null)).toBe(true);
+		expect(classifyGraphQLFailure(400, null)).toBe(false);
 	});
 
 	it("retries a rate limit that arrives under a non-retryable status", () => {
 		// The whole point of reading extensions.code separately: Linear can
 		// answer a rate limit with a 400 body, and the status alone would
 		// then read as a permanent schema error.
-		expect(classifyGraphQLFailure(400, "RATELIMITED", "Rate limit")).toBe(true);
+		expect(classifyGraphQLFailure(400, "RATELIMITED")).toBe(true);
 	});
 
 	it("retries a transport failure that never got an answer out of Linear", () => {
 		// No status AND no code means the request never reached a Linear
 		// response — every failure Linear itself produced carries a status.
-		// Leaving these to the message list alone would misclassify any
-		// wording not in it, which is unbounded.
-		expect(classifyGraphQLFailure(null, null, "fetch failed")).toBe(true);
-		expect(classifyGraphQLFailure(null, null, "read ECONNRESET")).toBe(true);
-		expect(
-			classifyGraphQLFailure(
-				null,
-				null,
-				"Client network socket disconnected before secure TLS handshake",
-			),
-		).toBe(true);
+		// This structural absence is stronger than guessing from unbounded
+		// transport-error wording.
+		expect(classifyGraphQLFailure(null, null)).toBe(true);
 	});
 
-	it("does not let message text override an authoritative permanent response", () => {
-		expect(classifyGraphQLFailure(400, null, "upstream said 503")).toBe(false);
-		expect(classifyGraphQLFailure(401, null, "429 requests processed")).toBe(
-			false,
-		);
-		expect(
-			classifyGraphQLFailure(403, "FORBIDDEN", "backend returned 500 rows"),
-		).toBe(false);
-		expect(classifyGraphQLFailure(400, null, "Entity not found")).toBe(false);
+	it("keeps authoritative permanent responses non-retryable", () => {
+		expect(classifyGraphQLFailure(400, null)).toBe(false);
+		expect(classifyGraphQLFailure(401, null)).toBe(false);
+		expect(classifyGraphQLFailure(403, "FORBIDDEN")).toBe(false);
 	});
 });
 
