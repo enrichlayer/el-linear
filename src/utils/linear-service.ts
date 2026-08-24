@@ -16,9 +16,14 @@ import type {
 import type { AuthOptions } from "./auth.js";
 import { toISOStringOrNow, toISOStringOrUndefined } from "./date-format.js";
 import { multipleMatchesError, notFoundError } from "./error-messages.js";
+import { instrumentLinearClient } from "./graphql-service.js";
 import { parseIssueIdentifier } from "./identifier-parser.js";
 import { toLinearGraphQLError } from "./linear-graphql-error.js";
 import { parseProjectSlugId } from "./project-slug.js";
+import {
+	createOAuthProfileRateLimitAdmission,
+	type RateLimitAdmission,
+} from "./rate-limit-admission.js";
 import { isUuid } from "./uuid.js";
 
 const DEFAULT_CYCLE_PAGINATION_LIMIT = 250;
@@ -97,25 +102,37 @@ export function instrumentLinearGraphQLErrorClassification(
 	return client;
 }
 
-function buildLinearClient(auth: LinearServiceAuth): LinearClient {
+function buildLinearClient(
+	auth: LinearServiceAuth,
+	admission?: RateLimitAdmission,
+): LinearClient {
 	if ("oauthToken" in auth) {
 		// Linear's SDK natively supports OAuth via the `accessToken` option,
 		// which causes the underlying transport to send
 		// `Authorization: Bearer <token>` instead of the personal-token shape.
 		return instrumentLinearGraphQLErrorClassification(
-			new LinearClient({ accessToken: auth.oauthToken }),
+			instrumentLinearClient(
+				new LinearClient({ accessToken: auth.oauthToken }),
+				auth,
+				{ admission },
+			),
 		);
 	}
 	return instrumentLinearGraphQLErrorClassification(
-		new LinearClient({ apiKey: auth.apiKey }),
+		instrumentLinearClient(new LinearClient({ apiKey: auth.apiKey }), auth, {
+			admission,
+		}),
 	);
 }
 
 export class LinearService {
 	private readonly client: LinearClient;
 
-	constructor(auth: LinearServiceAuth) {
-		this.client = buildLinearClient(auth);
+	constructor(
+		auth: LinearServiceAuth,
+		options: { admission?: RateLimitAdmission } = {},
+	) {
+		this.client = buildLinearClient(auth, options.admission);
 	}
 
 	async resolveIssueId(issueId: string): Promise<string> {
@@ -843,7 +860,14 @@ export async function createLinearService(
 ): Promise<LinearService> {
 	const auth = await getActiveAuth(options);
 	if (auth.kind === "oauth") {
-		return new LinearService({ oauthToken: auth.token });
+		const credential = { oauthToken: auth.token } as const;
+		return new LinearService(credential, {
+			admission: createOAuthProfileRateLimitAdmission(
+				credential,
+				auth.oauth.clientId,
+				auth.oauth.viewerId,
+			),
+		});
 	}
 	return new LinearService({ apiKey: auth.token });
 }

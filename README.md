@@ -597,8 +597,32 @@ valid JSON. Current remaining/reset values come from the most recent response;
 `observedRequests`, `minimumRemaining`, `complexity.totalCost`, and each
 endpoint entry expose the command's aggregate cost and lowest observed
 headroom. Rate-limited error envelopes include the same metadata. Commands
-served entirely from cache or SDK paths that do not expose response headers
-omit it.
+served entirely from cache omit it.
+
+Automation can reserve a request floor before issuing another GraphQL call:
+
+```bash
+export EL_LINEAR_RATE_LIMIT_HEADROOM=250
+export EL_LINEAR_QUOTA_KEY=verticalint-shared-linear-user
+```
+
+When Linear's last observed remaining count reaches the configured floor,
+`el-linear` refuses the request until the observed reset time instead of
+consuming capacity reserved for higher-priority work. Admission and response
+observations are serialized across local processes. The state filename is a
+SHA-256 digest; neither the credential nor `EL_LINEAR_QUOTA_KEY` is written in
+clear text. Set the same non-secret quota key for API keys belonging to the
+same Linear user, because Linear pools those keys by user. Without an explicit
+key, API keys coordinate by credential and OAuth tokens coordinate by token.
+Profile OAuth uses its stable app/viewer identity so token refreshes keep the
+same local quota state.
+
+This file-backed admission is intentionally a same-machine boundary. Separate
+hosts still need a shared coordinator (or separate OAuth app-user quotas); do
+not interpret this setting as distributed admission. Read-through cache misses
+for teams, projects, labels, and similar cached lists are also single-flighted
+across local processes, preventing a cold-cache burst from issuing the same
+request once per command.
 
 Every command accepts `--format <kind>` at the root:
 

@@ -25,6 +25,7 @@
 import { randomBytes } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { withFileLock } from "../auth/oauth-fs.js";
 import { resolveActiveProfile } from "../config/paths.js";
 import { logger } from "./logger.js";
 
@@ -147,32 +148,62 @@ export async function cached<T>(
 		return fetcher();
 	}
 
-	const now = Date.now();
-
 	if (!options?.bypass) {
 		const envelope = await readEnvelope<T>(key);
-		if (envelope && envelope.expiresAt > now) {
+		if (envelope && envelope.expiresAt > Date.now()) {
 			return envelope.data;
 		}
 	}
 
-	const data = await fetcher();
-	const envelope: CacheEnvelope<T> = {
-		v: CACHE_VERSION,
-		key,
-		fetchedAt: now,
-		expiresAt: now + ttlSeconds * 1000,
-		data,
+	const fetchAndStore = async (): Promise<T> => {
+		const data = await fetcher();
+		const now = Date.now();
+		const envelope: CacheEnvelope<T> = {
+			v: CACHE_VERSION,
+			key,
+			fetchedAt: now,
+			expiresAt: now + ttlSeconds * 1000,
+			data,
+		};
+		try {
+			await writeEnvelope(key, envelope);
+		} catch (err) {
+			// Cache writes are best-effort — log to stderr and return the data
+			// anyway so a flaky disk doesn't break the user's command.
+			const msg = err instanceof Error ? err.message : String(err);
+			logger.error(`[disk-cache] write failed for "${key}": ${msg}`);
+		}
+		return data;
 	};
+
+	// `--no-cache` is an explicit request to bypass both the cached value and
+	// cache coordination. Preserve that contract instead of making two forced
+	// refreshes wait on one another.
+	if (options?.bypass) return fetchAndStore();
+
+	// Cold-cache single flight across processes. Re-read only after acquiring
+	// the sidecar lock: another el-linear invocation may have populated the
+	// envelope while this process was waiting. Without this second read, a
+	// burst of identical commands still sends one Linear request per process.
+	let enteredCriticalSection = false;
 	try {
-		await writeEnvelope(key, envelope);
+		await fs.mkdir(cacheDir(), { recursive: true, mode: CACHE_DIR_MODE });
+		return await withFileLock(cachePath(key), async () => {
+			enteredCriticalSection = true;
+			const winner = await readEnvelope<T>(key);
+			if (winner && winner.expiresAt > Date.now()) return winner.data;
+			return fetchAndStore();
+		});
 	} catch (err) {
-		// Cache writes are best-effort — log to stderr and return the data
-		// anyway so a flaky disk doesn't break the user's command.
+		// Never retry a failed fetcher: a write may have reached Linear before
+		// throwing, so replaying it would be unsafe. Only coordination failures
+		// that happen before entering the critical section degrade to the old
+		// uncoordinated read-through behavior.
+		if (enteredCriticalSection) throw err;
 		const msg = err instanceof Error ? err.message : String(err);
-		logger.error(`[disk-cache] write failed for "${key}": ${msg}`);
+		logger.error(`[disk-cache] single-flight unavailable for "${key}": ${msg}`);
+		return fetchAndStore();
 	}
-	return data;
 }
 
 /**

@@ -1,3 +1,4 @@
+import type { LinearClient } from "@linear/sdk";
 import { describe, expect, it, vi } from "vitest";
 import type { LinearGraphQLError } from "./linear-graphql-error.js";
 import { outputSuccess, resetWarnings } from "./output.js";
@@ -15,8 +16,12 @@ vi.mock("@linear/sdk", () => ({
 	},
 }));
 
-const { GraphQLService, isRateLimitGraphQLError, isTransientGraphQLError } =
-	await import("./graphql-service.js");
+const {
+	GraphQLService,
+	instrumentLinearClient,
+	isRateLimitGraphQLError,
+	isTransientGraphQLError,
+} = await import("./graphql-service.js");
 
 describe("GraphQLService", () => {
 	it("returns response data from rawRequest", async () => {
@@ -27,6 +32,91 @@ describe("GraphQLService", () => {
 
 		const result = await service.rawRequest("query { issue { id title } }");
 		expect(result).toEqual({ issue: { id: "123", title: "Test" } });
+	});
+
+	it("admits before the request and persists the returned quota observation", async () => {
+		const admit = vi.fn().mockResolvedValue(undefined);
+		const observe = vi.fn().mockResolvedValue(undefined);
+		mockRawRequest.mockResolvedValue({
+			data: { viewer: { id: "123" } },
+			headers: new Headers({
+				"x-ratelimit-requests-limit": "2500",
+				"x-ratelimit-requests-remaining": "2499",
+			}),
+		});
+		const service = new GraphQLService(
+			{ apiKey: "test-token" },
+			{ admission: { enabled: true, admit, observe } },
+		);
+
+		await service.rawRequest("query { viewer { id } }");
+
+		expect(admit).toHaveBeenCalledTimes(1);
+		expect(observe).toHaveBeenCalledWith(
+			expect.objectContaining({ limit: 2500, remaining: 2499 }),
+		);
+		expect(admit.mock.invocationCallOrder[0]).toBeLessThan(
+			mockRawRequest.mock.invocationCallOrder.at(-1) as number,
+		);
+	});
+
+	it("does not call Linear when quota admission refuses", async () => {
+		const before = mockRawRequest.mock.calls.length;
+		const service = new GraphQLService(
+			{ apiKey: "test-token" },
+			{
+				admission: {
+					enabled: true,
+					admit: vi
+						.fn()
+						.mockRejectedValue(
+							new Error(
+								"Linear rate limit exceeded before request; admission refused",
+							),
+						),
+					observe: vi.fn().mockResolvedValue(undefined),
+				},
+			},
+		);
+
+		await expect(service.rawRequest("query { viewer { id } }")).rejects.toThrow(
+			"Rate limit exceeded",
+		);
+		expect(mockRawRequest.mock.calls.length).toBe(before);
+	});
+
+	it("instruments SDK request calls without hiding response headers", async () => {
+		const admit = vi.fn().mockResolvedValue(undefined);
+		const observe = vi.fn().mockResolvedValue(undefined);
+		const rawRequest = vi.fn().mockResolvedValue({
+			data: { teams: { nodes: [] } },
+			headers: new Headers({
+				"x-ratelimit-requests-limit": "2500",
+				"x-ratelimit-requests-remaining": "2490",
+			}),
+		});
+		const client = {
+			client: { rawRequest, request: vi.fn() },
+		} as unknown as LinearClient;
+		instrumentLinearClient(
+			client,
+			{ apiKey: "test-token" },
+			{
+				admission: { enabled: true, admit, observe },
+			},
+		);
+
+		await expect(
+			(
+				client as unknown as {
+					client: { request(query: string): Promise<unknown> };
+				}
+			).client.request("query { teams { nodes { id } } }"),
+		).resolves.toEqual({ teams: { nodes: [] } });
+		expect(admit).toHaveBeenCalledTimes(1);
+		expect(observe).toHaveBeenCalledWith(
+			expect.objectContaining({ remaining: 2490 }),
+		);
 	});
 
 	it("surfaces successful response headers on normal JSON output", async () => {

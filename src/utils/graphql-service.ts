@@ -1,4 +1,5 @@
 import { LinearClient } from "@linear/sdk";
+import { type DocumentNode, print } from "graphql";
 import type { LinearCredential } from "../auth/linear-credential.js";
 import { getActiveAuth } from "../auth/token-resolver.js";
 import type { GraphQLResponseData, GraphQLVariables } from "../types/linear.js";
@@ -8,7 +9,13 @@ import {
 	graphQLErrorHttpStatus,
 	toLinearGraphQLError,
 } from "./linear-graphql-error.js";
+import { logger } from "./logger.js";
 import { type RateLimitInfo, recordRateLimitInfo } from "./output.js";
+import {
+	createOAuthProfileRateLimitAdmission,
+	createRateLimitAdmission,
+	type RateLimitAdmission,
+} from "./rate-limit-admission.js";
 
 interface ResponseHeaders {
 	get(name: string): string | null;
@@ -35,6 +42,8 @@ interface GraphQLServiceRuntimeOptions {
 	retryDelaysMs?: readonly number[];
 	sleep?: (ms: number) => Promise<void>;
 	now?: () => number;
+	/** Test/embedding seam; production derives this from EL_LINEAR_RATE_LIMIT_HEADROOM. */
+	admission?: RateLimitAdmission;
 }
 
 const DEFAULT_SAFE_MUTATION_RETRY_DELAYS_MS = [150, 400] as const;
@@ -112,7 +121,7 @@ function resetAtFromRetryAfter(
 	return undefined;
 }
 
-function extractRateLimitInfo(
+export function extractRateLimitInfo(
 	source: unknown,
 	now: () => number,
 ): RateLimitInfo | undefined {
@@ -307,11 +316,89 @@ function buildLinearClient(auth: GraphQLServiceAuth): LinearClient {
 	return new LinearClient({ apiKey: auth.apiKey, headers: baseHeaders });
 }
 
+interface InstrumentableTransport {
+	rawRequest<T>(
+		query: string,
+		variables?: GraphQLVariables,
+		requestHeaders?: Record<string, string>,
+	): Promise<{ data: T; headers?: ResponseHeaders; status?: number }>;
+	request<T>(
+		document: string | DocumentNode,
+		variables?: GraphQLVariables,
+		requestHeaders?: Record<string, string>,
+	): Promise<T>;
+}
+
+async function persistRateLimitObservation(
+	admission: RateLimitAdmission,
+	info: RateLimitInfo,
+): Promise<void> {
+	recordRateLimitInfo(info);
+	try {
+		await admission.observe(info);
+	} catch (error) {
+		// The request already completed. Never turn an observation write
+		// failure into a replayable command failure (especially for mutations).
+		const message = error instanceof Error ? error.message : String(error);
+		logger.error(
+			`[rate-limit] could not persist quota observation: ${message}`,
+		);
+	}
+}
+
+/**
+ * Put SDK-backed LinearService calls through the same quota admission and
+ * response-header observer as custom GraphQLService calls. The SDK's public
+ * `request()` discards response headers, so this narrow transport adapter uses
+ * its own public-ish rawRequest escape hatch and returns only `data` to the
+ * generated SDK models, preserving their existing contract.
+ */
+export function instrumentLinearClient(
+	client: LinearClient,
+	auth: GraphQLServiceAuth,
+	options: { admission?: RateLimitAdmission; now?: () => number } = {},
+): LinearClient {
+	const transport = (client as unknown as { client?: InstrumentableTransport })
+		.client;
+	// Unit-test doubles and future SDK versions may not expose the escape hatch.
+	// Leave them untouched rather than manufacturing a partial transport.
+	if (!transport?.rawRequest || !transport.request) return client;
+	const originalRawRequest = transport.rawRequest.bind(transport);
+	const admission =
+		options.admission ?? createRateLimitAdmission(auth, { now: options.now });
+	const now = options.now ?? Date.now;
+
+	transport.request = async <T>(
+		document: string | DocumentNode,
+		variables?: GraphQLVariables,
+		requestHeaders?: Record<string, string>,
+	): Promise<T> => {
+		await admission.admit();
+		const query = typeof document === "string" ? document : print(document);
+		try {
+			const response = await originalRawRequest<T>(
+				query,
+				variables,
+				requestHeaders,
+			);
+			const rateLimit = extractRateLimitInfo(response, now);
+			if (rateLimit) await persistRateLimitObservation(admission, rateLimit);
+			return response.data;
+		} catch (error) {
+			const rateLimit = extractRateLimitInfo(error, now);
+			if (rateLimit) await persistRateLimitObservation(admission, rateLimit);
+			throw error;
+		}
+	};
+	return client;
+}
+
 export class GraphQLService {
 	private readonly graphQLClient: GraphQLRawClient;
 	private readonly retryDelaysMs: readonly number[];
 	private readonly sleep: (ms: number) => Promise<void>;
 	private readonly now: () => number;
+	private readonly admission: RateLimitAdmission;
 
 	constructor(
 		auth: GraphQLServiceAuth,
@@ -328,6 +415,12 @@ export class GraphQLService {
 			options.sleep ??
 			((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
 		this.now = options.now ?? Date.now;
+		this.admission =
+			options.admission ?? createRateLimitAdmission(auth, { now: this.now });
+	}
+
+	private async observeRateLimit(info: RateLimitInfo): Promise<void> {
+		await persistRateLimitObservation(this.admission, info);
 	}
 
 	// Default type allows property access on raw GraphQL responses.
@@ -341,16 +434,17 @@ export class GraphQLService {
 		try {
 			while (true) {
 				try {
+					await this.admission.admit();
 					const response = await this.graphQLClient.rawRequest<T>(
 						query,
 						variables,
 					);
 					const rateLimit = extractRateLimitInfo(response, this.now);
-					if (rateLimit) recordRateLimitInfo(rateLimit);
+					if (rateLimit) await this.observeRateLimit(rateLimit);
 					return response.data;
 				} catch (error) {
 					const rateLimit = extractRateLimitInfo(error, this.now);
-					if (rateLimit) recordRateLimitInfo(rateLimit);
+					if (rateLimit) await this.observeRateLimit(rateLimit);
 					if (
 						!options.retrySafeMutation ||
 						attempt >= this.retryDelaysMs.length ||
@@ -391,7 +485,14 @@ export async function createGraphQLService(
 ): Promise<GraphQLService> {
 	const auth = await getActiveAuth(options);
 	if (auth.kind === "oauth") {
-		return new GraphQLService({ oauthToken: auth.token });
+		const credential = { oauthToken: auth.token } as const;
+		return new GraphQLService(credential, {
+			admission: createOAuthProfileRateLimitAdmission(
+				credential,
+				auth.oauth.clientId,
+				auth.oauth.viewerId,
+			),
+		});
 	}
 	return new GraphQLService({ apiKey: auth.token });
 }
