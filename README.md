@@ -618,11 +618,22 @@ Profile OAuth uses its stable app/viewer identity so token refreshes keep the
 same local quota state.
 
 This file-backed admission is intentionally a same-machine boundary. Separate
-hosts still need a shared coordinator (or separate OAuth app-user quotas); do
-not interpret this setting as distributed admission. Read-through cache misses
-for teams, projects, labels, and similar cached lists are also single-flighted
-across local processes, preventing a cold-cache burst from issuing the same
-request once per command.
+hosts can opt into the companion distributed coordinator:
+
+```bash
+export EL_LINEAR_RATE_LIMIT_COORDINATOR_URL=https://el-linear-control-plane.example.workers.dev
+export EL_LINEAR_RATE_LIMIT_COORDINATOR_TOKEN="..."
+```
+
+The URL switches admission and observations to the coordinator's atomic
+Durable Object for the hashed quota key. Admission fails closed when that
+service is unavailable; a completed Linear response is never replayed merely
+because its observation could not be persisted. Without the URL, do not
+interpret the file-backed setting as distributed admission.
+
+Read-through cache misses for teams, projects, labels, and similar cached lists
+are also single-flighted across local processes, preventing a cold-cache burst
+from issuing the same request once per command.
 
 Every command accepts `--format <kind>` at the root:
 

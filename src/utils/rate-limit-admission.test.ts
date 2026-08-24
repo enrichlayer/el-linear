@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRateLimitAdmission } from "./rate-limit-admission.js";
 
 const roots: string[] = [];
@@ -53,6 +53,12 @@ describe("rate-limit admission", () => {
 		);
 	});
 
+	it("permits only one initial probe before the first observation", async () => {
+		const gate = admission();
+		await expect(gate.admit()).resolves.toBeUndefined();
+		await expect(gate.admit()).rejects.toThrow("probe is already in flight");
+	});
+
 	it("admits one probe after reset and holds followers until observation", async () => {
 		let current = Date.parse("2026-08-24T08:00:00Z");
 		const gate = admission("2", () => current);
@@ -65,6 +71,16 @@ describe("rate-limit admission", () => {
 			remaining: 2499,
 			resetAt: "2026-08-24T10:00:00Z",
 		});
+		await expect(gate.admit()).resolves.toBeUndefined();
+	});
+
+	it("recovers when a probe fails before reporting rate-limit headers", async () => {
+		let current = Date.parse("2026-08-24T08:00:00Z");
+		const gate = admission("2", () => current);
+		await expect(gate.admit()).resolves.toBeUndefined();
+		current += 29_999;
+		await expect(gate.admit()).rejects.toThrow("probe is already in flight");
+		current += 1;
 		await expect(gate.admit()).resolves.toBeUndefined();
 	});
 
@@ -112,5 +128,83 @@ describe("rate-limit admission", () => {
 		expect(
 			await fs.readFile(path.join(stateRoot, names[0] as string), "utf8"),
 		).not.toContain("shared-user");
+	});
+
+	it("uses the distributed coordinator when configured", async () => {
+		const fetchImpl = vi.fn().mockResolvedValue({
+			ok: true,
+			status: 200,
+			json: async () => ({ admitted: true }),
+		});
+		const gate = createRateLimitAdmission(
+			{ apiKey: "token-a" },
+			{
+				env: {
+					EL_LINEAR_RATE_LIMIT_HEADROOM: "25",
+					EL_LINEAR_QUOTA_KEY: "shared-user",
+					EL_LINEAR_RATE_LIMIT_COORDINATOR_URL: "https://quota.example/",
+					EL_LINEAR_RATE_LIMIT_COORDINATOR_TOKEN: "control-token",
+				},
+				fetchImpl,
+			},
+		);
+		await gate.admit();
+		await gate.observe({
+			limit: 2500,
+			remaining: 2400,
+			resetAt: "2026-08-24T10:00:00Z",
+		});
+		expect(fetchImpl).toHaveBeenCalledTimes(2);
+		expect(fetchImpl.mock.calls[0][0]).toMatch(
+			/^https:\/\/quota\.example\/v1\/quota\/[a-f0-9]{64}\/admit$/,
+		);
+		expect(fetchImpl.mock.calls[0][1]).toMatchObject({
+			headers: { authorization: "Bearer control-token" },
+		});
+		expect(JSON.parse(fetchImpl.mock.calls[1][1].body)).toEqual({
+			limit: 2500,
+			remaining: 2400,
+			resetAt: "2026-08-24T10:00:00Z",
+		});
+	});
+
+	it("surfaces a coordinator headroom refusal before the Linear request", async () => {
+		const gate = createRateLimitAdmission(
+			{ apiKey: "token-a" },
+			{
+				env: {
+					EL_LINEAR_RATE_LIMIT_HEADROOM: "25",
+					EL_LINEAR_RATE_LIMIT_COORDINATOR_URL: "https://quota.example",
+					EL_LINEAR_RATE_LIMIT_COORDINATOR_TOKEN: "control-token",
+				},
+				fetchImpl: vi.fn().mockResolvedValue({
+					ok: false,
+					status: 429,
+					json: async () => ({
+						state: {
+							remaining: 25,
+							resetAt: "2026-08-24T10:00:00Z",
+						},
+					}),
+				}),
+			},
+		);
+		await expect(gate.admit()).rejects.toThrow(
+			"distributed admission refused: 25 requests remain",
+		);
+	});
+
+	it("requires a coordinator token instead of failing open", () => {
+		expect(() =>
+			createRateLimitAdmission(
+				{ apiKey: "token-a" },
+				{
+					env: {
+						EL_LINEAR_RATE_LIMIT_HEADROOM: "25",
+						EL_LINEAR_RATE_LIMIT_COORDINATOR_URL: "https://quota.example",
+					},
+				},
+			),
+		).toThrow("EL_LINEAR_RATE_LIMIT_COORDINATOR_TOKEN is required");
 	});
 });

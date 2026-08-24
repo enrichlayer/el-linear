@@ -7,6 +7,7 @@ import { atomicWrite, withFileLock } from "../auth/oauth-fs.js";
 import type { RateLimitInfo } from "./output.js";
 
 const STATE_VERSION = 1;
+const PROBE_LEASE_MS = 30_000;
 
 interface QuotaState {
 	v: typeof STATE_VERSION;
@@ -14,6 +15,7 @@ interface QuotaState {
 	remaining: number;
 	resetAt?: string;
 	observedAt: number;
+	probeUntil?: number;
 }
 
 export interface RateLimitAdmission {
@@ -24,9 +26,19 @@ export interface RateLimitAdmission {
 
 export interface RateLimitAdmissionOptions {
 	env?: NodeJS.ProcessEnv;
+	fetchImpl?: CoordinatorFetchLike;
 	now?: () => number;
 	stateRoot?: string;
 }
+
+type CoordinatorFetchLike = (
+	url: string,
+	init: {
+		method: string;
+		headers: Record<string, string>;
+		body: string;
+	},
+) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>;
 
 function parseHeadroom(env: NodeJS.ProcessEnv): number {
 	const raw = env.EL_LINEAR_RATE_LIMIT_HEADROOM?.trim();
@@ -45,6 +57,81 @@ function quotaKey(auth: LinearCredential, env: NodeJS.ProcessEnv): string {
 	const source =
 		explicit || ("oauthToken" in auth ? auth.oauthToken : auth.apiKey);
 	return createHash("sha256").update(source).digest("hex");
+}
+
+function coordinatorUrl(env: NodeJS.ProcessEnv): string | null {
+	const raw = env.EL_LINEAR_RATE_LIMIT_COORDINATOR_URL?.trim();
+	if (!raw) return null;
+	let parsed: URL;
+	try {
+		parsed = new URL(raw);
+	} catch {
+		throw new Error(
+			"EL_LINEAR_RATE_LIMIT_COORDINATOR_URL must be a valid URL.",
+		);
+	}
+	if (!/^https?:$/.test(parsed.protocol)) {
+		throw new Error(
+			"EL_LINEAR_RATE_LIMIT_COORDINATOR_URL must use HTTP or HTTPS.",
+		);
+	}
+	return parsed.toString().replace(/\/$/, "");
+}
+
+function createCoordinatorAdmission(
+	key: string,
+	headroom: number,
+	baseUrl: string,
+	token: string,
+	fetchImpl: CoordinatorFetchLike,
+): RateLimitAdmission {
+	const post = async (
+		action: "admit" | "observe",
+		body: Record<string, unknown>,
+	): Promise<{ status: number; payload: unknown }> => {
+		const response = await fetchImpl(
+			`${baseUrl}/v1/quota/${encodeURIComponent(key)}/${action}`,
+			{
+				method: "POST",
+				headers: {
+					authorization: `Bearer ${token}`,
+					"content-type": "application/json",
+				},
+				body: JSON.stringify(body),
+			},
+		);
+		const payload = await response.json().catch(() => null);
+		if (!(response.ok || (action === "admit" && response.status === 429))) {
+			throw new Error(
+				`Linear quota coordinator ${action} failed with HTTP ${response.status}.`,
+			);
+		}
+		return { status: response.status, payload };
+	};
+
+	return {
+		enabled: true,
+		async admit(): Promise<void> {
+			const result = await post("admit", { headroom, cost: 1 });
+			if (result.status !== 429) return;
+			const state = (
+				result.payload as { state?: { remaining?: number; resetAt?: string } }
+			)?.state;
+			const remaining = state?.remaining ?? 0;
+			const reset = state?.resetAt ? ` until ${state.resetAt}` : "";
+			throw new Error(
+				`Linear rate limit exceeded before request; distributed admission refused: ${remaining} requests remain, preserving configured headroom ${headroom}${reset}.`,
+			);
+		},
+		async observe(info: RateLimitInfo): Promise<void> {
+			if (info.remaining === undefined) return;
+			await post("observe", {
+				limit: info.limit,
+				remaining: info.remaining,
+				resetAt: info.resetAt,
+			});
+		},
+	};
 }
 
 function defaultStateRoot(env: NodeJS.ProcessEnv): string {
@@ -91,9 +178,30 @@ export function createRateLimitAdmission(
 	}
 
 	const now = options.now ?? Date.now;
+	const key = quotaKey(auth, env);
+	const remote = coordinatorUrl(env);
+	if (remote) {
+		const token = env.EL_LINEAR_RATE_LIMIT_COORDINATOR_TOKEN?.trim();
+		if (!token) {
+			throw new Error(
+				"EL_LINEAR_RATE_LIMIT_COORDINATOR_TOKEN is required when the coordinator URL is configured.",
+			);
+		}
+		const fetchImpl: CoordinatorFetchLike =
+			options.fetchImpl ??
+			(async (url, init) => {
+				const response = await globalThis.fetch(url, init);
+				return {
+					ok: response.ok,
+					status: response.status,
+					json: () => response.json(),
+				};
+			});
+		return createCoordinatorAdmission(key, headroom, remote, token, fetchImpl);
+	}
 	const statePath = path.join(
 		options.stateRoot ?? defaultStateRoot(env),
-		`${quotaKey(auth, env)}.json`,
+		`${key}.json`,
 	);
 
 	return {
@@ -102,23 +210,44 @@ export function createRateLimitAdmission(
 			await fs.mkdir(path.dirname(statePath), { recursive: true, mode: 0o700 });
 			await withFileLock(statePath, async () => {
 				const state = await readState(statePath);
-				if (!state) return;
+				const currentTime = now();
+				if (!state) {
+					await writeState(statePath, {
+						v: STATE_VERSION,
+						remaining: headroom,
+						observedAt: currentTime,
+						probeUntil: currentTime + PROBE_LEASE_MS,
+					});
+					return;
+				}
 				const resetAtMs = state.resetAt
 					? Date.parse(state.resetAt)
 					: Number.NaN;
-				if (Number.isFinite(resetAtMs) && now() >= resetAtMs) {
+				const leaseExpired =
+					state.probeUntil !== undefined && currentTime >= state.probeUntil;
+				if (
+					(Number.isFinite(resetAtMs) && currentTime >= resetAtMs) ||
+					leaseExpired
+				) {
 					// Permit exactly one probe into the new window. Closing the local
 					// gate before releasing the lock prevents every waiting process
 					// from seeing the same expired state and stampeding the reset.
-					// Its response headers will reopen the gate with authoritative
-					// capacity; a headerless failure remains safely pessimistic.
+					// Its response headers reopen the gate with authoritative capacity;
+					// a headerless failure remains pessimistic until the bounded lease
+					// permits exactly one recovery probe.
 					await writeState(statePath, {
 						...state,
 						remaining: headroom,
 						resetAt: undefined,
-						observedAt: now(),
+						observedAt: currentTime,
+						probeUntil: currentTime + PROBE_LEASE_MS,
 					});
 					return;
+				}
+				if (state.probeUntil !== undefined) {
+					throw new Error(
+						`Linear rate limit probe is already in flight; admission refused while preserving configured headroom ${headroom}.`,
+					);
 				}
 				if (state.remaining <= headroom) {
 					const reset = state.resetAt ? ` until ${state.resetAt}` : "";
@@ -132,7 +261,7 @@ export function createRateLimitAdmission(
 				await writeState(statePath, {
 					...state,
 					remaining: state.remaining - 1,
-					observedAt: now(),
+					observedAt: currentTime,
 				});
 			});
 		},
@@ -157,6 +286,7 @@ export function createRateLimitAdmission(
 					remaining,
 					resetAt: info.resetAt,
 					observedAt: now(),
+					probeUntil: undefined,
 				});
 			});
 		},
