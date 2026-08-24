@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+	exchangeClientCredentials,
 	exchangeCodeForTokens,
 	type FetchLike,
 	refreshTokens,
@@ -245,6 +246,36 @@ describe("refreshTokens", () => {
 		await expect(
 			refreshTokens({ clientId: "id", refreshToken: "expired" }, fetchImpl),
 		).rejects.toThrow(/401/);
+	});
+});
+
+describe("exchangeClientCredentials", () => {
+	it("posts the browserless app-user grant and requested scopes", async () => {
+		const fetchImpl = vi.fn<FetchLike>(async () =>
+			jsonResponse({
+				access_token: "app-access",
+				token_type: "Bearer",
+				expires_in: 2_592_000,
+				scope: "read,write",
+			}),
+		);
+		const result = await exchangeClientCredentials(
+			{
+				clientId: "app-id",
+				clientSecret: "app-secret",
+				scopes: ["read", "write"],
+			},
+			fetchImpl,
+			() => 1_000,
+		);
+		expect(result.accessToken).toBe("app-access");
+		expect(result.refreshToken).toBeUndefined();
+		expect(result.expiresAt).toBe(1_000 + 2_592_000 * 1000);
+		const body = new URLSearchParams(fetchImpl.mock.calls[0][1].body);
+		expect(body.get("grant_type")).toBe("client_credentials");
+		expect(body.get("client_id")).toBe("app-id");
+		expect(body.get("client_secret")).toBe("app-secret");
+		expect(body.get("scope")).toBe("read,write");
 	});
 });
 

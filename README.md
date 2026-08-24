@@ -111,6 +111,25 @@ el-linear init oauth --actor app
 App actor tokens can request `app:assignable` and `app:mentionable`, but not
 `admin`. The authorized app user ID is stored in `oauth.json` as `viewerId`.
 
+OAuth apps that have Linear's client-credentials grant enabled can obtain an
+app-user token without a browser. Keep the secret out of argv and source it
+through an environment variable:
+
+```bash
+export LINEAR_OAUTH_CLIENT_SECRET="..."
+el-linear init oauth --client-credentials --actor app \
+  --client-id your-linear-oauth-client-id
+```
+
+Use `--client-secret-env NAME` to read a differently named variable and
+`--scopes read,write,issues:create,comments:create` to override the configured
+scope set. The 0600 profile state stores the secret so el-linear can acquire a
+new token before expiry and once after an HTTP 401; client-credentials tokens
+do not have refresh tokens. Keep the scope set stable: Linear revokes an app's
+existing client-credentials tokens when a new token requests different scopes.
+This flow is opt-in. Remote automation can keep using `LINEAR_API_TOKEN`, which
+remains higher precedence than profile OAuth.
+
 At runtime, credentials are resolved in this order:
 
 1. `--api-token <token>` flag.

@@ -65,6 +65,12 @@ interface RefreshTokensInput {
 	refreshToken: string;
 }
 
+interface ClientCredentialsInput {
+	clientId: string;
+	clientSecret: string;
+	scopes: readonly OAuthScope[];
+}
+
 interface RevokeTokenInput {
 	accessToken: string;
 }
@@ -202,6 +208,30 @@ export async function refreshTokens(
 	);
 	if (typeof res.access_token !== "string" || res.access_token === "") {
 		throw new Error("OAuth refresh response missing `access_token`.");
+	}
+	return tokenResponseToResult(res, now());
+}
+
+/** Obtain an app-user token without a browser or refresh token. */
+export async function exchangeClientCredentials(
+	input: ClientCredentialsInput,
+	fetchImpl: FetchLike = defaultFetch,
+	now: () => number = Date.now,
+): Promise<ExchangeResult> {
+	const res = await postForm<LinearTokenResponse>(
+		LINEAR_TOKEN_URL,
+		{
+			grant_type: "client_credentials",
+			client_id: input.clientId,
+			client_secret: input.clientSecret,
+			scope: input.scopes.join(","),
+		},
+		fetchImpl,
+	);
+	if (typeof res.access_token !== "string" || res.access_token === "") {
+		throw new Error(
+			"OAuth client-credentials response missing `access_token`.",
+		);
 	}
 	return tokenResponseToResult(res, now());
 }

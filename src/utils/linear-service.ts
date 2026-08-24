@@ -1,6 +1,9 @@
 import { LinearClient } from "@linear/sdk";
 import type { LinearCredential } from "../auth/linear-credential.js";
-import { getActiveAuth } from "../auth/token-resolver.js";
+import {
+	ensureFreshAccessToken,
+	getActiveAuth,
+} from "../auth/token-resolver.js";
 import { resolveUserDisplayName } from "../config/resolver.js";
 import {
 	GET_CYCLE_DETAIL_QUERY,
@@ -35,7 +38,10 @@ import { toISOStringOrNow, toISOStringOrUndefined } from "./date-format.js";
 import { multipleMatchesError, notFoundError } from "./error-messages.js";
 import { GraphQLService, instrumentLinearClient } from "./graphql-service.js";
 import { parseIssueIdentifier } from "./identifier-parser.js";
-import { toLinearGraphQLError } from "./linear-graphql-error.js";
+import {
+	graphQLErrorHttpStatus,
+	toLinearGraphQLError,
+} from "./linear-graphql-error.js";
 import { parseProjectSlugId } from "./project-slug.js";
 import {
 	createOAuthProfileRateLimitAdmission,
@@ -127,6 +133,15 @@ interface ClassifiableSdkClient {
 	_request?: LinearSdkRequest;
 }
 
+interface RenewableSdkTransport {
+	request<T>(
+		document: unknown,
+		variables?: Record<string, unknown>,
+		requestHeaders?: Record<string, string>,
+	): Promise<T>;
+	setHeader(name: string, value: string): void;
+}
+
 function errorMessage(error: unknown): string {
 	if (error instanceof Error) return error.message;
 	if (typeof error === "object" && error !== null) {
@@ -163,19 +178,46 @@ export function instrumentLinearGraphQLErrorClassification(
 	return client;
 }
 
+export function instrumentClientCredentialsRenewal(
+	client: LinearClient,
+	renewAccessToken?: () => Promise<string>,
+): LinearClient {
+	if (!renewAccessToken) return client;
+	const transport = (client as unknown as { client?: RenewableSdkTransport })
+		.client;
+	if (!transport?.request || !transport.setHeader) return client;
+	const originalRequest = transport.request.bind(transport);
+	transport.request = async <T>(
+		document: unknown,
+		variables?: Record<string, unknown>,
+		requestHeaders?: Record<string, string>,
+	): Promise<T> => {
+		try {
+			return await originalRequest<T>(document, variables, requestHeaders);
+		} catch (error) {
+			if (graphQLErrorHttpStatus(error) !== 401) throw error;
+			const token = await renewAccessToken();
+			transport.setHeader("authorization", `Bearer ${token}`);
+			return originalRequest<T>(document, variables, requestHeaders);
+		}
+	};
+	return client;
+}
+
 function buildLinearClient(
 	auth: LinearServiceAuth,
 	admission?: RateLimitAdmission,
+	renewAccessToken?: () => Promise<string>,
 ): LinearClient {
 	if ("oauthToken" in auth) {
-		// Linear's SDK natively supports OAuth via the `accessToken` option,
-		// which causes the underlying transport to send
-		// `Authorization: Bearer <token>` instead of the personal-token shape.
 		return instrumentLinearGraphQLErrorClassification(
-			instrumentLinearClient(
-				new LinearClient({ accessToken: auth.oauthToken }),
-				auth,
-				{ admission },
+			instrumentClientCredentialsRenewal(
+				instrumentLinearClient(
+					new LinearClient({ accessToken: auth.oauthToken }),
+					auth,
+					{ admission },
+				),
+				renewAccessToken,
 			),
 		);
 	}
@@ -195,12 +237,20 @@ export class LinearService {
 		options: {
 			admission?: RateLimitAdmission;
 			graphQLService?: GraphQLService;
+			renewAccessToken?: () => Promise<string>;
 		} = {},
 	) {
-		this.client = buildLinearClient(auth, options.admission);
+		this.client = buildLinearClient(
+			auth,
+			options.admission,
+			options.renewAccessToken,
+		);
 		this.graphQLService =
 			options.graphQLService ??
-			new GraphQLService(auth, { admission: options.admission });
+			new GraphQLService(auth, {
+				admission: options.admission,
+				renewAccessToken: options.renewAccessToken,
+			});
 	}
 
 	async resolveIssueId(issueId: string): Promise<string> {
@@ -814,6 +864,15 @@ export async function createLinearService(
 				auth.oauth.clientId,
 				auth.oauth.viewerId,
 			),
+			renewAccessToken:
+				auth.oauth.grantType === "client_credentials"
+					? async () =>
+							(
+								await ensureFreshAccessToken(auth.oauth, {
+									forceOAuthRenewal: true,
+								})
+							).accessToken
+					: undefined,
 		});
 	}
 	return new LinearService({ apiKey: auth.token });

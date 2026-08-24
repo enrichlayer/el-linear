@@ -1,7 +1,10 @@
 import { LinearClient } from "@linear/sdk";
 import { type DocumentNode, print } from "graphql";
 import type { LinearCredential } from "../auth/linear-credential.js";
-import { getActiveAuth } from "../auth/token-resolver.js";
+import {
+	ensureFreshAccessToken,
+	getActiveAuth,
+} from "../auth/token-resolver.js";
 import type { GraphQLResponseData, GraphQLVariables } from "../types/linear.js";
 import type { AuthOptions } from "./auth.js";
 import {
@@ -22,6 +25,7 @@ interface ResponseHeaders {
 }
 
 interface GraphQLRawClient {
+	setHeader(name: string, value: string): void;
 	rawRequest: <T>(
 		query: string,
 		variables?: GraphQLVariables,
@@ -44,6 +48,8 @@ interface GraphQLServiceRuntimeOptions {
 	now?: () => number;
 	/** Test/embedding seam; production derives this from EL_LINEAR_RATE_LIMIT_HEADROOM. */
 	admission?: RateLimitAdmission;
+	/** Reacquire an app-user client-credentials token after HTTP 401. */
+	renewAccessToken?: () => Promise<string>;
 }
 
 const DEFAULT_SAFE_MUTATION_RETRY_DELAYS_MS = [150, 400] as const;
@@ -176,7 +182,6 @@ export function extractRateLimitInfo(
 		endpointLimit !== undefined ||
 		endpointRemaining !== undefined ||
 		endpointResetTimestamp !== undefined;
-
 	if (
 		limit === undefined &&
 		remaining === undefined &&
@@ -399,6 +404,7 @@ export class GraphQLService {
 	private readonly sleep: (ms: number) => Promise<void>;
 	private readonly now: () => number;
 	private readonly admission: RateLimitAdmission;
+	private readonly renewAccessToken?: () => Promise<string>;
 
 	constructor(
 		auth: GraphQLServiceAuth,
@@ -417,6 +423,7 @@ export class GraphQLService {
 		this.now = options.now ?? Date.now;
 		this.admission =
 			options.admission ?? createRateLimitAdmission(auth, { now: this.now });
+		this.renewAccessToken = options.renewAccessToken;
 	}
 
 	private async observeRateLimit(info: RateLimitInfo): Promise<void> {
@@ -431,6 +438,7 @@ export class GraphQLService {
 		options: GraphQLRequestOptions = {},
 	): Promise<T> {
 		let attempt = 0;
+		let renewedAfterUnauthorized = false;
 		try {
 			while (true) {
 				try {
@@ -445,6 +453,16 @@ export class GraphQLService {
 				} catch (error) {
 					const rateLimit = extractRateLimitInfo(error, this.now);
 					if (rateLimit) await this.observeRateLimit(rateLimit);
+					if (
+						!renewedAfterUnauthorized &&
+						this.renewAccessToken &&
+						graphQLErrorHttpStatus(error) === 401
+					) {
+						const token = await this.renewAccessToken();
+						this.graphQLClient.setHeader("authorization", `Bearer ${token}`);
+						renewedAfterUnauthorized = true;
+						continue;
+					}
 					if (
 						!options.retrySafeMutation ||
 						attempt >= this.retryDelaysMs.length ||
@@ -492,6 +510,15 @@ export async function createGraphQLService(
 				auth.oauth.clientId,
 				auth.oauth.viewerId,
 			),
+			renewAccessToken:
+				auth.oauth.grantType === "client_credentials"
+					? async () =>
+							(
+								await ensureFreshAccessToken(auth.oauth, {
+									forceOAuthRenewal: true,
+								})
+							).accessToken
+					: undefined,
 		});
 	}
 	return new GraphQLService({ apiKey: auth.token });

@@ -35,8 +35,11 @@ vi.mock("@linear/sdk", () => ({
 	},
 }));
 
-const { LinearService, instrumentLinearGraphQLErrorClassification } =
-	await import("./linear-service.js");
+const {
+	LinearService,
+	instrumentClientCredentialsRenewal,
+	instrumentLinearGraphQLErrorClassification,
+} = await import("./linear-service.js");
 
 // Reset every mock before each test so tests are order-independent: call
 // logs, queued `mockResolvedValueOnce` entries, AND base implementations.
@@ -117,6 +120,26 @@ describe("LinearService", () => {
 			expect(readGraphQLErrorDetail(thrown)).toBeNull();
 			expect((thrown as Error).message).toContain('Issue "DEV-999" not found');
 		});
+	});
+
+	it("renews the SDK transport once after HTTP 401", async () => {
+		const request = vi
+			.fn()
+			.mockRejectedValueOnce({ status: 401 })
+			.mockResolvedValueOnce({ nodes: [{ id: "team" }] });
+		const setHeader = vi.fn();
+		const renewAccessToken = vi.fn().mockResolvedValue("renewed-token");
+		const client = { client: { request, setHeader } };
+		instrumentClientCredentialsRenewal(client as never, renewAccessToken);
+
+		await expect(client.client.request("query")).resolves.toEqual({
+			nodes: [{ id: "team" }],
+		});
+		expect(renewAccessToken).toHaveBeenCalledTimes(1);
+		expect(setHeader).toHaveBeenCalledWith(
+			"authorization",
+			"Bearer renewed-token",
+		);
 	});
 
 	describe("resolveIssueId", () => {
@@ -548,9 +571,7 @@ describe("LinearService", () => {
 			mockRawRequest.mockResolvedValue({
 				data: {
 					projects: {
-						nodes: [
-							{ id: "resolved-uuid", name: "Foo", teams: { nodes: [] } },
-						],
+						nodes: [{ id: "resolved-uuid", name: "Foo", teams: { nodes: [] } }],
 					},
 				},
 			});

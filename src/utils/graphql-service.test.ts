@@ -4,12 +4,13 @@ import type { LinearGraphQLError } from "./linear-graphql-error.js";
 import { outputSuccess, resetWarnings } from "./output.js";
 
 const mockRawRequest = vi.fn();
+const mockSetHeader = vi.fn();
 const linearClientCtorSpy = vi.fn();
 
 // Mock @linear/sdk with a proper class constructor that records its options.
 vi.mock("@linear/sdk", () => ({
 	LinearClient: class MockLinearClient {
-		client = { rawRequest: mockRawRequest };
+		client = { rawRequest: mockRawRequest, setHeader: mockSetHeader };
 		constructor(opts: unknown) {
 			linearClientCtorSpy(opts);
 		}
@@ -490,6 +491,25 @@ describe("GraphQLService", () => {
 		expect(isTransientGraphQLError(graphqlRateLimit)).toBe(false);
 		expect(isTransientGraphQLError({ response: { status: 408 } })).toBe(true);
 		expect(isTransientGraphQLError({ response: { status: 503 } })).toBe(true);
+	});
+
+	it("renews client credentials once after HTTP 401", async () => {
+		mockRawRequest
+			.mockRejectedValueOnce({ status: 401, message: "Unauthorized" })
+			.mockResolvedValueOnce({ data: { viewer: { id: "app-user" } } });
+		const renewAccessToken = vi.fn().mockResolvedValue("renewed-token");
+		const service = new GraphQLService(
+			{ oauthToken: "expired-token" },
+			{ renewAccessToken },
+		);
+		await expect(
+			service.rawRequest("query { viewer { id } }"),
+		).resolves.toEqual({ viewer: { id: "app-user" } });
+		expect(renewAccessToken).toHaveBeenCalledTimes(1);
+		expect(mockSetHeader).toHaveBeenCalledWith(
+			"authorization",
+			"Bearer renewed-token",
+		);
 	});
 
 	it("string constructor passes apiKey to LinearClient (personal-token path)", () => {
