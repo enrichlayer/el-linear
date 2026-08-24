@@ -31,14 +31,6 @@ export const RETRYABLE_GRAPHQL_ERROR_CODES: readonly string[] = [
 const RETRYABLE_HTTP_STATUSES: readonly number[] = [408, 429];
 
 /**
- * Message fragments that identify a transport failure that never reached
- * Linear (DNS, refused connection, socket reset). Kept as a message test
- * because these arrive as bare `Error`s with no status and no code.
- */
-const TRANSIENT_TRANSPORT_MESSAGE_RE =
-	/\b(?:408|429|500|502|503|504)\b|(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|fetch failed|network error|connection termination)/i;
-
-/**
  * The classification block `el-linear` publishes as `errorDetail` on a
  * failed command's JSON envelope. Every field is always present — `null`
  * means "the failure carried no such signal", which is itself information a
@@ -151,7 +143,7 @@ export function isRetryableGraphQLCode(code: string | null): boolean {
 export function classifyGraphQLFailure(
 	httpStatus: number | null,
 	code: string | null,
-	message: string,
+	_message: string,
 ): boolean {
 	if (isRetryableHttpStatus(httpStatus) || isRetryableGraphQLCode(code)) {
 		return true;
@@ -159,7 +151,10 @@ export function classifyGraphQLFailure(
 	if (httpStatus === null && code === null) {
 		return true;
 	}
-	return TRANSIENT_TRANSPORT_MESSAGE_RE.test(message);
+	// A response status or GraphQL code is authoritative. Message text may
+	// contain an unrelated number such as a validation limit of 500; it must
+	// never turn a known permanent 400/401/403 into a retryable transport fault.
+	return false;
 }
 
 /**

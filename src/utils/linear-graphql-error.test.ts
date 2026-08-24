@@ -127,8 +127,14 @@ describe("classifyGraphQLFailure", () => {
 		).toBe(true);
 	});
 
-	it("still reads the message when a status is present but not itself retryable", () => {
-		expect(classifyGraphQLFailure(400, null, "upstream said 503")).toBe(true);
+	it("does not let message text override an authoritative permanent response", () => {
+		expect(classifyGraphQLFailure(400, null, "upstream said 503")).toBe(false);
+		expect(classifyGraphQLFailure(401, null, "429 requests processed")).toBe(
+			false,
+		);
+		expect(
+			classifyGraphQLFailure(403, "FORBIDDEN", "backend returned 500 rows"),
+		).toBe(false);
 		expect(classifyGraphQLFailure(400, null, "Entity not found")).toBe(false);
 	});
 });
