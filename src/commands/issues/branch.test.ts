@@ -1,10 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	currentGitBranch,
+	currentJjBookmark,
 	extractIssueIdentifierFromBranch,
 	getBranchLinearIssue,
 	gitCheckoutBranch,
@@ -148,5 +149,153 @@ describe("gitCheckoutBranch outside a git repo", () => {
 	it("returns false and does not throw", () => {
 		// A bare mkdtemp dir is not a git work tree, so the checkout is skipped.
 		expect(gitCheckoutBranch("feature/DEV-1-x")).toBe(false);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// DEV-8479 -- the jj bookmark fallback.
+//
+// In a colocated jj repo `.git/HEAD` points at `@`'s PARENT, so git reports a
+// detached HEAD and `currentGitBranch()` returns null while a bookmark names
+// the work perfectly well. These legs drive a REAL colocated repo through the
+// real binary: all three rungs are revset semantics, which is exactly what a
+// stubbed `jj` could not check.
+// ---------------------------------------------------------------------------
+const JJ_AVAILABLE = (() => {
+	try {
+		execFileSync("jj", ["--version"], { stdio: "pipe" });
+		return true;
+	} catch {
+		return false;
+	}
+})();
+
+describe.skipIf(!JJ_AVAILABLE)("currentJjBookmark (DEV-8479)", () => {
+	let repo: string;
+	let priorCwd: string;
+	let priorJjConfig: string | undefined;
+
+	/** Run a command in the fixture repo, failing loudly rather than silently. */
+	function run(bin: string, ...args: string[]): void {
+		execFileSync(bin, args, { stdio: "pipe" });
+	}
+
+	beforeEach(() => {
+		priorCwd = process.cwd();
+		repo = mkdtempSync(join(tmpdir(), "jj-bookmark-"));
+		process.chdir(repo);
+
+		// jj refuses to create a commit without an identity, and the developer's
+		// own ~/.jjconfig must not get a say in what these legs measure.
+		const config = join(repo, "jj-config.toml");
+		writeFileSync(
+			config,
+			'[user]\nname = "EL Linear Test"\nemail = "test@example.com"\n',
+		);
+		priorJjConfig = process.env.JJ_CONFIG;
+		process.env.JJ_CONFIG = config;
+
+		run("git", "init", "-q", "-b", "main");
+		run("git", "config", "user.email", "test@example.com");
+		run("git", "config", "user.name", "EL Linear Test");
+		writeFileSync(join(repo, "seed.txt"), "seed\n");
+		run("git", "add", "-A");
+		run("git", "commit", "-q", "-m", "DEV-8479: seed");
+		run("jj", "git", "init", "--colocate");
+
+		// Model a PILOT CLONE, not a colocated `git init`.
+		//
+		// `--colocate` converts git's local `main` branch into a jj local
+		// BOOKMARK, and the revset `bookmarks()` is local-only -- so it matches
+		// that commit, and since everything here descends from it, rung 2 would
+		// answer "main" for every leg below. A real pilot clone is cloned
+		// single-branch: trunk is a REMOTE bookmark (`main@origin`), which
+		// `bookmarks()` does not match. Forgetting the local one is what makes
+		// this fixture the shape the resolver actually ships against -- and it is
+		// the reason rung 3 is reachable in the pilot at all.
+		run("jj", "bookmark", "forget", "main");
+	});
+
+	afterEach(() => {
+		process.chdir(priorCwd);
+		if (priorJjConfig === undefined) {
+			delete process.env.JJ_CONFIG;
+		} else {
+			process.env.JJ_CONFIG = priorJjConfig;
+		}
+		rmSync(repo, { recursive: true, force: true });
+	});
+
+	it("returns null when no bookmark names the work", () => {
+		expect(currentJjBookmark()).toBeNull();
+	});
+
+	/** Rung 1 -- a bookmark sitting on the working-copy commit itself. */
+	it("finds a bookmark on @", () => {
+		run("jj", "bookmark", "create", "feature/DEV-8479-x", "-r", "@");
+		expect(currentJjBookmark()).toBe("feature/DEV-8479-x");
+	});
+
+	/** Rung 2 -- `@` has moved on and the bookmark is behind it in the ancestry. */
+	it("finds the nearest bookmark in @'s ancestry once @ has moved on", () => {
+		run("jj", "bookmark", "create", "feature/DEV-8479-y", "-r", "@");
+		run("jj", "new");
+		expect(currentJjBookmark()).toBe("feature/DEV-8479-y");
+	});
+
+	/**
+	 * Rung 3 -- THE CASE THE ORIGINAL DESIGN MISSED.
+	 *
+	 * `jj new @-` puts `@` on a SIBLING of the bookmarked commit: both are
+	 * children of one parent, so the bookmark is neither on `@` nor an ancestor
+	 * of it and rungs 1 and 2 both come back empty. This is the shape jj's own
+	 * recommended conflict-resolution flow leaves behind, which is why the ladder
+	 * has a third rung at all rather than stopping at ancestry.
+	 */
+	it("finds a sibling bookmark on the same stack (the conflict-resolution shape)", () => {
+		run("jj", "bookmark", "create", "feature/DEV-8479-z", "-r", "@");
+		run("jj", "new", "@-");
+		// Pin the fixture: were ANY bookmark still an ancestor -- the sibling's,
+		// or a local `main` the beforeEach forgot to forget -- this leg would pass
+		// via rung 2 and prove nothing whatsoever about rung 3.
+		const viaAncestry = execFileSync(
+			"jj",
+			[
+				"log",
+				"-r",
+				"heads(bookmarks() & ::@)",
+				"--no-graph",
+				"-T",
+				'local_bookmarks ++ "\\n"',
+			],
+			{ stdio: "pipe" },
+		)
+			.toString()
+			.trim();
+		expect(viaAncestry).toBe("");
+		expect(currentJjBookmark()).toBe("feature/DEV-8479-z");
+	});
+
+	/**
+	 * Two bookmarks on one commit give no basis for choosing, and `mark-branch`
+	 * would write its marker under whichever happened to sort first. Null is the
+	 * honest answer, and the caller already fails loudly on it.
+	 */
+	it("returns null rather than guessing when a rung is ambiguous", () => {
+		run("jj", "bookmark", "create", "feature/DEV-8479-a", "-r", "@");
+		run("jj", "bookmark", "create", "feature/DEV-8479-b", "-r", "@");
+		expect(currentJjBookmark()).toBeNull();
+	});
+
+	/**
+	 * The premise of the whole issue, asserted rather than assumed: git really
+	 * does lose the name here. If that ever stops being true the fallback is
+	 * unnecessary, and this is the leg that would say so.
+	 */
+	it("covers exactly the case git cannot -- a detached HEAD", () => {
+		run("jj", "bookmark", "create", "feature/DEV-8479-c", "-r", "@");
+		run("jj", "new");
+		expect(currentGitBranch()).toBeNull();
+		expect(currentJjBookmark()).toBe("feature/DEV-8479-c");
 	});
 });

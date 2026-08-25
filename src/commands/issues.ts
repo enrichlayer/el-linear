@@ -99,6 +99,7 @@ import {
 } from "../utils/validators.js";
 import {
 	currentGitBranch,
+	currentJjBookmark,
 	extractIssueIdentifierFromBranch,
 	getBranchLinearIssue,
 	gitCheckoutBranch,
@@ -1771,10 +1772,16 @@ async function handleMarkBranch(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	const branch = currentGitBranch();
+	// Git first, so a plain checkout answers exactly as it always has and no
+	// `jj` process is ever spawned. The fallback matters only where git has
+	// genuinely lost the name: inside a colocated jj repo `.git/HEAD` points at
+	// the working-copy commit's PARENT, so git reports a detached HEAD while a
+	// bookmark names the work perfectly well ([DEV-8479]).
+	const branch = currentGitBranch() ?? currentJjBookmark();
 	if (!branch) {
 		throw new Error(
-			"Not on a named git branch (detached HEAD or not in a repository).",
+			"Not on a named git branch, and no single jj bookmark names this work " +
+				"(detached HEAD, no bookmark on this stack, an ambiguous one, or not in a repository).",
 		);
 	}
 	if (branch === "main" || branch === "master") {
@@ -2375,7 +2382,9 @@ export function setupIssuesCommands(program: Command): void {
 			"\nManual recovery for branches not created via 'issues create --checkout' / 'retrolink'.\n" +
 				"With no argument, infers the identifier from the branch name (e.g. dev-4293-slug -> DEV-4293).\n" +
 				"Accepts a bare identifier (DEV-123), a branch-style token, or a Linear URL.\n" +
-				"By default, also claims the issue (assignee = current Linear user; status = first started state). Pass --no-claim to only write git metadata.",
+				"By default, also claims the issue (assignee = current Linear user; status = first started state). Pass --no-claim to only write git metadata.\n" +
+				"In a colocated jj repo git reports a detached HEAD, so the name falls back to the single jj bookmark identifying the current work — on @, the nearest one in @'s ancestry, or one elsewhere on the same stack.\n" +
+				"The marker is then written under that bookmark name, so whatever reads it back must resolve the bookmark the same way (DEV-8479).",
 		)
 		.option(
 			"--no-claim",
