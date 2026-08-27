@@ -52,12 +52,16 @@ function nonEmptyFilter(
  */
 export type LinearServiceAuth = LinearCredential;
 
-interface ClassifiableSdkTransport {
-	request<T>(
-		document: unknown,
-		variables?: Record<string, unknown>,
-		requestHeaders?: Record<string, string>,
-	): Promise<T>;
+type LinearSdkRequest = <
+	Response,
+	Variables extends Record<string, unknown>,
+>(
+	document: string,
+	variables?: Variables,
+) => Promise<Response>;
+
+interface ClassifiableSdkClient {
+	_request?: LinearSdkRequest;
 }
 
 function errorMessage(error: unknown): string {
@@ -70,26 +74,28 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * Classify every request made through the SDK-backed service at its shared
- * transport boundary. Keeping the wrapper here (rather than guessing in
- * `outputError`) means local validation/not-found errors remain unclassified,
- * while issues, projects, comments, and every other SDK method publish the
- * same DEV-7987 detail as the raw GraphQL command.
+ * Classify every generated SDK operation after the SDK has normalized its raw
+ * transport rejection. Patching `client.client.request` is too early: the
+ * LinearClient constructor wraps that transport with `parseLinearError`, which
+ * would immediately strip our additive classification fields again. Keeping
+ * the wrapper here (rather than guessing in `outputError`) also leaves local
+ * validation and not-found errors unclassified.
  */
 export function instrumentLinearGraphQLErrorClassification(
 	client: LinearClient,
 ): LinearClient {
-	const transport = (client as unknown as { client?: ClassifiableSdkTransport })
-		.client;
-	if (!transport?.request) return client;
-	const originalRequest = transport.request.bind(transport);
-	transport.request = async <T>(
-		document: unknown,
-		variables?: Record<string, unknown>,
-		requestHeaders?: Record<string, string>,
-	): Promise<T> => {
+	const sdk = client as unknown as ClassifiableSdkClient;
+	if (!sdk._request) return client;
+	const originalRequest = sdk._request.bind(sdk);
+	sdk._request = async <
+		Response,
+		Variables extends Record<string, unknown>,
+	>(
+		document: string,
+		variables?: Variables,
+	): Promise<Response> => {
 		try {
-			return await originalRequest<T>(document, variables, requestHeaders);
+			return await originalRequest<Response, Variables>(document, variables);
 		} catch (error) {
 			throw toLinearGraphQLError(error, errorMessage(error));
 		}
