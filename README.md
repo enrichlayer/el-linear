@@ -111,6 +111,25 @@ el-linear init oauth --actor app
 App actor tokens can request `app:assignable` and `app:mentionable`, but not
 `admin`. The authorized app user ID is stored in `oauth.json` as `viewerId`.
 
+OAuth apps that have Linear's client-credentials grant enabled can obtain an
+app-user token without a browser. Keep the secret out of argv and source it
+through an environment variable:
+
+```bash
+export LINEAR_OAUTH_CLIENT_SECRET="..."
+el-linear init oauth --client-credentials --actor app \
+  --client-id your-linear-oauth-client-id
+```
+
+Use `--client-secret-env NAME` to read a differently named variable and
+`--scopes read,write,issues:create,comments:create` to override the configured
+scope set. The 0600 profile state stores the secret so el-linear can acquire a
+new token before expiry and once after an HTTP 401; client-credentials tokens
+do not have refresh tokens. Keep the scope set stable: Linear revokes an app's
+existing client-credentials tokens when a new token requests different scopes.
+This flow is opt-in. Remote automation can keep using `LINEAR_API_TOKEN`, which
+remains higher precedence than profile OAuth.
+
 At runtime, credentials are resolved in this order:
 
 1. `--api-token <token>` flag.
@@ -558,6 +577,83 @@ list-shaped reads — single-issue `issues read DEV-123` is unaffected.
 
 ## Output formats
 
+Commands whose request path exposes Linear response headers include aggregate
+quota observations as optional `_rateLimit` metadata in JSON output:
+
+```json
+{
+  "identifier": "DEV-123",
+  "_rateLimit": {
+    "limit": 2500,
+    "remaining": 2498,
+    "resetAt": "2026-08-11T10:00:00.000Z",
+    "observedRequests": 2,
+    "minimumRemaining": 2498,
+    "complexity": {
+      "cost": 30,
+      "totalCost": 50,
+      "limit": 2000000,
+      "remaining": 1999950,
+      "minimumRemaining": 1999950,
+      "resetAt": "2026-08-11T10:00:00.000Z"
+    },
+    "endpoints": {
+      "Issue": {
+        "limit": 1000,
+        "remaining": 998,
+        "minimumRemaining": 998,
+        "resetAt": "2026-08-11T10:00:00.000Z",
+        "observedRequests": 2
+      }
+    }
+  }
+}
+```
+
+Summary output renders the same information as an `_rateLimit:` line. With a
+bare-array output such as `--raw`, the line goes to stderr so stdout remains
+valid JSON. Current remaining/reset values come from the most recent response;
+`observedRequests`, `minimumRemaining`, `complexity.totalCost`, and each
+endpoint entry expose the command's aggregate cost and lowest observed
+headroom. Rate-limited error envelopes include the same metadata. Commands
+served entirely from cache omit it.
+
+Automation can reserve a request floor before issuing another GraphQL call:
+
+```bash
+export EL_LINEAR_RATE_LIMIT_HEADROOM=250
+export EL_LINEAR_QUOTA_KEY=verticalint-shared-linear-user
+```
+
+When Linear's last observed remaining count reaches the configured floor,
+`el-linear` refuses the request until the observed reset time instead of
+consuming capacity reserved for higher-priority work. Admission and response
+observations are serialized across local processes. The state filename is a
+SHA-256 digest; neither the credential nor `EL_LINEAR_QUOTA_KEY` is written in
+clear text. Set the same non-secret quota key for API keys belonging to the
+same Linear user, because Linear pools those keys by user. Without an explicit
+key, API keys coordinate by credential and OAuth tokens coordinate by token.
+Profile OAuth uses its stable app/viewer identity so token refreshes keep the
+same local quota state.
+
+This file-backed admission is intentionally a same-machine boundary. Separate
+hosts can opt into the companion distributed coordinator:
+
+```bash
+export EL_LINEAR_RATE_LIMIT_COORDINATOR_URL=https://el-linear-control-plane.example.workers.dev
+export EL_LINEAR_RATE_LIMIT_COORDINATOR_TOKEN="..."
+```
+
+The URL switches admission and observations to the coordinator's atomic
+Durable Object for the hashed quota key. Admission fails closed when that
+service is unavailable; a completed Linear response is never replayed merely
+because its observation could not be persisted. Without the URL, do not
+interpret the file-backed setting as distributed admission.
+
+Read-through cache misses for teams, projects, labels, and similar cached lists
+are also single-flighted across local processes, preventing a cold-cache burst
+from issuing the same request once per command.
+
 Every command accepts `--format <kind>` at the root:
 
 - `--format json` (default) — emits the full structured envelope. Stable
@@ -660,6 +756,60 @@ el-linear projects list --format summary --fields name,state,progress,lead,teams
 ```
 
 Unrecognized field names are reported as a `_warnings:` line appended after the summary block (`fields_unprojectable: --format summary on issues list does not project foo, bar; ...`) — same signal scripts get on the JSON path. Resources whose summary formatter doesn't yet wire `--fields` (cycles, milestones, project updates, comments, teams, labels, users, documents, templates, attachments, releases, search results) emit the same warning and render their default summary.
+
+### Error envelope
+
+Every command reports a failure the same way: **exit code 1**, and a
+single JSON object on **stdout** (the same stream as success, so a caller
+capturing one stream always gets exactly one parseable object).
+
+```json
+{
+  "error": "Ratelimit exceeded",
+  "activeProfile": "work",
+  "errorDetail": {
+    "httpStatus": 429,
+    "code": "RATELIMITED",
+    "retryable": true
+  }
+}
+```
+
+| Field           | Always present | Meaning                                                              |
+| --------------- | -------------- | -------------------------------------------------------------------- |
+| `error`         | yes            | The failure message, token-sanitized.                                |
+| `activeProfile` | yes            | Which profile the command ran under — distinguishes "not found" from "wrong workspace". |
+| `errorDetail`   | no             | Classification of a **Linear GraphQL** failure. See below.           |
+
+`errorDetail` is emitted only when the failure came from a request to the
+Linear GraphQL API. Its fields:
+
+| Field        | Type             | Meaning                                                                 |
+| ------------ | ---------------- | ----------------------------------------------------------------------- |
+| `httpStatus` | `number \| null` | HTTP status of Linear's response; `null` when no response arrived.      |
+| `code`       | `string \| null` | The first GraphQL error's `extensions.code`; `null` when absent.        |
+| `retryable`  | `boolean`        | Whether the failure is transient — retrying after an appropriate wait could succeed. |
+
+`retryable` is `true` for HTTP 408 / 429 / 5xx, for the `RATELIMITED`,
+`INTERNAL_SERVER_ERROR` and `SERVICE_UNAVAILABLE` GraphQL codes, and for a
+transport failure that never reached a response (`fetch failed`,
+`ECONNRESET`, …). Reading `code` separately matters: Linear can answer a
+rate limit under a status that would otherwise read as permanent, so
+`httpStatus` alone is not the whole verdict.
+
+`retryable: true` says the failure is transient — **not** that retrying
+immediately is a good idea. A rate limit is transient and reported as such,
+but its window may be minutes away; the wait is the caller's policy.
+
+**A missing `errorDetail` is not "not retryable".** It means the failure
+was not a Linear GraphQL request at all — a bad argument, an unreadable
+`--file`, a missing token. Treat its absence as *unclassified* and apply
+your own policy; emitting a fabricated `retryable: false` there would let
+an argv typo masquerade as a verdict about Linear.
+
+Automation that shells out to `el-linear` (a job runner deciding whether
+to retry, say) should branch on `errorDetail.retryable` rather than
+substring-matching `error`.
 
 ### Windowed metadata (`WindowedMeta`)
 

@@ -14,7 +14,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { CONFIG_DIR, resolveActiveProfile } from "../config/paths.js";
-import type { OAuthActor } from "./oauth-client.js";
+import type { OAuthActor, OAuthScope } from "./oauth-client.js";
 import { atomicWrite } from "./oauth-fs.js";
 
 export const OAUTH_STATE_VERSION = 1;
@@ -26,17 +26,19 @@ const OAUTH_STATE_FILENAME = "oauth.json";
  */
 export interface OAuthState {
 	v: typeof OAUTH_STATE_VERSION;
+	/** Legacy state omits this and is treated as authorization_code. */
+	grantType?: "authorization_code" | "client_credentials";
 	/** Linear OAuth actor tied to the access token. Defaults to user for legacy state. */
 	actor?: OAuthActor;
 	/** viewer.id returned after authorization; for actor=app this is the app user ID. */
 	viewerId?: string;
 	clientId: string;
 	clientSecret?: string;
-	registeredRedirectUri: string;
+	registeredRedirectUri?: string;
 	accessToken: string;
 	refreshToken?: string;
 	tokenType: string;
-	scopes: string[];
+	scopes: OAuthScope[];
 	/** Unix epoch milliseconds; computed at write time from `expires_in`. */
 	expiresAt: number;
 	/** When we last fetched a token (for diagnostics). */

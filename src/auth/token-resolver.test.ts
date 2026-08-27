@@ -282,4 +282,64 @@ describe("ensureFreshAccessToken", () => {
 		expect(a.refreshToken).toBe("rt-rotated");
 		expect(b.refreshToken).toBe("rt-rotated");
 	});
+
+	it("reacquires an expired client-credentials token without a refresh token", async () => {
+		const state = freshState({
+			grantType: "client_credentials",
+			actor: "app",
+			registeredRedirectUri: undefined,
+			refreshToken: undefined,
+			accessToken: "expired-app-token",
+			expiresAt: NOW - 1,
+		});
+		await writeOAuthState(state);
+		const fetchImpl = vi.fn<FetchLike>(async () => ({
+			ok: true,
+			status: 200,
+			statusText: "OK",
+			text: async () =>
+				JSON.stringify({
+					access_token: "new-app-token",
+					token_type: "Bearer",
+					expires_in: 2_592_000,
+					scope: "read,write",
+				}),
+		}));
+		const result = await ensureFreshAccessToken(state, {
+			fetchImpl,
+			now: () => NOW,
+		});
+		expect(result.accessToken).toBe("new-app-token");
+		expect(result.refreshToken).toBeUndefined();
+		const body = new URLSearchParams(fetchImpl.mock.calls[0][1].body);
+		expect(body.get("grant_type")).toBe("client_credentials");
+	});
+
+	it("force-renews client credentials once after a 401", async () => {
+		const state = freshState({
+			grantType: "client_credentials",
+			actor: "app",
+			refreshToken: undefined,
+		});
+		await writeOAuthState(state);
+		const fetchImpl = vi.fn<FetchLike>(async () => ({
+			ok: true,
+			status: 200,
+			statusText: "OK",
+			text: async () =>
+				JSON.stringify({
+					access_token: "renewed-after-401",
+					token_type: "Bearer",
+					expires_in: 2_592_000,
+					scope: "read,write",
+				}),
+		}));
+		const result = await ensureFreshAccessToken(state, {
+			fetchImpl,
+			now: () => NOW + 1,
+			forceOAuthRenewal: true,
+		});
+		expect(result.accessToken).toBe("renewed-after-401");
+		expect(fetchImpl).toHaveBeenCalledTimes(1);
+	});
 });

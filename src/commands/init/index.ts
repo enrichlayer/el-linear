@@ -18,7 +18,9 @@
 import type { Command } from "commander";
 import {
 	type OAuthActor,
+	type OAuthScope,
 	validateOAuthActor,
+	validateScopes,
 } from "../../auth/oauth-client.js";
 import {
 	type AliasUpdate,
@@ -93,6 +95,21 @@ export function setupInitCommands(program: Command): void {
 			"OAuth actor: user (default) or app for agents/service accounts",
 			validateOAuthActor,
 		)
+		.option(
+			"--client-credentials",
+			"use the browserless OAuth app-user client_credentials grant",
+		)
+		.option("--client-id <id>", "OAuth client id (non-secret)")
+		.option(
+			"--client-secret-env <name>",
+			"environment variable containing the OAuth client secret",
+			"LINEAR_OAUTH_CLIENT_SECRET",
+		)
+		.option(
+			"--scopes <scopes>",
+			"comma- or space-separated OAuth scopes",
+			(value) => validateScopes(value.split(/[,\s]+/).filter(Boolean)),
+		)
 		.option("--revoke", "revoke and remove the stored OAuth tokens")
 		.option(
 			"--no-browser",
@@ -111,6 +128,10 @@ export function setupInitCommands(program: Command): void {
 			withCleanExit(
 				async (options: {
 					actor?: OAuthActor;
+					clientCredentials?: boolean;
+					clientId?: string;
+					clientSecretEnv: string;
+					scopes?: OAuthScope[];
 					force?: boolean;
 					revoke?: boolean;
 					browser?: boolean;
@@ -123,8 +144,24 @@ export function setupInitCommands(program: Command): void {
 						console.log(`  ${result.message}`);
 						return;
 					}
+					const clientSecret = options.clientCredentials
+						? process.env[options.clientSecretEnv]?.trim()
+						: undefined;
+					if (
+						options.clientCredentials &&
+						!clientSecret &&
+						!process.stdin.isTTY
+					) {
+						throw new Error(
+							`Client credentials require ${options.clientSecretEnv} in a non-interactive shell.`,
+						);
+					}
 					await runOAuthStep({
 						actor: options.actor,
+						clientCredentials: options.clientCredentials === true,
+						clientId: options.clientId,
+						clientSecret,
+						scopes: options.scopes,
 						force: options.force ?? false,
 						// commander's `--no-browser` produces `browser: false`.
 						noBrowser: options.browser === false,
