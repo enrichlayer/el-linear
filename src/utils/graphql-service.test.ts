@@ -528,6 +528,7 @@ describe("GraphQLService", () => {
 	});
 
 	it("advances client-credentials state across sequential 401 renewals", async () => {
+		mockSetHeader.mockClear();
 		const initial: OAuthState = {
 			v: 1,
 			grantType: "client_credentials",
