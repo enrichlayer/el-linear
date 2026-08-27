@@ -17,6 +17,7 @@ import type { AuthOptions } from "./auth.js";
 import { toISOStringOrNow, toISOStringOrUndefined } from "./date-format.js";
 import { multipleMatchesError, notFoundError } from "./error-messages.js";
 import { parseIssueIdentifier } from "./identifier-parser.js";
+import { toLinearGraphQLError } from "./linear-graphql-error.js";
 import { parseProjectSlugId } from "./project-slug.js";
 import { isUuid } from "./uuid.js";
 
@@ -51,14 +52,63 @@ function nonEmptyFilter(
  */
 export type LinearServiceAuth = LinearCredential;
 
+interface ClassifiableSdkTransport {
+	request<T>(
+		document: unknown,
+		variables?: Record<string, unknown>,
+		requestHeaders?: Record<string, string>,
+	): Promise<T>;
+}
+
+function errorMessage(error: unknown): string {
+	if (error instanceof Error) return error.message;
+	if (typeof error === "object" && error !== null) {
+		const message = (error as { message?: unknown }).message;
+		if (typeof message === "string") return message;
+	}
+	return String(error);
+}
+
+/**
+ * Classify every request made through the SDK-backed service at its shared
+ * transport boundary. Keeping the wrapper here (rather than guessing in
+ * `outputError`) means local validation/not-found errors remain unclassified,
+ * while issues, projects, comments, and every other SDK method publish the
+ * same DEV-7987 detail as the raw GraphQL command.
+ */
+export function instrumentLinearGraphQLErrorClassification(
+	client: LinearClient,
+): LinearClient {
+	const transport = (client as unknown as { client?: ClassifiableSdkTransport })
+		.client;
+	if (!transport?.request) return client;
+	const originalRequest = transport.request.bind(transport);
+	transport.request = async <T>(
+		document: unknown,
+		variables?: Record<string, unknown>,
+		requestHeaders?: Record<string, string>,
+	): Promise<T> => {
+		try {
+			return await originalRequest<T>(document, variables, requestHeaders);
+		} catch (error) {
+			throw toLinearGraphQLError(error, errorMessage(error));
+		}
+	};
+	return client;
+}
+
 function buildLinearClient(auth: LinearServiceAuth): LinearClient {
 	if ("oauthToken" in auth) {
 		// Linear's SDK natively supports OAuth via the `accessToken` option,
 		// which causes the underlying transport to send
 		// `Authorization: Bearer <token>` instead of the personal-token shape.
-		return new LinearClient({ accessToken: auth.oauthToken });
+		return instrumentLinearGraphQLErrorClassification(
+			new LinearClient({ accessToken: auth.oauthToken }),
+		);
 	}
-	return new LinearClient({ apiKey: auth.apiKey });
+	return instrumentLinearGraphQLErrorClassification(
+		new LinearClient({ apiKey: auth.apiKey }),
+	);
 }
 
 export class LinearService {
