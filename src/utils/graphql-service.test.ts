@@ -1,7 +1,9 @@
 import type { LinearClient } from "@linear/sdk";
 import { describe, expect, it, vi } from "vitest";
+import type { OAuthState } from "../auth/oauth-storage.js";
 import type { LinearGraphQLError } from "./linear-graphql-error.js";
 import { outputSuccess, resetWarnings } from "./output.js";
+import { RateLimitAdmissionRefusal } from "./rate-limit-admission.js";
 
 const mockRawRequest = vi.fn();
 const mockSetHeader = vi.fn();
@@ -18,6 +20,7 @@ vi.mock("@linear/sdk", () => ({
 }));
 
 const {
+	createClientCredentialsTokenRenewal,
 	GraphQLService,
 	instrumentLinearClient,
 	isRateLimitGraphQLError,
@@ -61,30 +64,42 @@ describe("GraphQLService", () => {
 		);
 	});
 
-	it("does not call Linear when quota admission refuses", async () => {
-		const before = mockRawRequest.mock.calls.length;
-		const service = new GraphQLService(
-			{ apiKey: "test-token" },
-			{
-				admission: {
-					enabled: true,
-					admit: vi
-						.fn()
-						.mockRejectedValue(
-							new Error(
-								"Linear rate limit exceeded before request; admission refused",
-							),
-						),
-					observe: vi.fn().mockResolvedValue(undefined),
+	it.each([
+		{
+			name: "read",
+			query: "query { viewer { id } }",
+			requestOptions: undefined,
+		},
+		{
+			name: "retry-safe mutation",
+			query: 'mutation { issueUpdate(id: "x") { success } }',
+			requestOptions: { retrySafeMutation: true },
+		},
+	])(
+		"does not call Linear for a preflight refusal on $name",
+		async ({ query, requestOptions }) => {
+			const before = mockRawRequest.mock.calls.length;
+			const refusal = new RateLimitAdmissionRefusal(
+				"Linear rate limit exceeded before request; admission refused: 25 requests remain, preserving configured headroom 25 until 2026-08-24T10:00:00Z.",
+			);
+			const service = new GraphQLService(
+				{ apiKey: "test-token" },
+				{
+					admission: {
+						enabled: true,
+						admit: vi.fn().mockRejectedValue(refusal),
+						observe: vi.fn().mockResolvedValue(undefined),
+					},
 				},
-			},
-		);
+			);
 
-		await expect(service.rawRequest("query { viewer { id } }")).rejects.toThrow(
-			"Rate limit exceeded",
-		);
-		expect(mockRawRequest.mock.calls.length).toBe(before);
-	});
+			await expect(
+				service.rawRequest(query, undefined, requestOptions),
+			).rejects.toBe(refusal);
+			expect(refusal.message).not.toContain("may have committed");
+			expect(mockRawRequest.mock.calls.length).toBe(before);
+		},
+	);
 
 	it("instruments SDK request calls without hiding response headers", async () => {
 		const admit = vi.fn().mockResolvedValue(undefined);
@@ -509,6 +524,60 @@ describe("GraphQLService", () => {
 		expect(mockSetHeader).toHaveBeenCalledWith(
 			"authorization",
 			"Bearer renewed-token",
+		);
+	});
+
+	it("advances client-credentials state across sequential 401 renewals", async () => {
+		const initial: OAuthState = {
+			v: 1,
+			grantType: "client_credentials",
+			actor: "app",
+			clientId: "client-id",
+			clientSecret: "client-secret",
+			accessToken: "token-1",
+			tokenType: "Bearer",
+			scopes: ["read"],
+			expiresAt: 1,
+			obtainedAt: 1,
+		};
+		const second = { ...initial, accessToken: "token-2", obtainedAt: 2 };
+		const third = { ...initial, accessToken: "token-3", obtainedAt: 3 };
+		const renew = vi
+			.fn()
+			.mockResolvedValueOnce(second)
+			.mockResolvedValueOnce(third);
+		const renewAccessToken = createClientCredentialsTokenRenewal(initial, renew);
+		mockRawRequest
+			.mockRejectedValueOnce({ status: 401, message: "Unauthorized" })
+			.mockResolvedValueOnce({ data: { viewer: { id: "first" } } })
+			.mockRejectedValueOnce({ status: 401, message: "Unauthorized" })
+			.mockResolvedValueOnce({ data: { viewer: { id: "second" } } });
+		const service = new GraphQLService(
+			{ oauthToken: initial.accessToken },
+			{ renewAccessToken },
+		);
+
+		await expect(service.rawRequest("query First { viewer { id } }")).resolves.toEqual(
+			{ viewer: { id: "first" } },
+		);
+		await expect(
+			service.rawRequest("query Second { viewer { id } }"),
+		).resolves.toEqual({ viewer: { id: "second" } });
+		expect(renew).toHaveBeenNthCalledWith(1, initial, {
+			forceOAuthRenewal: true,
+		});
+		expect(renew).toHaveBeenNthCalledWith(2, second, {
+			forceOAuthRenewal: true,
+		});
+		expect(mockSetHeader).toHaveBeenNthCalledWith(
+			1,
+			"authorization",
+			"Bearer token-2",
+		);
+		expect(mockSetHeader).toHaveBeenNthCalledWith(
+			2,
+			"authorization",
+			"Bearer token-3",
 		);
 	});
 

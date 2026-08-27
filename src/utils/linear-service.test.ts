@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { OAuthState } from "../auth/oauth-storage.js";
 import { readGraphQLErrorDetail } from "./linear-graphql-error.js";
 
 const mockTeams = vi.fn();
@@ -40,6 +41,9 @@ const {
 	instrumentClientCredentialsRenewal,
 	instrumentLinearGraphQLErrorClassification,
 } = await import("./linear-service.js");
+const { createClientCredentialsTokenRenewal } = await import(
+	"./graphql-service.js"
+);
 
 // Reset every mock before each test so tests are order-independent: call
 // logs, queued `mockResolvedValueOnce` entries, AND base implementations.
@@ -139,6 +143,60 @@ describe("LinearService", () => {
 		expect(setHeader).toHaveBeenCalledWith(
 			"authorization",
 			"Bearer renewed-token",
+		);
+	});
+
+	it("renews the SDK transport from the latest state on two separate 401s", async () => {
+		const initial: OAuthState = {
+			v: 1,
+			grantType: "client_credentials",
+			actor: "app",
+			clientId: "client-id",
+			clientSecret: "client-secret",
+			accessToken: "token-1",
+			tokenType: "Bearer",
+			scopes: ["read"],
+			expiresAt: 1,
+			obtainedAt: 1,
+		};
+		const second = { ...initial, accessToken: "token-2", obtainedAt: 2 };
+		const third = { ...initial, accessToken: "token-3", obtainedAt: 3 };
+		const renew = vi
+			.fn()
+			.mockResolvedValueOnce(second)
+			.mockResolvedValueOnce(third);
+		const renewAccessToken = createClientCredentialsTokenRenewal(initial, renew);
+		const request = vi
+			.fn()
+			.mockRejectedValueOnce({ status: 401 })
+			.mockResolvedValueOnce({ nodes: [{ id: "first" }] })
+			.mockRejectedValueOnce({ status: 401 })
+			.mockResolvedValueOnce({ nodes: [{ id: "second" }] });
+		const setHeader = vi.fn();
+		const client = { client: { request, setHeader } };
+		instrumentClientCredentialsRenewal(client as never, renewAccessToken);
+
+		await expect(client.client.request("query First")).resolves.toEqual({
+			nodes: [{ id: "first" }],
+		});
+		await expect(client.client.request("query Second")).resolves.toEqual({
+			nodes: [{ id: "second" }],
+		});
+		expect(renew).toHaveBeenNthCalledWith(1, initial, {
+			forceOAuthRenewal: true,
+		});
+		expect(renew).toHaveBeenNthCalledWith(2, second, {
+			forceOAuthRenewal: true,
+		});
+		expect(setHeader).toHaveBeenNthCalledWith(
+			1,
+			"authorization",
+			"Bearer token-2",
+		);
+		expect(setHeader).toHaveBeenNthCalledWith(
+			2,
+			"authorization",
+			"Bearer token-3",
 		);
 	});
 

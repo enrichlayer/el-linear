@@ -2,7 +2,10 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createRateLimitAdmission } from "./rate-limit-admission.js";
+import {
+	createRateLimitAdmission,
+	RateLimitAdmissionRefusal,
+} from "./rate-limit-admission.js";
 
 const roots: string[] = [];
 
@@ -168,6 +171,50 @@ describe("rate-limit admission", () => {
 		});
 	});
 
+	it("rejects a remote HTTP coordinator before exposing its bearer token", () => {
+		const fetchImpl = vi.fn();
+		expect(() =>
+			createRateLimitAdmission(
+				{ apiKey: "token-a" },
+				{
+					env: {
+						EL_LINEAR_RATE_LIMIT_HEADROOM: "25",
+						EL_LINEAR_RATE_LIMIT_COORDINATOR_URL:
+							"http://quota.example/v1",
+						EL_LINEAR_RATE_LIMIT_COORDINATOR_TOKEN: "control-token",
+					},
+					fetchImpl,
+				},
+			),
+		).toThrow("must use HTTPS");
+		expect(fetchImpl).not.toHaveBeenCalled();
+	});
+
+	it.each(["localhost", "127.0.0.1", "[::1]"])(
+		"allows explicit loopback HTTP coordinator host %s",
+		async (host) => {
+			const fetchImpl = vi.fn().mockResolvedValue({
+				ok: true,
+				status: 200,
+				json: async () => ({ admitted: true }),
+			});
+			const gate = createRateLimitAdmission(
+				{ apiKey: "token-a" },
+				{
+					env: {
+						EL_LINEAR_RATE_LIMIT_HEADROOM: "25",
+						EL_LINEAR_RATE_LIMIT_COORDINATOR_URL: `http://${host}:8787`,
+						EL_LINEAR_RATE_LIMIT_COORDINATOR_TOKEN: "control-token",
+					},
+					fetchImpl,
+				},
+			);
+
+			await expect(gate.admit()).resolves.toBeUndefined();
+			expect(fetchImpl).toHaveBeenCalledTimes(1);
+		},
+	);
+
 	it("surfaces a coordinator headroom refusal before the Linear request", async () => {
 		const gate = createRateLimitAdmission(
 			{ apiKey: "token-a" },
@@ -189,8 +236,14 @@ describe("rate-limit admission", () => {
 				}),
 			},
 		);
-		await expect(gate.admit()).rejects.toThrow(
-			"distributed admission refused: 25 requests remain",
+		await expect(gate.admit()).rejects.toMatchObject({
+			name: "RateLimitAdmissionRefusal",
+			message: expect.stringContaining(
+				"distributed admission refused: 25 requests remain",
+			),
+		});
+		await expect(gate.admit()).rejects.toBeInstanceOf(
+			RateLimitAdmissionRefusal,
 		);
 	});
 

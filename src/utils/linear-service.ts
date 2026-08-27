@@ -1,9 +1,6 @@
 import { LinearClient } from "@linear/sdk";
 import type { LinearCredential } from "../auth/linear-credential.js";
-import {
-	ensureFreshAccessToken,
-	getActiveAuth,
-} from "../auth/token-resolver.js";
+import { getActiveAuth } from "../auth/token-resolver.js";
 import { resolveUserDisplayName } from "../config/resolver.js";
 import {
 	GET_CYCLE_DETAIL_QUERY,
@@ -36,7 +33,11 @@ import type {
 import type { AuthOptions } from "./auth.js";
 import { toISOStringOrNow, toISOStringOrUndefined } from "./date-format.js";
 import { multipleMatchesError, notFoundError } from "./error-messages.js";
-import { GraphQLService, instrumentLinearClient } from "./graphql-service.js";
+import {
+	createClientCredentialsTokenRenewal,
+	GraphQLService,
+	instrumentLinearClient,
+} from "./graphql-service.js";
 import { parseIssueIdentifier } from "./identifier-parser.js";
 import {
 	graphQLErrorHttpStatus,
@@ -46,6 +47,7 @@ import { parseProjectSlugId } from "./project-slug.js";
 import {
 	createOAuthProfileRateLimitAdmission,
 	type RateLimitAdmission,
+	RateLimitAdmissionRefusal,
 } from "./rate-limit-admission.js";
 import { isUuid } from "./uuid.js";
 
@@ -172,6 +174,7 @@ export function instrumentLinearGraphQLErrorClassification(
 		try {
 			return await originalRequest<Response, Variables>(document, variables);
 		} catch (error) {
+			if (error instanceof RateLimitAdmissionRefusal) throw error;
 			throw toLinearGraphQLError(error, errorMessage(error));
 		}
 	};
@@ -864,15 +867,7 @@ export async function createLinearService(
 				auth.oauth.clientId,
 				auth.oauth.viewerId,
 			),
-			renewAccessToken:
-				auth.oauth.grantType === "client_credentials"
-					? async () =>
-							(
-								await ensureFreshAccessToken(auth.oauth, {
-									forceOAuthRenewal: true,
-								})
-							).accessToken
-					: undefined,
+			renewAccessToken: createClientCredentialsTokenRenewal(auth.oauth),
 		});
 	}
 	return new LinearService({ apiKey: auth.token });

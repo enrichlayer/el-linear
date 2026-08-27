@@ -1,6 +1,7 @@
 import { LinearClient } from "@linear/sdk";
 import { type DocumentNode, print } from "graphql";
 import type { LinearCredential } from "../auth/linear-credential.js";
+import type { OAuthState } from "../auth/oauth-storage.js";
 import {
 	ensureFreshAccessToken,
 	getActiveAuth,
@@ -18,6 +19,7 @@ import {
 	createOAuthProfileRateLimitAdmission,
 	createRateLimitAdmission,
 	type RateLimitAdmission,
+	RateLimitAdmissionRefusal,
 } from "./rate-limit-admission.js";
 
 interface ResponseHeaders {
@@ -53,6 +55,28 @@ interface GraphQLServiceRuntimeOptions {
 }
 
 const DEFAULT_SAFE_MUTATION_RETRY_DELAYS_MS = [150, 400] as const;
+
+type OAuthStateRenewal = (
+	state: OAuthState,
+	options: { forceOAuthRenewal: true },
+) => Promise<OAuthState>;
+
+/**
+ * Keep the last persisted client-credentials state in a long-lived service.
+ * Each forced 401 renewal must advance from the previous renewal, not from the
+ * state captured when the service was constructed.
+ */
+export function createClientCredentialsTokenRenewal(
+	initialState: OAuthState,
+	renew: OAuthStateRenewal = ensureFreshAccessToken,
+): (() => Promise<string>) | undefined {
+	if (initialState.grantType !== "client_credentials") return undefined;
+	let currentState = initialState;
+	return async () => {
+		currentState = await renew(currentState, { forceOAuthRenewal: true });
+		return currentState.accessToken;
+	};
+}
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -451,6 +475,7 @@ export class GraphQLService {
 					if (rateLimit) await this.observeRateLimit(rateLimit);
 					return response.data;
 				} catch (error) {
+					if (error instanceof RateLimitAdmissionRefusal) throw error;
 					const rateLimit = extractRateLimitInfo(error, this.now);
 					if (rateLimit) await this.observeRateLimit(rateLimit);
 					if (
@@ -475,6 +500,7 @@ export class GraphQLService {
 				}
 			}
 		} catch (error: unknown) {
+			if (error instanceof RateLimitAdmissionRefusal) throw error;
 			if (isRateLimitGraphQLError(error)) {
 				throw rateLimitError(error, query, this.now);
 			}
@@ -510,15 +536,7 @@ export async function createGraphQLService(
 				auth.oauth.clientId,
 				auth.oauth.viewerId,
 			),
-			renewAccessToken:
-				auth.oauth.grantType === "client_credentials"
-					? async () =>
-							(
-								await ensureFreshAccessToken(auth.oauth, {
-									forceOAuthRenewal: true,
-								})
-							).accessToken
-					: undefined,
+			renewAccessToken: createClientCredentialsTokenRenewal(auth.oauth),
 		});
 	}
 	return new GraphQLService({ apiKey: auth.token });

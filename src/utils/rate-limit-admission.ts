@@ -24,6 +24,14 @@ export interface RateLimitAdmission {
 	observe(info: RateLimitInfo): Promise<void>;
 }
 
+/** A local/coordinator quota gate refused before any Linear request was sent. */
+export class RateLimitAdmissionRefusal extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "RateLimitAdmissionRefusal";
+	}
+}
+
 export interface RateLimitAdmissionOptions {
 	env?: NodeJS.ProcessEnv;
 	fetchImpl?: CoordinatorFetchLike;
@@ -72,7 +80,13 @@ function coordinatorUrl(env: NodeJS.ProcessEnv): string | null {
 	}
 	if (!/^https?:$/.test(parsed.protocol)) {
 		throw new Error(
-			"EL_LINEAR_RATE_LIMIT_COORDINATOR_URL must use HTTP or HTTPS.",
+			"EL_LINEAR_RATE_LIMIT_COORDINATOR_URL must use HTTPS (HTTP is allowed only for loopback development).",
+		);
+	}
+	const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+	if (parsed.protocol === "http:" && !loopbackHosts.has(parsed.hostname)) {
+		throw new Error(
+			"EL_LINEAR_RATE_LIMIT_COORDINATOR_URL must use HTTPS; bearer credentials may use HTTP only with a loopback host.",
 		);
 	}
 	return parsed.toString().replace(/\/$/, "");
@@ -119,7 +133,7 @@ function createCoordinatorAdmission(
 			)?.state;
 			const remaining = state?.remaining ?? 0;
 			const reset = state?.resetAt ? ` until ${state.resetAt}` : "";
-			throw new Error(
+			throw new RateLimitAdmissionRefusal(
 				`Linear rate limit exceeded before request; distributed admission refused: ${remaining} requests remain, preserving configured headroom ${headroom}${reset}.`,
 			);
 		},
@@ -245,13 +259,13 @@ export function createRateLimitAdmission(
 					return;
 				}
 				if (state.probeUntil !== undefined) {
-					throw new Error(
+					throw new RateLimitAdmissionRefusal(
 						`Linear rate limit probe is already in flight; admission refused while preserving configured headroom ${headroom}.`,
 					);
 				}
 				if (state.remaining <= headroom) {
 					const reset = state.resetAt ? ` until ${state.resetAt}` : "";
-					throw new Error(
+					throw new RateLimitAdmissionRefusal(
 						`Linear rate limit exceeded before request; admission refused: ${state.remaining} requests remain, preserving configured headroom ${headroom}${reset}.`,
 					);
 				}

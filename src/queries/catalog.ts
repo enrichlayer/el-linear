@@ -11,6 +11,11 @@ const PROJECT_FIELDS = `
   teams { nodes { id key name } }
 `;
 
+/**
+ * Fetch project summaries, embedded teams, and lead in one paginated request.
+ * The conditional team branch replaces SDK relation follow-ups and keeps both
+ * request count and GraphQL complexity visible at one catalog boundary.
+ */
 export const GET_PROJECTS_CATALOG_QUERY = `
   query GetProjectsCatalog(
     $filter: ProjectFilter
@@ -32,6 +37,7 @@ export const GET_PROJECTS_CATALOG_QUERY = `
   }
 `;
 
+/** Batch label metadata and parent/team relations into one bounded catalog read. */
 export const GET_LABELS_CATALOG_QUERY = `
   query GetLabelsCatalog($filter: IssueLabelFilter, $first: Int!) {
     issueLabels(filter: $filter, first: $first) {
@@ -47,6 +53,7 @@ export const GET_LABELS_CATALOG_QUERY = `
   }
 `;
 
+/** Batch cycle summaries and their team relation instead of resolving each edge. */
 export const GET_CYCLES_CATALOG_QUERY = `
   query GetCyclesCatalog($filter: CycleFilter, $first: Int!) {
     cycles(filter: $filter, first: $first, orderBy: createdAt) {
@@ -67,6 +74,10 @@ export const GET_CYCLES_CATALOG_QUERY = `
   }
 `;
 
+/**
+ * Read one cycle and its bounded issue catalog in a single query, avoiding the
+ * SDK's per-issue relation fan-out while keeping the issue page size explicit.
+ */
 export const GET_CYCLE_DETAIL_QUERY = `
   query GetCycleDetail($id: String!, $issuesFirst: Int!) {
     cycle(id: $id) {
@@ -103,6 +114,10 @@ export const GET_CYCLE_DETAIL_QUERY = `
   }
 `;
 
+/**
+ * Resolve a project name/slug with one bounded query. The conditional team
+ * branch performs scoping server-side without a separate project catalog read.
+ */
 export const RESOLVE_PROJECT_QUERY = `
   query ResolveProjectCatalog(
     $filter: ProjectFilter!
