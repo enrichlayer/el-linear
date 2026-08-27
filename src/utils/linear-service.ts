@@ -52,10 +52,7 @@ function nonEmptyFilter(
  */
 export type LinearServiceAuth = LinearCredential;
 
-type LinearSdkRequest = <
-	Response,
-	Variables extends Record<string, unknown>,
->(
+type LinearSdkRequest = <Response, Variables extends Record<string, unknown>>(
 	document: string,
 	variables?: Variables,
 ) => Promise<Response>;
@@ -87,10 +84,7 @@ export function instrumentLinearGraphQLErrorClassification(
 	const sdk = client as unknown as ClassifiableSdkClient;
 	if (!sdk._request) return client;
 	const originalRequest = sdk._request.bind(sdk);
-	sdk._request = async <
-		Response,
-		Variables extends Record<string, unknown>,
-	>(
+	sdk._request = async <Response, Variables extends Record<string, unknown>>(
 		document: string,
 		variables?: Variables,
 	): Promise<Response> => {
