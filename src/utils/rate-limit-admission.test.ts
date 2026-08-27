@@ -179,8 +179,7 @@ describe("rate-limit admission", () => {
 				{
 					env: {
 						EL_LINEAR_RATE_LIMIT_HEADROOM: "25",
-						EL_LINEAR_RATE_LIMIT_COORDINATOR_URL:
-							"http://quota.example/v1",
+						EL_LINEAR_RATE_LIMIT_COORDINATOR_URL: "http://quota.example/v1",
 						EL_LINEAR_RATE_LIMIT_COORDINATOR_TOKEN: "control-token",
 					},
 					fetchImpl,

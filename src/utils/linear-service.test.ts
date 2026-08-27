@@ -165,7 +165,10 @@ describe("LinearService", () => {
 			.fn()
 			.mockResolvedValueOnce(second)
 			.mockResolvedValueOnce(third);
-		const renewAccessToken = createClientCredentialsTokenRenewal(initial, renew);
+		const renewAccessToken = createClientCredentialsTokenRenewal(
+			initial,
+			renew,
+		);
 		const request = vi
 			.fn()
 			.mockRejectedValueOnce({ status: 401 })

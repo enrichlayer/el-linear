@@ -546,7 +546,10 @@ describe("GraphQLService", () => {
 			.fn()
 			.mockResolvedValueOnce(second)
 			.mockResolvedValueOnce(third);
-		const renewAccessToken = createClientCredentialsTokenRenewal(initial, renew);
+		const renewAccessToken = createClientCredentialsTokenRenewal(
+			initial,
+			renew,
+		);
 		mockRawRequest
 			.mockRejectedValueOnce({ status: 401, message: "Unauthorized" })
 			.mockResolvedValueOnce({ data: { viewer: { id: "first" } } })
@@ -557,9 +560,9 @@ describe("GraphQLService", () => {
 			{ renewAccessToken },
 		);
 
-		await expect(service.rawRequest("query First { viewer { id } }")).resolves.toEqual(
-			{ viewer: { id: "first" } },
-		);
+		await expect(
+			service.rawRequest("query First { viewer { id } }"),
+		).resolves.toEqual({ viewer: { id: "first" } });
 		await expect(
 			service.rawRequest("query Second { viewer { id } }"),
 		).resolves.toEqual({ viewer: { id: "second" } });

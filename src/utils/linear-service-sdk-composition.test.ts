@@ -4,8 +4,8 @@ import { instrumentLinearClient } from "./graphql-service.js";
 import { readGraphQLErrorDetail } from "./linear-graphql-error.js";
 import { instrumentLinearGraphQLErrorClassification } from "./linear-service.js";
 import {
-	RateLimitAdmissionRefusal,
 	type RateLimitAdmission,
+	RateLimitAdmissionRefusal,
 } from "./rate-limit-admission.js";
 
 afterEach(() => {
