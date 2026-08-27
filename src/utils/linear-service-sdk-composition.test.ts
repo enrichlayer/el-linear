@@ -21,7 +21,10 @@ describe("Linear SDK error-classification composition", () => {
 							},
 						],
 					}),
-					{ status: 429 },
+					{
+						status: 429,
+						headers: { "Content-Type": "application/json" },
+					},
 				),
 			),
 		);

@@ -82,18 +82,16 @@ describe("LinearService", () => {
 				expected: { httpStatus: null, code: null, retryable: true },
 			},
 		])(
-			"classifies $name at the shared SDK transport",
+			"classifies $name at the shared SDK request boundary",
 			async ({ error, expected }) => {
-				const transport = {
-					request: vi.fn().mockRejectedValue(error),
+				const sdk = {
+					_request: vi.fn().mockRejectedValue(error),
 				};
-				instrumentLinearGraphQLErrorClassification({
-					client: transport,
-				} as never);
+				instrumentLinearGraphQLErrorClassification(sdk as never);
 
 				let thrown: unknown;
 				try {
-					await transport.request("query Viewer { viewer { id } }");
+					await sdk._request("query Viewer { viewer { id } }");
 				} catch (caught) {
 					thrown = caught;
 				}
