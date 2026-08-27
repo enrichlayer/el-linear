@@ -153,6 +153,15 @@ function errorMessage(error: unknown): string {
 	return String(error);
 }
 
+function findRateLimitAdmissionRefusal(
+	error: unknown,
+): RateLimitAdmissionRefusal | null {
+	if (error instanceof RateLimitAdmissionRefusal) return error;
+	if (typeof error !== "object" || error === null) return null;
+	const raw = (error as { raw?: unknown }).raw;
+	return raw instanceof RateLimitAdmissionRefusal ? raw : null;
+}
+
 /**
  * Classify every generated SDK operation after the SDK has normalized its raw
  * transport rejection. Patching `client.client.request` is too early: the
@@ -174,7 +183,8 @@ export function instrumentLinearGraphQLErrorClassification(
 		try {
 			return await originalRequest<Response, Variables>(document, variables);
 		} catch (error) {
-			if (error instanceof RateLimitAdmissionRefusal) throw error;
+			const refusal = findRateLimitAdmissionRefusal(error);
+			if (refusal) throw refusal;
 			throw toLinearGraphQLError(error, errorMessage(error));
 		}
 	};
