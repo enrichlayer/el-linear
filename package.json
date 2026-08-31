@@ -71,7 +71,7 @@
 		"@types/node": "^26.0.0",
 		"graphql": "^17.0.1",
 		"tsx": "^4.21.0",
-		"typescript": "^6.0.3",
+		"typescript": "^7.0.2",
 		"vitest": "^4.0.18"
 	},
 	"optionalDependencies": {
