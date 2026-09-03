@@ -71,6 +71,16 @@ vi.mock("../utils/gate-telemetry.js", () => ({
 	emitGateEvent: mockEmitGateEvent,
 }));
 
+const mockReadSopCatalog = vi.fn();
+vi.mock("../utils/sop-matching.js", async (importOriginal) => {
+	const actual =
+		await importOriginal<typeof import("../utils/sop-matching.js")>();
+	return {
+		...actual,
+		readSopCatalog: mockReadSopCatalog,
+	};
+});
+
 const mockResolveTeam = vi
 	.fn()
 	.mockImplementation((v: string) => `team-id-${v}`);
@@ -161,6 +171,10 @@ describe("issues commands", () => {
 		// mockReturnValue — re-pin the default loadConfig to the bare baseline
 		// so individual tests start with a clean slate.
 		mockLoadConfig.mockReturnValue(baseConfig);
+		mockReadSopCatalog.mockReturnValue({
+			sops: [],
+			availability: { status: "ok" },
+		});
 	});
 
 	describe("issues list", () => {
@@ -1585,6 +1599,191 @@ describe("issues commands", () => {
 				}),
 			);
 			expect(mockCreateIssue).toHaveBeenCalled();
+		});
+	});
+
+	describe("issues create — SOP matching (DEV-9005)", () => {
+		const description =
+			"Work needs the standard review flow and a concrete checklist.\n\n## Done when\n\n- [ ] Existing criterion stays intact.";
+		const createArgs = [
+			"--team",
+			"DEV",
+			"--labels",
+			"feature",
+			"--description",
+			description,
+			"--assignee",
+			"bob",
+			"--project",
+			"Infrastructure",
+		];
+		const enabledConfig = {
+			...baseConfig,
+			validation: {
+				enabled: true,
+				sopMatching: true,
+				sopMatchThreshold: 0.3,
+			},
+		};
+		const matchingCatalog = {
+			sops: [
+				{
+					name: "sop-mr-review.mdx",
+					title: "SOP: MR Review",
+					path: "./sop-mr-review.mdx",
+					description: "Review a merge request with the standard flow.",
+					publishedUrl:
+						"https://enrichlayer.com/internal/docs/customer-support/workflow-guides/sop-mr-review",
+					checklist: ["Prepare the MR", "Request review"],
+				},
+			],
+			availability: { status: "ok" },
+		};
+
+		beforeEach(() => {
+			mockLoadConfig.mockReturnValue(enabledConfig);
+			mockSearchIssues.mockResolvedValue([]);
+			mockCreateIssue.mockResolvedValue({ id: "x", identifier: "DEV-999" });
+			mockReadSopCatalog.mockReturnValue(matchingCatalog);
+		});
+
+		it("prints a match and carries its link and checklist into Done when", async () => {
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Run the MR review",
+				...createArgs,
+			]);
+
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringContaining("Matched SOP:"),
+			);
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringContaining(matchingCatalog.sops[0].publishedUrl),
+			);
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({
+					description: expect.stringContaining("- [ ] Prepare the MR"),
+				}),
+			);
+			const createdDescription = mockCreateIssue.mock.calls[0][0].description;
+			expect(createdDescription).toContain(
+				"- [ ] Existing criterion stays intact.",
+			);
+			expect(createdDescription).toContain(
+				matchingCatalog.sops[0].publishedUrl,
+			);
+			expect(mockEmitGateEvent).toHaveBeenCalledWith(
+				"el-linear",
+				"issues create",
+				expect.objectContaining({
+					gate: "issues-create-sop-match",
+					outcome: "advisory",
+					candidateCount: 1,
+				}),
+			);
+		});
+
+		it("prints and adds nothing below the configured threshold", async () => {
+			mockReadSopCatalog.mockReturnValue({
+				...matchingCatalog,
+				sops: [
+					{
+						...matchingCatalog.sops[0],
+						title: "SOP: Customer account offboarding",
+						description: "Revoke access for a departing team member.",
+					},
+				],
+			});
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Run the MR review",
+				...createArgs,
+			]);
+
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ description }),
+			);
+			expect(mockOutputWarning).not.toHaveBeenCalledWith(
+				expect.stringContaining("Matched SOP"),
+			);
+			expect(mockEmitGateEvent).not.toHaveBeenCalledWith(
+				"el-linear",
+				"issues create",
+				expect.objectContaining({ gate: "issues-create-sop-match" }),
+			);
+		});
+
+		it("--no-sop-match opts out without reading the catalog", async () => {
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Run the MR review",
+				...createArgs,
+				"--no-sop-match",
+			]);
+
+			expect(mockReadSopCatalog).not.toHaveBeenCalled();
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ description }),
+			);
+		});
+
+		it("validation.sopMatching:false disables only SOP matching", async () => {
+			mockLoadConfig.mockReturnValue({
+				...enabledConfig,
+				validation: { enabled: true, sopMatching: false },
+			});
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Run the MR review",
+				...createArgs,
+			]);
+
+			expect(mockReadSopCatalog).not.toHaveBeenCalled();
+			expect(mockCreateIssue).toHaveBeenCalled();
+		});
+
+		it("fails open and records the degradation when el-sop is unavailable", async () => {
+			mockReadSopCatalog.mockImplementation(() => {
+				throw new Error("spawn el-sop ENOENT");
+			});
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Run the MR review",
+				...createArgs,
+			]);
+
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringContaining("proceeding without SOP matches"),
+			);
+			expect(mockEmitGateEvent).toHaveBeenCalledWith(
+				"el-linear",
+				"issues create",
+				expect.objectContaining({
+					gate: "issues-create-sop-match",
+					outcome: "fail-open",
+				}),
+			);
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ description }),
+			);
 		});
 	});
 

@@ -306,7 +306,10 @@ itself: `el-linear teams list --raw | jq '.[] | {key, id}'`, etc.
 
 `issues create` has a duplicate-detection gate (on by default), an opt-in
 [SOP-label parent gate](./docs/configuration.md#sop-label-parent-gate-validationsoplabelparentgate),
-and an opt-in
+an opt-in
+[SOP-matching gate](./docs/configuration.md#sop-matching-validationsopmatching)
+that uses `el-sop catalog` to print relevant published SOPs and copy their
+steps into the new issue's "Done when" checklist, and an opt-in
 [goal-completion gate](./docs/configuration.md#goal-completion-gate-validationgoalcompletiongate)
 (requires a falsifiable "Done when" / acceptance-criteria section), plus an
 opt-in

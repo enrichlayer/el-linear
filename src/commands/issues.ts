@@ -87,6 +87,14 @@ import {
 import { buildRelationCandidatePrompt } from "../utils/relation-candidate-prompt.js";
 import { effectiveOption, getRootOpts } from "../utils/root-opts.js";
 import {
+	appendSopMatchesToDoneWhen,
+	DEFAULT_SOP_MATCH_THRESHOLD,
+	formatSopMatches,
+	matchSops,
+	mergeSopRelations,
+	readSopCatalog,
+} from "../utils/sop-matching.js";
+import {
 	formatCsv,
 	formatMarkdown,
 	formatTable,
@@ -979,6 +987,62 @@ async function enforceSopLabelParent(
 }
 
 /**
+ * DEV-9005: creation-time SOP discovery. When opted in, read the structured
+ * catalog through `el-sop`, match the proposed issue using the duplicate
+ * gate's deterministic tokenization, and carry the matched links/checklists
+ * into Done when. Catalog/transport trouble is best-effort: warn, record the
+ * fail-open event, and leave the issue input unchanged.
+ */
+async function applySopMatches(
+	title: string,
+	rawDescription: string,
+	description: string,
+	options: OptionValues,
+): Promise<string> {
+	if (options.skipValidation || options.sopMatch === false) {
+		return description;
+	}
+	const validation = loadConfig().validation;
+	if (validation?.enabled === false || validation?.sopMatching !== true) {
+		return description;
+	}
+	const threshold =
+		typeof validation.sopMatchThreshold === "number"
+			? validation.sopMatchThreshold
+			: DEFAULT_SOP_MATCH_THRESHOLD;
+
+	try {
+		const matches = matchSops(
+			title,
+			rawDescription,
+			readSopCatalog(),
+			threshold,
+		);
+		if (matches.length === 0) {
+			return description;
+		}
+		await emitGateEvent("el-linear", "issues create", {
+			gate: "issues-create-sop-match",
+			outcome: "advisory",
+			topScore: matches[0].score,
+			candidateCount: matches.length,
+		});
+		outputWarning(formatSopMatches(matches));
+		options.relatedTo = mergeSopRelations(options.relatedTo, matches);
+		return appendSopMatchesToDoneWhen(description, matches);
+	} catch (error) {
+		await emitGateEvent("el-linear", "issues create", {
+			gate: "issues-create-sop-match",
+			outcome: "fail-open",
+		});
+		outputWarning(
+			`SOP matching could not read the catalog (${errorMessage(error)}); proceeding without SOP matches. Pass --no-sop-match to silence.`,
+		);
+		return description;
+	}
+}
+
+/**
  * DEV-5920: create-time goal-completion gate. Checks the description for a
  * "Done when" (or equivalent) section containing at least one falsifiable
  * criterion — the deterministic form of the concrete-goals rule (RFC-0027
@@ -1133,7 +1197,7 @@ async function handleCreateIssue(
 	const noFooter = options.footer === false;
 	const explicitFooter =
 		typeof options.footer === "string" ? options.footer : undefined;
-	const description =
+	let description =
 		applyFooter(descriptionWithAttachments, {
 			footer: explicitFooter,
 			noFooter,
@@ -1171,6 +1235,12 @@ async function handleCreateIssue(
 	// instantiated issues are rarer; the manual dup check still applies there.
 	if (title) {
 		await enforceNoDuplicateIssue(title, options, issuesService);
+		description = await applySopMatches(
+			title,
+			rawDescription ?? "",
+			description,
+			options,
+		);
 	}
 
 	// DEV-5378: deterministic SOP-label parent gate. Opt-in (dormant unless
@@ -2071,7 +2141,7 @@ export function setupIssuesCommands(program: Command): void {
 		)
 		.option(
 			"--skip-validation",
-			"skip general validation (labels, description, assignee, project, duplicate detection, SOP-parent gate, goal-completion gate); the intake-decision gate still requires its narrow override",
+			"skip general validation (labels, description, assignee, project, duplicate detection, SOP matching, SOP-parent gate, goal-completion gate); the intake-decision gate still requires its narrow override",
 		)
 		.option(
 			"--allow-duplicate",
@@ -2080,6 +2150,10 @@ export function setupIssuesCommands(program: Command): void {
 		.option(
 			"--allow-unparented-sop",
 			"skip the SOP-label parent gate and create an SOP-labeled issue without a parent SOP",
+		)
+		.option(
+			"--no-sop-match",
+			"skip matching this issue against the configured SOP catalog",
 		)
 		.option(
 			"--allow-vague-goal",
