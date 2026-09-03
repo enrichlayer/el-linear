@@ -91,7 +91,7 @@ import {
 	DEFAULT_SOP_MATCH_THRESHOLD,
 	formatSopMatches,
 	matchSops,
-	mergeSopRelations,
+	parseSopLinearIssueReference,
 	readSopCatalog,
 } from "../utils/sop-matching.js";
 import {
@@ -998,48 +998,120 @@ async function applySopMatches(
 	rawDescription: string,
 	description: string,
 	options: OptionValues,
-): Promise<string> {
+	linearService: LinearService,
+): Promise<{ description: string; relatedIssueIds: string[] }> {
+	const unchanged = { description, relatedIssueIds: [] };
 	if (options.skipValidation || options.sopMatch === false) {
-		return description;
+		return unchanged;
 	}
 	const validation = loadConfig().validation;
 	if (validation?.enabled === false || validation?.sopMatching !== true) {
-		return description;
+		return unchanged;
 	}
 	const threshold =
 		typeof validation.sopMatchThreshold === "number"
 			? validation.sopMatchThreshold
 			: DEFAULT_SOP_MATCH_THRESHOLD;
 
+	let catalog: ReturnType<typeof readSopCatalog>;
 	try {
-		const matches = matchSops(
-			title,
-			rawDescription,
-			readSopCatalog(),
-			threshold,
-		);
-		if (matches.length === 0) {
-			return description;
-		}
-		await emitGateEvent("el-linear", "issues create", {
-			gate: "issues-create-sop-match",
-			outcome: "advisory",
-			topScore: matches[0].score,
-			candidateCount: matches.length,
-		});
-		outputWarning(formatSopMatches(matches));
-		options.relatedTo = mergeSopRelations(options.relatedTo, matches);
-		return appendSopMatchesToDoneWhen(description, matches);
+		catalog = readSopCatalog();
 	} catch (error) {
-		await emitGateEvent("el-linear", "issues create", {
-			gate: "issues-create-sop-match",
-			outcome: "fail-open",
-		});
-		outputWarning(
-			`SOP matching could not read the catalog (${errorMessage(error)}); proceeding without SOP matches. Pass --no-sop-match to silence.`,
+		await reportSopMatchFailOpen(
+			"catalog read",
+			error,
+			"proceeding without SOP matches",
 		);
-		return description;
+		return unchanged;
 	}
+
+	const entryErrors: { name: string; error: Error }[] = [];
+	let matches: ReturnType<typeof matchSops>;
+	try {
+		matches = matchSops(title, rawDescription, catalog, {
+			threshold,
+			publishedUrlBase: validation.sopPublishedUrlBase,
+			onEntryError: (entry, error) => {
+				entryErrors.push({ name: entry.name, error });
+			},
+		});
+	} catch (error) {
+		await reportSopMatchFailOpen(
+			"matching",
+			error,
+			"proceeding without SOP matches",
+		);
+		return unchanged;
+	}
+	for (const entryError of entryErrors) {
+		await reportSopMatchFailOpen(
+			"matching",
+			entryError.error,
+			`skipping catalog entry ${entryError.name} and proceeding with remaining entries`,
+		);
+	}
+	if (matches.length === 0) {
+		return unchanged;
+	}
+	await emitGateEvent("el-linear", "issues create", {
+		gate: "issues-create-sop-match",
+		outcome: "advisory",
+		topScore: matches[0].score,
+		candidateCount: matches.length,
+	});
+	outputWarning(formatSopMatches(matches));
+
+	const relatedIssueIds: string[] = [];
+	for (const match of matches) {
+		if (!match.linearIssue) {
+			continue;
+		}
+		try {
+			const identifier = parseSopLinearIssueReference(match.linearIssue);
+			const issueId = await linearService.resolveIssueId(identifier);
+			if (!relatedIssueIds.includes(issueId)) {
+				relatedIssueIds.push(issueId);
+			}
+		} catch (error) {
+			await reportSopMatchFailOpen(
+				"relation",
+				error,
+				`dropping the SOP relation ${match.linearIssue} and proceeding`,
+			);
+		}
+	}
+
+	try {
+		return {
+			description: appendSopMatchesToDoneWhen(
+				description,
+				matches,
+				validation.goalSectionHeaders,
+			),
+			relatedIssueIds,
+		};
+	} catch (error) {
+		await reportSopMatchFailOpen(
+			"Done-when rewrite",
+			error,
+			"proceeding with the original description",
+		);
+		return { description, relatedIssueIds };
+	}
+}
+
+async function reportSopMatchFailOpen(
+	stage: "catalog read" | "matching" | "Done-when rewrite" | "relation",
+	error: unknown,
+	action: string,
+): Promise<void> {
+	await emitGateEvent("el-linear", "issues create", {
+		gate: "issues-create-sop-match",
+		outcome: "fail-open",
+	});
+	outputWarning(
+		`SOP matching ${stage} failed (${errorMessage(error)}); ${action}. Pass --no-sop-match to silence.`,
+	);
 }
 
 /**
@@ -1222,6 +1294,7 @@ async function handleCreateIssue(
 
 	const { graphQLService, linearService, issuesService } =
 		await createIssuesService(rootOpts);
+	let sopRelatedIssueIds: string[] = [];
 
 	// DEV-4823: deterministic duplicate-detection gate. Runs before the create
 	// POST, searches the title's salient keywords (including closed issues),
@@ -1235,12 +1308,15 @@ async function handleCreateIssue(
 	// instantiated issues are rarer; the manual dup check still applies there.
 	if (title) {
 		await enforceNoDuplicateIssue(title, options, issuesService);
-		description = await applySopMatches(
+		const sopMatches = await applySopMatches(
 			title,
 			rawDescription ?? "",
 			description,
 			options,
+			linearService,
 		);
+		description = sopMatches.description;
+		sopRelatedIssueIds = sopMatches.relatedIssueIds;
 	}
 
 	// DEV-5378: deterministic SOP-label parent gate. Opt-in (dormant unless
@@ -1304,6 +1380,27 @@ async function handleCreateIssue(
 		graphQLService,
 		linearService,
 	);
+	// SOP-discovered relations are advisory and deliberately separate from
+	// user-supplied relation flags. Apply them only after those explicit
+	// relations, and fail open per relation so a post-create write can never
+	// turn an otherwise successful create into an orphan-producing error.
+	for (const targetId of sopRelatedIssueIds) {
+		try {
+			const created = await createRelations(
+				result.id,
+				{ relatedTo: targetId },
+				graphQLService,
+				linearService,
+			);
+			relations.push(...created);
+		} catch (error) {
+			await reportSopMatchFailOpen(
+				"relation",
+				error,
+				`could not create the SOP relation to ${targetId}; issue creation still succeeded`,
+			);
+		}
+	}
 	// Pass the ORIGINAL description (pre-wrap) so the extractor's prose-keyword inference
 	// ("blocked by", "duplicates", etc.) sees `keyword DEV-100` instead of `keyword [DEV-100](url)`.
 	// After wrapping, the keyword regex's trailing-whitespace anchor fails to match the inserted `[`.

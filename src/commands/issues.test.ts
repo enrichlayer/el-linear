@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1640,6 +1640,24 @@ describe("issues commands", () => {
 			availability: { status: "ok" },
 		};
 
+		function mockRelatedRelation(targetId = "uuid-sop") {
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				issueRelationCreate: {
+					success: true,
+					issueRelation: {
+						id: "rel-sop",
+						type: "related",
+						issue: { id: "x", identifier: "DEV-999", title: "New issue" },
+						relatedIssue: {
+							id: targetId,
+							identifier: "DEV-100",
+							title: "SOP issue",
+						},
+					},
+				},
+			});
+		}
+
 		beforeEach(() => {
 			mockLoadConfig.mockReturnValue(enabledConfig);
 			mockSearchIssues.mockResolvedValue([]);
@@ -1684,6 +1702,258 @@ describe("issues commands", () => {
 					candidateCount: 1,
 				}),
 			);
+		});
+
+		it("resolves a matched SOP issue before create and adds its relation afterward", async () => {
+			mockReadSopCatalog.mockReturnValue({
+				...matchingCatalog,
+				sops: [{ ...matchingCatalog.sops[0], linearIssue: "DEV-100" }],
+			});
+			mockLinearService.resolveIssueId.mockResolvedValue("uuid-sop");
+			mockRelatedRelation();
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Run the MR review",
+				...createArgs,
+			]);
+
+			expect(mockLinearService.resolveIssueId).toHaveBeenCalledWith("DEV-100");
+			expect(
+				mockLinearService.resolveIssueId.mock.invocationCallOrder[0],
+			).toBeLessThan(mockCreateIssue.mock.invocationCallOrder[0]);
+			expect(mockGraphQLService.rawRequest).toHaveBeenCalledWith(
+				expect.stringContaining("IssueRelationCreate"),
+				{
+					input: {
+						issueId: "x",
+						relatedIssueId: "uuid-sop",
+						type: "related",
+					},
+				},
+			);
+		});
+
+		it("creates user relations before SOP-discovered relations", async () => {
+			mockReadSopCatalog.mockReturnValue({
+				...matchingCatalog,
+				sops: [{ ...matchingCatalog.sops[0], linearIssue: "DEV-100" }],
+			});
+			mockLinearService.resolveIssueId.mockImplementation(
+				(reference: string) => {
+					const ids: Record<string, string> = {
+						"DEV-50": "uuid-user",
+						"DEV-100": "uuid-sop",
+						"uuid-sop": "uuid-sop",
+					};
+					return Promise.resolve(ids[reference]);
+				},
+			);
+			mockRelatedRelation();
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Run the MR review",
+				...createArgs,
+				"--related-to",
+				"DEV-50",
+			]);
+
+			const relationTargets = mockGraphQLService.rawRequest.mock.calls.map(
+				(call: unknown[]) =>
+					(
+						call[1] as {
+							input: { relatedIssueId: string };
+						}
+					).input.relatedIssueId,
+			);
+			expect(relationTargets).toEqual(["uuid-user", "uuid-sop"]);
+		});
+
+		it("drops an unresolvable SOP relation before create and warns", async () => {
+			mockReadSopCatalog.mockReturnValue({
+				...matchingCatalog,
+				sops: [{ ...matchingCatalog.sops[0], linearIssue: "DEV-404" }],
+			});
+			mockLinearService.resolveIssueId.mockRejectedValue(
+				new Error('Issue "DEV-404" not found.'),
+			);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Run the MR review",
+				...createArgs,
+			]);
+
+			expect(mockCreateIssue).toHaveBeenCalled();
+			expect(process.exit).not.toHaveBeenCalledWith(1);
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringContaining("SOP matching relation failed"),
+			);
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringContaining("DEV-404"),
+			);
+			expect(mockEmitGateEvent).toHaveBeenCalledWith(
+				"el-linear",
+				"issues create",
+				expect.objectContaining({
+					gate: "issues-create-sop-match",
+					outcome: "fail-open",
+				}),
+			);
+			expect(mockGraphQLService.rawRequest).not.toHaveBeenCalled();
+		});
+
+		it("accepts a URL-form SOP relation reference and fails open if it is stale", async () => {
+			const url =
+				"https://linear.app/verticalint/issue/DEV-404/retired-sop-issue";
+			mockReadSopCatalog.mockReturnValue({
+				...matchingCatalog,
+				sops: [{ ...matchingCatalog.sops[0], linearIssue: url }],
+			});
+			mockLinearService.resolveIssueId.mockRejectedValue(
+				new Error('Issue "DEV-404" not found.'),
+			);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Run the MR review",
+				...createArgs,
+			]);
+
+			expect(mockLinearService.resolveIssueId).toHaveBeenCalledWith("DEV-404");
+			expect(mockCreateIssue).toHaveBeenCalled();
+			expect(process.exit).not.toHaveBeenCalledWith(1);
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringContaining(url),
+			);
+		});
+
+		it("fails open when the SOP relation write fails after issue creation", async () => {
+			mockReadSopCatalog.mockReturnValue({
+				...matchingCatalog,
+				sops: [{ ...matchingCatalog.sops[0], linearIssue: "DEV-100" }],
+			});
+			mockLinearService.resolveIssueId.mockResolvedValue("uuid-sop");
+			mockGraphQLService.rawRequest.mockRejectedValue(
+				new Error("relation mutation unavailable"),
+			);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Run the MR review",
+				...createArgs,
+			]);
+
+			expect(mockCreateIssue).toHaveBeenCalled();
+			expect(process.exit).not.toHaveBeenCalledWith(1);
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringContaining("issue creation still succeeded"),
+			);
+		});
+
+		it("does not let an SOP-discovered relation satisfy the SOP-parent gate", async () => {
+			mockLoadConfig.mockReturnValue({
+				...enabledConfig,
+				validation: {
+					...enabledConfig.validation,
+					sopLabelParentGate: true,
+				},
+			});
+			mockReadSopCatalog.mockReturnValue({
+				...matchingCatalog,
+				sops: [{ ...matchingCatalog.sops[0], linearIssue: "DEV-100" }],
+			});
+			mockLinearService.resolveIssueId.mockResolvedValue("uuid-sop");
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Run the MR review",
+				...createArgs,
+				"--labels",
+				"feature,SOP",
+			]);
+
+			expect(mockLinearService.resolveIssueId).toHaveBeenCalledWith("DEV-100");
+			expect(mockGetIssueById).not.toHaveBeenCalled();
+			expect(mockCreateIssue).not.toHaveBeenCalled();
+			expect(process.exit).toHaveBeenCalledWith(1);
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("has no --parent or --related-to"),
+			);
+		});
+
+		it("warns for one unreadable SOP entry and still applies another match", async () => {
+			const tempDir = mkdtempSync(join(tmpdir(), "sop-matching-test-"));
+			const docsDir = join(tempDir, "docs-mdx", "workflow-guides");
+			mkdirSync(docsDir, { recursive: true });
+			writeFileSync(join(docsDir, "CATALOG.md"), "# Catalog\n");
+			writeFileSync(
+				join(docsDir, "good.mdx"),
+				"---\ntitle: SOP: MR Review\n---\n\n## Steps\n\n1. Run the review.\n",
+			);
+			mockReadSopCatalog.mockReturnValue({
+				sops: [
+					{
+						...matchingCatalog.sops[0],
+						name: "bad.mdx",
+						path: "./bad.mdx",
+						publishedUrl: undefined,
+						checklist: undefined,
+					},
+					{
+						...matchingCatalog.sops[0],
+						name: "good.mdx",
+						path: "./good.mdx",
+						publishedUrl: undefined,
+						checklist: undefined,
+					},
+				],
+				availability: {
+					status: "ok",
+					catalogPath: join(docsDir, "CATALOG.md"),
+				},
+			});
+
+			try {
+				const program = createTestProgram();
+				setupIssuesCommands(program);
+				await runCommand(program, [
+					"issues",
+					"create",
+					"Run the MR review",
+					...createArgs,
+				]);
+
+				expect(mockOutputWarning).toHaveBeenCalledWith(
+					expect.stringContaining("skipping catalog entry bad.mdx"),
+				);
+				expect(mockCreateIssue).toHaveBeenCalledWith(
+					expect.objectContaining({
+						description: expect.stringContaining("Run the review"),
+					}),
+				);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
 		});
 
 		it("prints and adds nothing below the configured threshold", async () => {

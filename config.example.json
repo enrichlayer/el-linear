@@ -62,7 +62,8 @@
 		"sopLabelParentGate": false,
 		"sopLabels": ["SOP"],
 		"sopMatching": false,
-		"sopMatchThreshold": 0.3
+		"sopMatchThreshold": 0.3,
+		"sopPublishedUrlBase": "https://enrichlayer.com/internal/docs/customer-support"
 	},
 	"workspaceUrlKey": "acme"
 }

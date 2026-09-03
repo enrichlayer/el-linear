@@ -188,6 +188,12 @@ export interface ElLinearConfig {
 		 */
 		sopMatchThreshold?: number;
 		/**
+		 * Base URL used when a matched SOP catalog entry has only a docs-mdx
+		 * source path. Defaults to the current Enrich Layer internal-docs route.
+		 * Other workspaces can point the opt-in matcher at their own publisher.
+		 */
+		sopPublishedUrlBase?: string;
+		/**
 		 * OPT-IN goal-completion gate (DEV-5920). When `"warn"` or `"block"`,
 		 * `issues create` checks the description for a goal-completion section
 		 * ("Done when" / "Acceptance criteria" / … — see `goalSectionHeaders`)

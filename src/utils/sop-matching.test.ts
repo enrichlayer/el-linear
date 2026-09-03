@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
 	appendSopMatchesToDoneWhen,
+	DEFAULT_SOP_PUBLISHED_URL_BASE,
 	extractSopChecklist,
 	matchSops,
-	mergeSopRelations,
 	parseSopCatalogOutput,
+	parseSopLinearIssueReference,
 	publishedSopUrl,
 	type SopCatalog,
 	type SopMatch,
@@ -70,13 +71,15 @@ describe("SOP matching", () => {
 		).toThrow("malformed SOP entry");
 	});
 
-	it("uses title, description, and source tags with the duplicate gate tokenizer", () => {
+	it("uses title, description, and catalog tags with the duplicate gate tokenizer", () => {
 		const matches = matchSops(
 			"Run the merge request review",
 			"Follow the code review workflow.",
-			catalog,
-			0.3,
-			() => source,
+			{
+				...catalog,
+				sops: [{ ...catalog.sops[0], tags: ["merge-request", "code-review"] }],
+			},
+			{ threshold: 0.3, readSource: () => source },
 		);
 
 		expect(matches).toHaveLength(1);
@@ -98,25 +101,59 @@ describe("SOP matching", () => {
 			"Offboard a departing teammate",
 			"Revoke account access.",
 			catalog,
-			0.3,
-			() => source,
+			{ threshold: 0.3, readSource: () => source },
 		);
 
 		expect(matches).toEqual([]);
 	});
 
-	it("surfaces an unreadable SOP source to the create gate's fail-open path", () => {
-		expect(() =>
-			matchSops(
-				"Run the MR review",
-				"Review the request.",
-				catalog,
-				0.3,
-				() => {
-					throw new Error("read failed");
+	it("skips one unreadable matched entry and continues matching the corpus", () => {
+		const onEntryError = vi.fn();
+		const matches = matchSops(
+			"Run the MR review",
+			"Review the request.",
+			{
+				...catalog,
+				sops: [
+					catalog.sops[0],
+					{
+						...catalog.sops[0],
+						name: "sop-review-backup.mdx",
+						path: "./sop-review-backup.mdx",
+					},
+				],
+			},
+			{
+				threshold: 0.3,
+				readSource: (path) => {
+					if (path.endsWith("sop-mr-review.mdx")) {
+						throw new Error("read failed");
+					}
+					return source;
 				},
-			),
-		).toThrow("could not read SOP source sop-mr-review.mdx: read failed");
+				onEntryError,
+			},
+		);
+
+		expect(matches).toHaveLength(1);
+		expect(matches[0].name).toBe("sop-review-backup.mdx");
+		expect(onEntryError).toHaveBeenCalledWith(
+			catalog.sops[0],
+			expect.objectContaining({
+				message: expect.stringContaining("read failed"),
+			}),
+		);
+	});
+
+	it("does not hydrate catalog entries below the score threshold", () => {
+		const readSource = vi.fn(() => source);
+		expect(
+			matchSops("Offboard a teammate", "Revoke access.", catalog, {
+				threshold: 0.3,
+				readSource,
+			}),
+		).toEqual([]);
+		expect(readSource).not.toHaveBeenCalled();
 	});
 
 	it("extracts only top-level numbered items from the Steps section", () => {
@@ -132,7 +169,31 @@ describe("SOP matching", () => {
 				"/workspace/docs-mdx/business/operations/sop-payments.mdx",
 			),
 		).toBe(
-			"https://enrichlayer.com/internal/docs/customer-support/business/operations/sop-payments",
+			`${DEFAULT_SOP_PUBLISHED_URL_BASE}/business/operations/sop-payments`,
+		);
+	});
+
+	it("derives the published URL from a configured base", () => {
+		expect(
+			publishedSopUrl(
+				"/workspace/docs-mdx/workflow-guides/sop-review.mdx",
+				"https://docs.example.com/playbooks/",
+			),
+		).toBe("https://docs.example.com/playbooks/workflow-guides/sop-review");
+	});
+
+	it("accepts bare and URL-form Linear issue references", () => {
+		expect(parseSopLinearIssueReference("DEV-100")).toBe("DEV-100");
+		expect(
+			parseSopLinearIssueReference(
+				"https://linear.app/verticalint/issue/DEV-100/review-the-mr",
+			),
+		).toBe("DEV-100");
+	});
+
+	it("rejects malformed Linear issue references", () => {
+		expect(() => parseSopLinearIssueReference("not-an-issue")).toThrow(
+			"expected TEAM-123",
 		);
 	});
 
@@ -157,21 +218,25 @@ describe("SOP matching", () => {
 
 	it("appends to a bold Done when pseudo-header", () => {
 		const result = appendSopMatchesToDoneWhen(
-			"Context.\n\n**Done when:**\n\n- [ ] Existing.\n\n**Out of scope**\n\nNothing else.",
+			"Context.\n\n**Done when:**\n\n- [ ] Existing.\n\n## Out of scope\n\nNothing else.",
 			[match()],
 		);
 		expect(result.indexOf("### Matched SOP")).toBeLessThan(
-			result.indexOf("**Out of scope**"),
+			result.indexOf("## Out of scope"),
 		);
 		expect(result.match(/Done when/g)).toHaveLength(1);
 	});
 
-	it("merges matched SOP Linear issues with explicit related issues", () => {
-		expect(
-			mergeSopRelations("DEV-50,DEV-100", [
-				match({ linearIssue: "DEV-100" }),
-				match({ linearIssue: "ALL-20" }),
-			]),
-		).toBe("DEV-50,DEV-100,ALL-20");
+	it("keeps a bold callout inside Done when instead of treating it as a section", () => {
+		const result = appendSopMatchesToDoneWhen(
+			"Context.\n\n## Done when\n\n**Important:**\n\nKeep this callout.\n\n- [ ] Existing.\n\n## Out of scope\n\nNothing else.",
+			[match()],
+		);
+		expect(result.indexOf("**Important:**")).toBeLessThan(
+			result.indexOf("### Matched SOP"),
+		);
+		expect(result.indexOf("### Matched SOP")).toBeLessThan(
+			result.indexOf("## Out of scope"),
+		);
 	});
 });

@@ -381,8 +381,9 @@ tags using the duplicate gate's deterministic tokenization and Jaccard score.
 Matches at or above `validation.sopMatchThreshold` (default `0.3`) are printed
 with their published internal-docs URLs. Each matched SOP is linked from the
 issue's `Done when` section and its top-level numbered `Steps` are copied there
-as unchecked boxes. If the catalog exposes a Linear issue identifier, the new
-issue also receives a `related` relation to it.
+as unchecked boxes. If the catalog exposes a Linear issue reference, either a
+bare `TEAM-123` identifier or a full `linear.app` issue URL, the new issue also
+receives a `related` relation to it.
 
 The gate is off by default because `el-linear` is open-source and most installs
 do not have the Enrich Layer `el-sop` CLI or docs corpus. Enable it per workspace:
@@ -392,16 +393,25 @@ do not have the Enrich Layer `el-sop` CLI or docs corpus. Enable it per workspac
   "validation": {
     "enabled": true,
     "sopMatching": true,
-    "sopMatchThreshold": 0.3
+    "sopMatchThreshold": 0.3,
+    "sopPublishedUrlBase": "https://enrichlayer.com/internal/docs/customer-support"
   }
 }
 ```
 
+`validation.sopPublishedUrlBase` controls the published URL prefix used for
+catalog entries that expose only a source path. It defaults to
+`https://enrichlayer.com/internal/docs/customer-support`; set it to the root
+that publishes your workspace's `docs-mdx` tree.
+
 Use `--no-sop-match` to skip one create, or set
-`validation.sopMatching: false` to disable it. Catalog command, parse, or SOP
-source-read failures fail open: creation proceeds unchanged, a warning explains
-the degradation, and gate telemetry records `fail-open`. A clean no-match is
-silent and leaves the description and relations unchanged.
+`validation.sopMatching: false` to disable it. Catalog command or parse failures
+fail open for the whole match; an SOP source-read failure skips only that
+catalog entry so the remaining entries can still match. Invalid, stale,
+unresolvable, or failed SOP-originated Linear relations also fail open: the
+issue is still created and only that advisory relation is dropped. Each warning
+names the failing stage, and gate telemetry records `fail-open`. A clean
+no-match is silent and leaves the description and relations unchanged.
 
 ### Goal-completion gate (`validation.goalCompletionGate`)
 
