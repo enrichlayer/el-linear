@@ -1,5 +1,6 @@
 import type { Command, OptionValues } from "commander";
 import { loadConfig } from "../config/config.js";
+import { resolvedProfileLabel } from "../config/paths.js";
 import { cached, resolveCacheTTL } from "../utils/disk-cache.js";
 import { createLinearService } from "../utils/linear-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
@@ -40,7 +41,10 @@ export function setupTeamsCommands(program: Command): void {
 						return service.getTeams(limit);
 					},
 				);
-				outputSuccess({ data: result, meta: { count: result.length } });
+				outputSuccess({
+					data: result,
+					meta: { count: result.length, profile: resolvedProfileLabel() },
+				});
 			}),
 		);
 }
