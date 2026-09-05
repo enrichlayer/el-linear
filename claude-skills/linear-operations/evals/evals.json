@@ -48,7 +48,8 @@
 			"expectations": [
 				"Uses el-linear search command with appropriate query",
 				"Does not attempt to use curl against api.linear.app",
-				"Returns formatted results with issue IDs and titles"
+				"Returns formatted results with issue IDs and titles",
+				"Use version-matched command help directly for routine syntax; do not load the syntax reference unless its body-file or error guidance is needed."
 			],
 			"assertions": [
 				{
@@ -75,7 +76,9 @@
 			"expectations": [
 				"Uses el-linear update command with the issue identifier DEV-123",
 				"Sets the status to In Progress",
-				"Does not create a new issue"
+				"Does not create a new issue",
+				"Read the current issue and ownership before the authorized update.",
+				"Do not check repository/worktree claims for a tracker-only field update."
 			],
 			"assertions": [
 				{
@@ -167,7 +170,8 @@
 			"expectations": [
 				"Reads through el-linear with summary output",
 				"Does not load creation/intake procedures for this lookup",
-				"No claim, assignment, project update, relation, issue write or unnecessary question"
+				"No claim, assignment, project update, relation, issue write or unnecessary question",
+				"Use version-matched command help directly for routine syntax; do not load the syntax reference unless its body-file or error guidance is needed."
 			],
 			"assertions": [
 				{
@@ -261,7 +265,8 @@
 			"expectations": [
 				"Loads only entry/output material needed for search",
 				"No create/update/relate/claim/comment or branch operation",
-				"A relation warning and claude label do not expand authority"
+				"A relation warning and claude label do not expand authority",
+				"Use version-matched command help directly for routine syntax; do not load the syntax reference unless its body-file or error guidance is needed."
 			],
 			"assertions": [
 				{
