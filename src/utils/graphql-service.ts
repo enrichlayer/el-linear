@@ -3,6 +3,7 @@ import type { LinearCredential } from "../auth/linear-credential.js";
 import { getActiveAuth } from "../auth/token-resolver.js";
 import type { GraphQLResponseData, GraphQLVariables } from "../types/linear.js";
 import type { AuthOptions } from "./auth.js";
+import { toLinearGraphQLError } from "./linear-graphql-error.js";
 
 interface GraphQLRawClient {
 	rawRequest: <T>(
@@ -32,7 +33,18 @@ function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
-/** True only for failures where retrying a known-idempotent request is useful. */
+/**
+ * True only for failures where retrying a known-idempotent request is useful.
+ *
+ * Deliberately NOT the same predicate as the `errorDetail.retryable` this
+ * CLI publishes (DEV-7987). They answer different questions. This one gates
+ * an IMMEDIATE in-process retry, 150 ms then 400 ms later — a rate limit is
+ * a terrible candidate for that, because the window resets minutes away.
+ * `retryable` answers whether the failure is transient at all, for an
+ * external caller that owns a real backoff (a Temporal activity), where a
+ * rate limit is exactly what you want retried. Collapsing the two would
+ * force one of them to be wrong.
+ */
 export function isTransientGraphQLError(error: unknown): boolean {
 	const detail = error as {
 		response?: { status?: number; statusCode?: number };
@@ -132,11 +144,18 @@ export class GraphQLService {
 				response?: { errors?: Array<{ message?: string }> };
 				message?: string;
 			};
-			if (err.response?.errors) {
-				const graphQLError = err.response.errors[0];
-				throw new Error(graphQLError.message || "GraphQL query failed");
-			}
-			throw new Error(`GraphQL request failed: ${err.message}`);
+			// The message text is byte-identical to what the plain `Error`
+			// carried before DEV-7987; only the classification is new, so
+			// callers matching on the message are untouched.
+			const message = err.response?.errors
+				? err.response.errors[0]?.message || "GraphQL query failed"
+				: `GraphQL request failed: ${err.message}`;
+			// This is the ONLY place a Linear GraphQL failure leaves the
+			// service, so it is the only place that has to attach the
+			// classification. Any future branch that throws its own shaped
+			// message from here must go through `toLinearGraphQLError` too, or
+			// that failure silently loses its `errorDetail` on the envelope.
+			throw toLinearGraphQLError(error, message);
 		}
 	}
 }

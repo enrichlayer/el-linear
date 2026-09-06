@@ -17,6 +17,7 @@ import type { AuthOptions } from "./auth.js";
 import { toISOStringOrNow, toISOStringOrUndefined } from "./date-format.js";
 import { multipleMatchesError, notFoundError } from "./error-messages.js";
 import { parseIssueIdentifier } from "./identifier-parser.js";
+import { toLinearGraphQLError } from "./linear-graphql-error.js";
 import { parseProjectSlugId } from "./project-slug.js";
 import { isUuid } from "./uuid.js";
 
@@ -51,14 +52,63 @@ function nonEmptyFilter(
  */
 export type LinearServiceAuth = LinearCredential;
 
+type LinearSdkRequest = <Response, Variables extends Record<string, unknown>>(
+	document: string,
+	variables?: Variables,
+) => Promise<Response>;
+
+interface ClassifiableSdkClient {
+	_request?: LinearSdkRequest;
+}
+
+function errorMessage(error: unknown): string {
+	if (error instanceof Error) return error.message;
+	if (typeof error === "object" && error !== null) {
+		const message = (error as { message?: unknown }).message;
+		if (typeof message === "string") return message;
+	}
+	return String(error);
+}
+
+/**
+ * Classify every generated SDK operation after the SDK has normalized its raw
+ * transport rejection. Patching `client.client.request` is too early: the
+ * LinearClient constructor wraps that transport with `parseLinearError`, which
+ * would immediately strip our additive classification fields again. Keeping
+ * the wrapper here (rather than guessing in `outputError`) also leaves local
+ * validation and not-found errors unclassified.
+ */
+export function instrumentLinearGraphQLErrorClassification(
+	client: LinearClient,
+): LinearClient {
+	const sdk = client as unknown as ClassifiableSdkClient;
+	if (!sdk._request) return client;
+	const originalRequest = sdk._request.bind(sdk);
+	sdk._request = async <Response, Variables extends Record<string, unknown>>(
+		document: string,
+		variables?: Variables,
+	): Promise<Response> => {
+		try {
+			return await originalRequest<Response, Variables>(document, variables);
+		} catch (error) {
+			throw toLinearGraphQLError(error, errorMessage(error));
+		}
+	};
+	return client;
+}
+
 function buildLinearClient(auth: LinearServiceAuth): LinearClient {
 	if ("oauthToken" in auth) {
 		// Linear's SDK natively supports OAuth via the `accessToken` option,
 		// which causes the underlying transport to send
 		// `Authorization: Bearer <token>` instead of the personal-token shape.
-		return new LinearClient({ accessToken: auth.oauthToken });
+		return instrumentLinearGraphQLErrorClassification(
+			new LinearClient({ accessToken: auth.oauthToken }),
+		);
 	}
-	return new LinearClient({ apiKey: auth.apiKey });
+	return instrumentLinearGraphQLErrorClassification(
+		new LinearClient({ apiKey: auth.apiKey }),
+	);
 }
 
 export class LinearService {

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readGraphQLErrorDetail } from "./linear-graphql-error.js";
 
 const mockTeams = vi.fn();
 const mockTeam = vi.fn();
@@ -32,7 +33,8 @@ vi.mock("@linear/sdk", () => ({
 	},
 }));
 
-const { LinearService } = await import("./linear-service.js");
+const { LinearService, instrumentLinearGraphQLErrorClassification } =
+	await import("./linear-service.js");
 
 // Reset every mock before each test so tests are order-independent: call
 // logs, queued `mockResolvedValueOnce` entries, AND base implementations.
@@ -45,6 +47,76 @@ beforeEach(() => {
 });
 
 describe("LinearService", () => {
+	describe("SDK GraphQL error classification", () => {
+		it.each([
+			{
+				name: "HTTP 429",
+				error: { status: 429, message: "Ratelimit exceeded" },
+				expected: { httpStatus: 429, code: null, retryable: true },
+			},
+			{
+				name: "permanent HTTP 403",
+				error: { status: 403, message: "Forbidden" },
+				expected: { httpStatus: 403, code: null, retryable: false },
+			},
+			{
+				name: "RATELIMITED GraphQL code",
+				error: {
+					status: 400,
+					message: "Rate limited",
+					raw: {
+						response: {
+							errors: [{ extensions: { code: "RATELIMITED" } }],
+						},
+					},
+				},
+				expected: {
+					httpStatus: 400,
+					code: "RATELIMITED",
+					retryable: true,
+				},
+			},
+			{
+				name: "no-response transport failure",
+				error: new Error("fetch failed"),
+				expected: { httpStatus: null, code: null, retryable: true },
+			},
+		])(
+			"classifies $name at the shared SDK request boundary",
+			async ({ error, expected }) => {
+				const sdk = {
+					_request: vi.fn().mockRejectedValue(error),
+				};
+				instrumentLinearGraphQLErrorClassification(sdk as never);
+
+				let thrown: unknown;
+				try {
+					await sdk._request("query Viewer { viewer { id } }");
+				} catch (caught) {
+					thrown = caught;
+				}
+
+				expect(readGraphQLErrorDetail(thrown)).toEqual(expected);
+				expect((thrown as Error).message).toBe(error.message);
+			},
+		);
+
+		it("leaves local not-found failures unclassified", async () => {
+			mockIssues.mockResolvedValue({ nodes: [] });
+			const service = new LinearService({ apiKey: "token" });
+
+			let thrown: unknown;
+			try {
+				await service.resolveIssueId("DEV-999");
+			} catch (caught) {
+				thrown = caught;
+			}
+
+			expect(readGraphQLErrorDetail(thrown)).toBeNull();
+			expect((thrown as Error).message).toContain('Issue "DEV-999" not found');
+		});
+	});
+
 	describe("resolveIssueId", () => {
 		it("returns UUID directly", async () => {
 			const service = new LinearService({ apiKey: "token" });

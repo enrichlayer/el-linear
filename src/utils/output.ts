@@ -7,6 +7,7 @@ import {
 	inferKindFromPayload,
 	type ResourceKind,
 } from "./formatters/summary.js";
+import { readGraphQLErrorDetail } from "./linear-graphql-error.js";
 import { logger } from "./logger.js";
 import { sanitizeForLog } from "./sanitize-for-log.js";
 
@@ -559,8 +560,18 @@ function outputError(error: Error): void {
 	} catch {
 		// leave activeProfile as "<unknown>"
 	}
+	// `errorDetail` (DEV-7987) is the classification block: present only
+	// when the failure came from a Linear GraphQL request, absent for
+	// every other error, so nothing about the existing two-key envelope
+	// changes for callers that never looked at it. See the "Error
+	// envelope" section of the README for the published contract.
+	const errorDetail = readGraphQLErrorDetail(error);
 	const payload = JSON.stringify(
-		{ error: sanitizeForLog(error.message), activeProfile },
+		{
+			error: sanitizeForLog(error.message),
+			activeProfile,
+			...(errorDetail ? { errorDetail } : {}),
+		},
 		null,
 		2,
 	);

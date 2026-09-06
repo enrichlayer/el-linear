@@ -661,6 +661,60 @@ el-linear projects list --format summary --fields name,state,progress,lead,teams
 
 Unrecognized field names are reported as a `_warnings:` line appended after the summary block (`fields_unprojectable: --format summary on issues list does not project foo, bar; ...`) — same signal scripts get on the JSON path. Resources whose summary formatter doesn't yet wire `--fields` (cycles, milestones, project updates, comments, teams, labels, users, documents, templates, attachments, releases, search results) emit the same warning and render their default summary.
 
+### Error envelope
+
+Every command reports a failure the same way: **exit code 1**, and a
+single JSON object on **stdout** (the same stream as success, so a caller
+capturing one stream always gets exactly one parseable object).
+
+```json
+{
+  "error": "Ratelimit exceeded",
+  "activeProfile": "work",
+  "errorDetail": {
+    "httpStatus": 429,
+    "code": "RATELIMITED",
+    "retryable": true
+  }
+}
+```
+
+| Field           | Always present | Meaning                                                              |
+| --------------- | -------------- | -------------------------------------------------------------------- |
+| `error`         | yes            | The failure message, token-sanitized.                                |
+| `activeProfile` | yes            | Which profile the command ran under — distinguishes "not found" from "wrong workspace". |
+| `errorDetail`   | no             | Classification of a **Linear GraphQL** failure. See below.           |
+
+`errorDetail` is emitted only when the failure came from a request to the
+Linear GraphQL API. Its fields:
+
+| Field        | Type             | Meaning                                                                 |
+| ------------ | ---------------- | ----------------------------------------------------------------------- |
+| `httpStatus` | `number \| null` | HTTP status of Linear's response; `null` when no response arrived.      |
+| `code`       | `string \| null` | The first GraphQL error's `extensions.code`; `null` when absent.        |
+| `retryable`  | `boolean`        | Whether the failure is transient — retrying after an appropriate wait could succeed. |
+
+`retryable` is `true` for HTTP 408 / 429 / 5xx, for the `RATELIMITED`,
+`INTERNAL_SERVER_ERROR` and `SERVICE_UNAVAILABLE` GraphQL codes, and for a
+transport failure that never reached a response (`fetch failed`,
+`ECONNRESET`, …). Reading `code` separately matters: Linear can answer a
+rate limit under a status that would otherwise read as permanent, so
+`httpStatus` alone is not the whole verdict.
+
+`retryable: true` says the failure is transient — **not** that retrying
+immediately is a good idea. A rate limit is transient and reported as such,
+but its window may be minutes away; the wait is the caller's policy.
+
+**A missing `errorDetail` is not "not retryable".** It means the failure
+was not a Linear GraphQL request at all — a bad argument, an unreadable
+`--file`, a missing token. Treat its absence as *unclassified* and apply
+your own policy; emitting a fabricated `retryable: false` there would let
+an argv typo masquerade as a verdict about Linear.
+
+Automation that shells out to `el-linear` (a job runner deciding whether
+to retry, say) should branch on `errorDetail.retryable` rather than
+substring-matching `error`.
+
 ### Windowed metadata (`WindowedMeta`)
 
 When a command returns less than its complete result set — because it

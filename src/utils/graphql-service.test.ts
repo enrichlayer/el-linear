@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { LinearGraphQLError } from "./linear-graphql-error.js";
 
 const mockRawRequest = vi.fn();
 const linearClientCtorSpy = vi.fn();
@@ -109,6 +110,112 @@ describe("GraphQLService", () => {
 			service.rawRequest("mutation Create { commentCreate { success } }"),
 		).rejects.toThrow("GraphQL request failed: upstream unavailable");
 		expect(mockRawRequest.mock.calls.length - callsBefore).toBe(1);
+	});
+
+	// DEV-7987: a shell-out caller must be able to tell a retryable 429 from a
+	// permanent 400. These pin the classification the thrown error carries,
+	// which is what `outputError` publishes as `errorDetail`. The rejection
+	// fixtures mirror the `@linear/sdk` `LinearError` shape a live call
+	// produces — status hoisted to the top level, `extensions.code` reachable
+	// only through `raw` — because that, not `graphql-request`'s `ClientError`,
+	// is what this service catches in production.
+	it("classifies a 429 as retryable and a 400 as permanent", async () => {
+		const service = new GraphQLService({ apiKey: "test-token" });
+
+		mockRawRequest.mockRejectedValueOnce(
+			Object.assign(new Error("Ratelimit exceeded"), {
+				type: "Ratelimited",
+				status: 429,
+				raw: {
+					response: {
+						status: 429,
+						errors: [{ extensions: { code: "RATELIMITED" } }],
+					},
+				},
+			}),
+		);
+		const rateLimited = await service
+			.rawRequest("{ viewer { id } }")
+			.catch((error: unknown) => error as LinearGraphQLError);
+		expect(rateLimited.httpStatus).toBe(429);
+		expect(rateLimited.code).toBe("RATELIMITED");
+		expect(rateLimited.retryable).toBe(true);
+
+		mockRawRequest.mockRejectedValueOnce(
+			Object.assign(new Error("Cannot query field 'nope'"), {
+				type: "GraphqlError",
+				status: 400,
+				raw: {
+					response: {
+						status: 400,
+						errors: [{ extensions: { code: "GRAPHQL_VALIDATION_FAILED" } }],
+					},
+				},
+			}),
+		);
+		const badQuery = await service
+			.rawRequest("{ nope }")
+			.catch((error: unknown) => error as LinearGraphQLError);
+		expect(badQuery.httpStatus).toBe(400);
+		expect(badQuery.code).toBe("GRAPHQL_VALIDATION_FAILED");
+		expect(badQuery.retryable).toBe(false);
+		// The message contract is unchanged — the SDK-normalized rejection has
+		// no `response.errors`, so it keeps taking the wrapped-message branch.
+		expect(badQuery.message).toBe(
+			"GraphQL request failed: Cannot query field 'nope'",
+		);
+	});
+
+	it("reads a rate limit off extensions.code even under a 400", async () => {
+		mockRawRequest.mockRejectedValueOnce(
+			Object.assign(new Error("Ratelimit"), {
+				status: 400,
+				raw: {
+					response: {
+						status: 400,
+						errors: [{ extensions: { code: "RATELIMITED" } }],
+					},
+				},
+			}),
+		);
+		const service = new GraphQLService({ apiKey: "test-token" });
+		const error = await service
+			.rawRequest("{ viewer { id } }")
+			.catch((e: unknown) => e as LinearGraphQLError);
+		expect(error.code).toBe("RATELIMITED");
+		expect(error.retryable).toBe(true);
+	});
+
+	it("classifies a response-less transport failure as retryable", async () => {
+		mockRawRequest.mockRejectedValueOnce(new Error("fetch failed"));
+		const service = new GraphQLService({ apiKey: "test-token" });
+		const error = await service
+			.rawRequest("{ viewer { id } }")
+			.catch((e: unknown) => e as LinearGraphQLError);
+		expect(error.message).toBe("GraphQL request failed: fetch failed");
+		expect(error.httpStatus).toBe(null);
+		expect(error.code).toBe(null);
+		expect(error.retryable).toBe(true);
+	});
+
+	it("keeps the un-normalized ClientError shape working too", async () => {
+		// The `client.client` escape hatch is not contractually guaranteed to
+		// stay SDK-normalized across upgrades; if it ever hands back a bare
+		// graphql-request ClientError, the classification must not go blind.
+		mockRawRequest.mockRejectedValueOnce({
+			response: {
+				status: 503,
+				errors: [{ message: "Service unavailable" }],
+			},
+			message: "upstream unavailable",
+		});
+		const service = new GraphQLService({ apiKey: "test-token" });
+		const error = await service
+			.rawRequest("{ viewer { id } }")
+			.catch((e: unknown) => e as LinearGraphQLError);
+		expect(error.httpStatus).toBe(503);
+		expect(error.retryable).toBe(true);
+		expect(error.message).toBe("Service unavailable");
 	});
 
 	it("string constructor passes apiKey to LinearClient (personal-token path)", () => {

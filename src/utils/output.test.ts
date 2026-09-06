@@ -7,6 +7,7 @@ import {
 	it,
 	vi,
 } from "vitest";
+import { LinearGraphQLError } from "./linear-graphql-error.js";
 import {
 	type CliListEnvelope,
 	handleAsyncCommand,
@@ -585,6 +586,54 @@ describe("handleAsyncCommand", () => {
 		expect(parsed.error).toBe("test failure");
 		expect(parsed.activeProfile).toEqual(expect.any(String));
 		expect(exitSpy).toHaveBeenCalledWith(1);
+	});
+
+	// DEV-7987: the flattened envelope is what kept a shell-out caller from
+	// telling a retryable rate limit from a permanent schema error.
+	it("publishes errorDetail for a classified Linear GraphQL failure", async () => {
+		const fn = vi.fn().mockRejectedValue(
+			new LinearGraphQLError("Ratelimit exceeded", {
+				httpStatus: 429,
+				code: "RATELIMITED",
+				retryable: true,
+			}),
+		);
+		await handleAsyncCommand(fn)();
+		const parsed = JSON.parse(stdoutSpy.mock.calls[0]?.[0] as string);
+		expect(parsed.error).toBe("Ratelimit exceeded");
+		expect(parsed.errorDetail).toEqual({
+			httpStatus: 429,
+			code: "RATELIMITED",
+			retryable: true,
+		});
+	});
+
+	it("marks a permanent GraphQL failure non-retryable in the same shape", async () => {
+		const fn = vi.fn().mockRejectedValue(
+			new LinearGraphQLError("Cannot query field 'nope'", {
+				httpStatus: 400,
+				code: "GRAPHQL_VALIDATION_FAILED",
+				retryable: false,
+			}),
+		);
+		await handleAsyncCommand(fn)();
+		const parsed = JSON.parse(stdoutSpy.mock.calls[0]?.[0] as string);
+		expect(parsed.errorDetail).toEqual({
+			httpStatus: 400,
+			code: "GRAPHQL_VALIDATION_FAILED",
+			retryable: false,
+		});
+	});
+
+	it("omits errorDetail entirely for an unclassified error", async () => {
+		// Absence is the signal for "this was not a Linear GraphQL failure":
+		// emitting a fabricated `retryable: false` here would let an argv or
+		// filesystem error masquerade as a verdict about Linear.
+		const fn = vi.fn().mockRejectedValue(new Error("File not found: q.gql"));
+		await handleAsyncCommand(fn)();
+		const parsed = JSON.parse(stdoutSpy.mock.calls[0]?.[0] as string);
+		expect(parsed.error).toBe("File not found: q.gql");
+		expect("errorDetail" in parsed).toBe(false);
 	});
 
 	it("wraps non-Error throws in Error", async () => {
