@@ -70,9 +70,10 @@ jobs:
           sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
           gitleaks detect --source . --redact --no-banner --exit-code 1
 
-      - run: pnpm run lint
-      - run: pnpm run typecheck
-      - run: pnpm test
+      # Invoke validation tools directly; only build produces the package artifact.
+      - run: pnpm exec biome check src/
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm exec vitest run
       - run: pnpm run build
 
       - run: pnpm publish --access public --no-git-checks
