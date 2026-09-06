@@ -1,12 +1,30 @@
 name: release
 
-# Publish to npm when a tag matching v* is pushed. Manually triggered via
-# `git tag -a v1.2.0 -m "..."` + `git push origin v1.2.0`.
+# Publish an exact version tag, from a tag push or directly from release-please.
+# The reusable path also works for GitHub-token-created tags.
 
 on:
   push:
     tags:
       - 'v*'
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+    secrets:
+      NPM_TOKEN:
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to publish
+        required: true
+        type: string
+
+concurrency:
+  group: npm-release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -17,6 +35,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
 
       - uses: pnpm/action-setup@v6.0.9
         with:
@@ -32,7 +52,7 @@ jobs:
 
       - name: Verify package version matches tag
         env:
-          GIT_TAG: ${{ github.ref_name }}
+          GIT_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           PKG_VERSION=$(node -p "require('./package.json').version")
           TAG_VERSION="${GIT_TAG#v}"
@@ -50,6 +70,10 @@ jobs:
           sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
           gitleaks detect --source . --redact --no-banner --exit-code 1
 
+      # Invoke validation tools directly; only build produces the package artifact.
+      - run: pnpm exec biome check src/
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm exec vitest run
       - run: pnpm run build
 
       - run: pnpm publish --access public --no-git-checks
