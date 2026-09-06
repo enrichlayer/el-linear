@@ -38,5 +38,3 @@ jobs:
     uses: ./.github/workflows/release.yml
     with:
       tag: ${{ needs.release-please.outputs.tag_name }}
-    secrets:
-      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
