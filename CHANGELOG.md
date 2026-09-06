@@ -26,6 +26,19 @@ project adheres to [Semantic Versioning](https://semver.org/).
 * **quality:** restore a clean full-repository lint baseline (DEV-6142)
 * **labels:** resolve `labels create --team` keys and names before creating the label (DEV-5749)
 
+## [1.45.0](https://github.com/enrichlayer/el-linear/compare/v1.44.2...v1.45.0) (2026-09-06)
+
+
+### Features
+
+* **graphql:** classify GraphQL failures with HTTP status and extensions.code ([#302](https://github.com/enrichlayer/el-linear/issues/302)) ([6a08808](https://github.com/enrichlayer/el-linear/commit/6a0880846aefe3f91e7a2f4e2d3f7fae1d3b0711))
+
+
+### Bug Fixes
+
+* **ci:** restore automated releases without a repository PAT (DEV-4269) ([#318](https://github.com/enrichlayer/el-linear/issues/318)) ([cc7cf74](https://github.com/enrichlayer/el-linear/commit/cc7cf7424bac739f9450582e7fda3cfe34f64751))
+* **cli:** coordinate Linear rate-limit usage (DEV-7874) ([#301](https://github.com/enrichlayer/el-linear/issues/301)) ([892b668](https://github.com/enrichlayer/el-linear/commit/892b668e66b7742e8226c27351d268dc22e7a876))
+
 ## [1.44.2](https://github.com/enrichlayer/el-linear/compare/v1.44.1...v1.44.2) (2026-08-09)
 
 
