@@ -8,6 +8,7 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Features
 
+* **issues:** add opt-in SOP discovery on create — match through `el-sop catalog`, print published SOP links, carry matched steps into Done when, relate catalog-backed Linear issues, and fail open on catalog transport errors; configure with `validation.sopMatching` / `validation.sopMatchThreshold` or bypass once with `--no-sop-match` (DEV-9005)
 * **issues:** add an opt-in intake-decision gate that requires explicit need, value, ownership, placement, and a `PROCEED` decision before creation; `--skip-validation` cannot silently bypass it (DEV-6163)
 * **issues:** add an opt-in create-time goal-completion gate — checks the description for a falsifiable "Done when" / acceptance-criteria section, `warn`/`block` modes via `validation.goalCompletionGate`, bypass with `--allow-vague-goal` (DEV-5920)
 * **projects:** add `projects update --name/--description/--content` for editing project metadata without raw GraphQL (DEV-5749)

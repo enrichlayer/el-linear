@@ -60,7 +60,10 @@
 		"intakeDecisionGate": false,
 		"intakeSectionHeaders": ["Intake decision"],
 		"sopLabelParentGate": false,
-		"sopLabels": ["SOP"]
+		"sopLabels": ["SOP"],
+		"sopMatching": false,
+		"sopMatchThreshold": 0.3,
+		"sopPublishedUrlBase": "https://enrichlayer.com/internal/docs/customer-support"
 	},
 	"workspaceUrlKey": "acme"
 }

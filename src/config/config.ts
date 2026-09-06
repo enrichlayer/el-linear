@@ -174,6 +174,26 @@ export interface ElLinearConfig {
 		 */
 		sopLabels?: string[];
 		/**
+		 * OPT-IN SOP matching (DEV-9005). When `true`, `issues create` asks the
+		 * installed `el-sop catalog` reader for the SOP corpus, matches the new
+		 * issue's title/description against SOP titles/descriptions/tags, and
+		 * appends matched SOP links and steps to Done when. Defaults to `false`
+		 * because el-linear is open-source and most installs have no `el-sop`.
+		 * Bypass a single create with `--no-sop-match`.
+		 */
+		sopMatching?: boolean;
+		/**
+		 * Jaccard similarity threshold (0-1) for SOP matches. Defaults to
+		 * `DEFAULT_SOP_MATCH_THRESHOLD` (0.3). Lower = more aggressive.
+		 */
+		sopMatchThreshold?: number;
+		/**
+		 * Base URL used when a matched SOP catalog entry has only a docs-mdx
+		 * source path. Defaults to the current Enrich Layer internal-docs route.
+		 * Other workspaces can point the opt-in matcher at their own publisher.
+		 */
+		sopPublishedUrlBase?: string;
+		/**
 		 * OPT-IN goal-completion gate (DEV-5920). When `"warn"` or `"block"`,
 		 * `issues create` checks the description for a goal-completion section
 		 * ("Done when" / "Acceptance criteria" / … — see `goalSectionHeaders`)
