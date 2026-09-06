@@ -153,7 +153,7 @@ retitled PR title and got deduped. That is luck, not a rule. Amend the subject.
 1. PR with conventional commits merges to `main`.
 2. [`release-please`](https://github.com/googleapis/release-please-action) opens (or updates) a "Release vX.Y.Z" PR aggregating commits since the last release. The PR contains the `package.json` version bump and the `CHANGELOG.md` entry. No manual edits.
 3. Review the release PR, merge it.
-4. release-please tags `vX.Y.Z` on merge. The existing [`release.yml`](../.github/workflows/release.yml) workflow picks up the tag, verifies the version, runs gitleaks, builds, and publishes to npm.
+4. release-please creates `vX.Y.Z` and directly calls [`release.yml`](../.github/workflows/release.yml), which validates the exact tag, builds, and publishes through npm trusted publishing. GitHub-token-created tag pushes do not start another workflow.
 
 ### Manual (bootstrap / hotfix only)
 
@@ -168,3 +168,31 @@ This path is for the bootstrap commit that introduces release-please itself, or 
 
 - A merge to `main` with only `chore:` / `docs:` / `style:` / `refactor:` / `test:` / `build:` / `ci:` / `perf:` commits since the last release.
 - A merge that doesn't touch the package (e.g., README-only changes that aren't in `package.json#files`). release-please will still open a release PR if the changelog grows; merge it only when you actually want a publish.
+
+### npm trusted publishing
+
+The publisher uses GitHub OIDC, not a stored npm write token. Both the caller
+and reusable publisher grant `id-token: write`; the runner uses Node24 and a
+compatible npm11 CLI. Validation and package/tag equality run before publication.
+
+A package maintainer with 2FA enabled must configure trusted publishing for
+`@enrichlayer/el-linear` in npm package settings. Create GitHub Actions entries
+for organization `enrichlayer`, repository `el-linear`, direct publishing allowed,
+and these workflow filenames (leave environment blank):
+
+- `release-please.yml`: automatic publication through the reusable workflow.
+- `release.yml`: direct tag pushes and manual publication of an existing tag.
+
+For reusable workflows npm matches the **calling** workflow filename. The
+existing `repository.url` points to this GitHub repository. Preserve other
+trusted publisher entries; these settings require maintainer authentication
+and are not established by merely merging the workflow. See the
+[npm trusted publishing documentation](https://docs.npmjs.com/trusted-publishers/).
+
+To recover an already-created but unpublished release, manually dispatch
+`release.yml` from main with its existing version tag (for example `v1.45.0`).
+The workflow checks out that tag and validates it; do not move the tag or
+create another version merely to retry publication. Confirm both the workflow
+result and the registry version before updating consumers. Stored legacy
+credentials can remain in place during recovery; this workflow does not read
+or rotate them.

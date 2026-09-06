@@ -12,9 +12,6 @@ on:
       tag:
         required: true
         type: string
-    secrets:
-      NPM_TOKEN:
-        required: true
   workflow_dispatch:
     inputs:
       tag:
@@ -44,9 +41,11 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
-          registry-url: https://registry.npmjs.org
+          node-version: 24
           cache: pnpm
+
+      # OIDC publishing requires npm >=11.5.1; keep the CLI explicitly compatible.
+      - run: npm install --global npm@^11.15.0
 
       - run: pnpm install --frozen-lockfile
 
@@ -76,6 +75,5 @@ jobs:
       - run: pnpm exec vitest run
       - run: pnpm run build
 
-      - run: pnpm publish --access public --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # Authenticate using the configured GitHub OIDC trusted publisher.
+      - run: npm publish --access public
