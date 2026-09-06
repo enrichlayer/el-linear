@@ -52,6 +52,28 @@ describe("cached() — happy path", () => {
 		expect(fetcher).toHaveBeenCalledTimes(1);
 	});
 
+	it("coalesces concurrent cold misses into one fetch", async () => {
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const fetcher = vi.fn(async () => {
+			await gate;
+			return { teams: ["A"] };
+		});
+
+		const first = cached("teams-list", 60, fetcher);
+		const second = cached("teams-list", 60, fetcher);
+		await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+		release();
+
+		await expect(Promise.all([first, second])).resolves.toEqual([
+			{ teams: ["A"] },
+			{ teams: ["A"] },
+		]);
+		expect(fetcher).toHaveBeenCalledTimes(1);
+	});
+
 	it("write produces a file at <profile-dir>/cache/<key>.json with mode 0644", async () => {
 		await cached("teams-list", 60, async () => ({ teams: [] }));
 

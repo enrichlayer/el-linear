@@ -76,6 +76,83 @@ afterEach(async () => {
 	await fs.rm(TEST_HOME, { recursive: true, force: true });
 });
 
+describe("runOAuthStep — client credentials", () => {
+	it("obtains and stores an app-user token without browser or callback", async () => {
+		const fetchImpl = vi.fn<FetchLike>(async () =>
+			jsonResponse({
+				access_token: "app-access",
+				token_type: "Bearer",
+				expires_in: 2_592_000,
+				scope: "read,write",
+			}),
+		);
+		const validateViewer = vi.fn().mockResolvedValue(VALID_VIEWER);
+		const openBrowser = vi.fn();
+		const result = await runOAuthStep({
+			actor: "app",
+			clientCredentials: true,
+			clientId: "app-id",
+			clientSecret: "app-secret",
+			scopes: ["read", "write"],
+			fetchImpl,
+			validateViewer,
+			openBrowser,
+		});
+		expect(result.state).toMatchObject({
+			grantType: "client_credentials",
+			actor: "app",
+			clientId: "app-id",
+			clientSecret: "app-secret",
+			accessToken: "app-access",
+			viewerId: VALID_VIEWER.id,
+		});
+		expect(result.state.refreshToken).toBeUndefined();
+		expect(result.state.registeredRedirectUri).toBeUndefined();
+		expect(openBrowser).not.toHaveBeenCalled();
+		const request = new URLSearchParams(fetchImpl.mock.calls[0][1].body);
+		expect(request.get("grant_type")).toBe("client_credentials");
+	});
+
+	it("rejects the user actor before requesting a token", async () => {
+		await expect(
+			runOAuthStep({
+				actor: "user",
+				clientCredentials: true,
+				clientId: "app-id",
+				clientSecret: "app-secret",
+			}),
+		).rejects.toThrow("requires --actor app");
+	});
+
+	it("requires --force before replacing authorization-code state", async () => {
+		await fs.mkdir(`${TEST_HOME}/.config/el-linear`, { recursive: true });
+		await fs.writeFile(
+			`${TEST_HOME}/.config/el-linear/oauth.json`,
+			JSON.stringify({
+				v: 1,
+				grantType: "authorization_code",
+				clientId: "browser-app",
+				registeredRedirectUri: "http://localhost:8765/oauth/callback",
+				accessToken: "browser-token",
+				tokenType: "Bearer",
+				scopes: ["read"],
+				expiresAt: Date.now() + 60_000,
+				obtainedAt: Date.now(),
+			}),
+			{ mode: 0o600 },
+		);
+
+		await expect(
+			runOAuthStep({
+				actor: "app",
+				clientCredentials: true,
+				clientId: "app-id",
+				clientSecret: "app-secret",
+			}),
+		).rejects.toThrow("Re-run with --force");
+	});
+});
+
 // ─────────────────────────────────────────────────────────────────────
 //  Happy path — full PKCE flow
 // ─────────────────────────────────────────────────────────────────────

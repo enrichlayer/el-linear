@@ -16,6 +16,7 @@ import {
 	outputSingle,
 	outputSuccess,
 	outputWarning,
+	recordRateLimitInfo,
 	resetWarnings,
 	setFieldsFilter,
 	setQuietMode,
@@ -209,6 +210,93 @@ describe("warning buffer", () => {
 		const parsed = JSON.parse(allStdout);
 		expect(parsed.identifier).toBe("DEV-1");
 		expect(parsed._warnings).toEqual(["mid-execution warning"]);
+	});
+});
+
+describe("rate-limit metadata", () => {
+	let stdoutSpy: ReturnType<typeof vi.spyOn>;
+	let stderrSpy: ReturnType<typeof vi.spyOn>;
+
+	beforeEach(() => {
+		resetWarnings();
+		stdoutSpy = vi
+			.spyOn(process.stdout, "write")
+			.mockImplementation(() => true);
+		stderrSpy = vi
+			.spyOn(process.stderr, "write")
+			.mockImplementation(() => true);
+	});
+
+	afterEach(() => {
+		stdoutSpy.mockRestore();
+		stderrSpy.mockRestore();
+	});
+
+	it("adds the latest observed request budget to normal JSON output", () => {
+		recordRateLimitInfo({
+			limit: 2500,
+			remaining: 2498,
+			resetAt: "2026-08-11T10:00:00.000Z",
+		});
+		outputSuccess({ id: "DEV-1" });
+
+		const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+		expect(parsed._rateLimit).toEqual({
+			limit: 2500,
+			remaining: 2498,
+			resetAt: "2026-08-11T10:00:00.000Z",
+			observedRequests: 1,
+			minimumRemaining: 2498,
+		});
+	});
+
+	it("aggregates quota cost and minimum headroom for a multi-request command", () => {
+		recordRateLimitInfo({
+			limit: 2500,
+			remaining: 2499,
+			complexity: { cost: 20, limit: 2_000_000, remaining: 1_999_980 },
+			endpoints: { Issue: { limit: 1000, remaining: 999 } },
+		});
+		recordRateLimitInfo({
+			limit: 2500,
+			remaining: 2498,
+			complexity: { cost: 30, limit: 2_000_000, remaining: 1_999_950 },
+			endpoints: { Issue: { limit: 1000, remaining: 998 } },
+		});
+		outputSuccess({ id: "DEV-1" });
+
+		const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+		expect(parsed._rateLimit).toMatchObject({
+			remaining: 2498,
+			minimumRemaining: 2498,
+			observedRequests: 2,
+			complexity: {
+				cost: 30,
+				totalCost: 50,
+				remaining: 1_999_950,
+				minimumRemaining: 1_999_950,
+			},
+			endpoints: {
+				Issue: {
+					remaining: 998,
+					minimumRemaining: 998,
+					observedRequests: 2,
+				},
+			},
+		});
+	});
+
+	it("routes rate-limit metadata to stderr for bare-array output", () => {
+		recordRateLimitInfo({ limit: 2500, remaining: 2498 });
+		outputSuccess([1, 2, 3]);
+
+		expect(JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim())).toEqual([
+			1, 2, 3,
+		]);
+		const stderr = stderrSpy.mock.calls
+			.map((call: unknown[]) => call[0] as string)
+			.join("");
+		expect(stderr).toContain("_rateLimit: 2498/2500 requests remaining");
 	});
 });
 
@@ -591,6 +679,11 @@ describe("handleAsyncCommand", () => {
 	// DEV-7987: the flattened envelope is what kept a shell-out caller from
 	// telling a retryable rate limit from a permanent schema error.
 	it("publishes errorDetail for a classified Linear GraphQL failure", async () => {
+		recordRateLimitInfo({
+			limit: 2500,
+			remaining: 0,
+			resetAt: "2026-08-11T10:00:00.000Z",
+		});
 		const fn = vi.fn().mockRejectedValue(
 			new LinearGraphQLError("Ratelimit exceeded", {
 				httpStatus: 429,
@@ -605,6 +698,11 @@ describe("handleAsyncCommand", () => {
 			httpStatus: 429,
 			code: "RATELIMITED",
 			retryable: true,
+		});
+		expect(parsed._rateLimit).toMatchObject({
+			limit: 2500,
+			remaining: 0,
+			observedRequests: 1,
 		});
 	});
 

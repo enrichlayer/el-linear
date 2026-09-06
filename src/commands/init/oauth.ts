@@ -46,6 +46,7 @@ import {
 	writeOAuthState,
 } from "../../auth/oauth-storage.js";
 import {
+	exchangeClientCredentials,
 	exchangeCodeForTokens,
 	type FetchLike,
 	revokeToken,
@@ -84,6 +85,14 @@ interface ViewerResponse {
 export interface OAuthStepOptions {
 	/** OAuth actor mode: `user` (default) or `app` for agents/service accounts. */
 	actor?: OAuthActor;
+	/** Use the browserless app-user client_credentials grant. */
+	clientCredentials?: boolean;
+	/** Non-secret client id override for client-credentials setup. */
+	clientId?: string;
+	/** Secret supplied by the command's named environment variable. */
+	clientSecret?: string;
+	/** Scope override for non-interactive client-credentials setup. */
+	scopes?: OAuthScope[];
 	/** Force re-authorization even if existing state is valid. */
 	force?: boolean;
 	/** Skip the localhost listener; use the headless code-paste prompt. */
@@ -210,10 +219,16 @@ interface RegistrationAnswers {
 	scopes: OAuthScope[];
 }
 
+interface ClientCredentialsRegistration {
+	clientId: string;
+	clientSecret: string;
+	scopes: OAuthScope[];
+}
+
 /** Extract the port from a stored `http://localhost:NNN/...` redirect URI, if any. */
 function extractPortFromRedirect(state: OAuthState | null): number | null {
 	if (!state) return null;
-	const match = state.registeredRedirectUri.match(/:(\d+)\//);
+	const match = state.registeredRedirectUri?.match(/:(\d+)\//);
 	if (!match) return null;
 	const n = Number.parseInt(match[1], 10);
 	return Number.isInteger(n) ? n : null;
@@ -323,6 +338,45 @@ async function resolveRegistration(defaults: {
 	};
 }
 
+async function resolveClientCredentialsRegistration(
+	options: OAuthStepOptions,
+): Promise<ClientCredentialsRegistration> {
+	if (options.actor && options.actor !== "app") {
+		throw new Error("--client-credentials requires --actor app.");
+	}
+	const teamConfig = await readTeamOAuthConfig();
+	if (teamConfig && teamConfig.actor !== "app") {
+		throw new Error(
+			`${teamConfig.sourcePath} configures actor=user; client credentials require an OAuth app configured for actor=app.`,
+		);
+	}
+	const clientId =
+		options.clientId?.trim() ||
+		teamConfig?.clientId ||
+		(
+			await input({
+				message: "Linear OAuth client_id:",
+				validate: (value) =>
+					value.trim().length > 0 || "client_id cannot be empty",
+			})
+		).trim();
+	const clientSecret =
+		options.clientSecret?.trim() ||
+		(
+			await password({
+				message: "Linear OAuth client_secret (required, hidden):",
+				mask: "*",
+				validate: (value) =>
+					value.trim().length > 0 || "client_secret cannot be empty",
+			})
+		).trim();
+	const scopes = validateScopes(
+		options.scopes ?? teamConfig?.scopes ?? [...DEFAULT_SCOPES],
+	);
+	validateActorScopes("app", scopes);
+	return { clientId, clientSecret, scopes };
+}
+
 /**
  * Default viewer-validation routine. Calls `viewer { ... }` with the new
  * bearer token to confirm Linear accepted it. Reused for both the wizard
@@ -362,7 +416,16 @@ export async function runOAuthStep(
 	const validateViewer = options.validateViewer ?? defaultValidateViewer;
 
 	const existing = await readOAuthState();
-	if (existing && !options.force) {
+	const requestedGrant = options.clientCredentials
+		? "client_credentials"
+		: "authorization_code";
+	const existingGrant = existing?.grantType ?? "authorization_code";
+	if (existing && existingGrant !== requestedGrant && !options.force) {
+		throw new Error(
+			`This profile already stores ${existingGrant} OAuth state. Re-run with --force to replace it with ${requestedGrant}.`,
+		);
+	}
+	if (existing && existingGrant === requestedGrant && !options.force) {
 		const handled = await handleExistingState(existing, options);
 		if (handled.kind === "keep") {
 			// Validate the existing token actually works; if it's already
@@ -386,6 +449,41 @@ export async function runOAuthStep(
 			}
 		}
 		// Both `reauth` and `revoked` fall through to the re-auth flow.
+	}
+
+	if (options.clientCredentials) {
+		const reg = await resolveClientCredentialsRegistration(options);
+		logLine(TS("Requesting an app-user token with client credentials…"));
+		const exchanged = await exchangeClientCredentials(
+			{
+				clientId: reg.clientId,
+				clientSecret: reg.clientSecret,
+				scopes: reg.scopes,
+			},
+			options.fetchImpl,
+		);
+		const newState: OAuthState = {
+			v: OAUTH_STATE_VERSION,
+			grantType: "client_credentials",
+			actor: "app",
+			clientId: reg.clientId,
+			clientSecret: reg.clientSecret,
+			accessToken: exchanged.accessToken,
+			tokenType: exchanged.tokenType,
+			scopes: exchanged.scopes.length > 0 ? exchanged.scopes : reg.scopes,
+			expiresAt: exchanged.expiresAt,
+			obtainedAt: Date.now(),
+		};
+		logLine(TS("Validating against viewer…"));
+		const viewer = await validateViewer(newState.accessToken);
+		newState.viewerId = viewer.id;
+		await writeOAuthState(newState);
+		logLine(
+			TS(
+				`✓ Authorized app user ${viewer.displayName} <${viewer.email}> (${viewer.organization.name}).`,
+			),
+		);
+		return { state: newState, viewer };
 	}
 
 	const reg = await resolveRegistration({
@@ -469,6 +567,7 @@ export async function runOAuthStep(
 
 	const newState: OAuthState = {
 		v: OAUTH_STATE_VERSION,
+		grantType: "authorization_code",
 		actor: reg.actor,
 		clientId: reg.clientId,
 		clientSecret: reg.clientSecret,

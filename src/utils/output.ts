@@ -12,6 +12,7 @@ import { logger } from "./logger.js";
 import { sanitizeForLog } from "./sanitize-for-log.js";
 
 const warningBuffer: string[] = [];
+let rateLimitBuffer: RateLimitInfo | null = null;
 let rawMode = false;
 let quietMode = false;
 let jqFilter: string | null = null;
@@ -19,6 +20,139 @@ let fieldsFilter: string[] | null = null;
 
 type OutputFormat = "json" | "summary";
 let outputFormat: OutputFormat = "json";
+
+export interface RateLimitInfo {
+	/** Maximum requests allowed in the current Linear API window. */
+	limit?: number;
+	/** Requests still available in the current Linear API window. */
+	remaining?: number;
+	/** UTC instant when the current Linear API window resets. */
+	resetAt?: string;
+	/** Number of GraphQL responses observed during this command. */
+	observedRequests?: number;
+	/** Lowest global request headroom observed during this command. */
+	minimumRemaining?: number;
+	/** Complexity consumed and remaining in Linear's complexity bucket. */
+	complexity?: {
+		/** Complexity of the most recently observed response. */
+		cost?: number;
+		/** Sum of response complexity observed during this command. */
+		totalCost?: number;
+		limit?: number;
+		remaining?: number;
+		minimumRemaining?: number;
+		resetAt?: string;
+	};
+	/** Per-endpoint request buckets observed during this command. */
+	endpoints?: Record<
+		string,
+		{
+			limit?: number;
+			remaining?: number;
+			minimumRemaining?: number;
+			resetAt?: string;
+			observedRequests?: number;
+		}
+	>;
+}
+
+function minimumDefined(
+	left: number | undefined,
+	right: number | undefined,
+): number | undefined {
+	if (left === undefined) return right;
+	if (right === undefined) return left;
+	return Math.min(left, right);
+}
+
+function mergeRateLimitInfo(
+	current: RateLimitInfo,
+	next: RateLimitInfo,
+): RateLimitInfo {
+	const endpoints = { ...current.endpoints };
+	for (const [name, observation] of Object.entries(next.endpoints ?? {})) {
+		const previous = endpoints[name];
+		endpoints[name] = {
+			...previous,
+			...observation,
+			minimumRemaining: minimumDefined(
+				previous?.minimumRemaining ?? previous?.remaining,
+				observation.minimumRemaining ?? observation.remaining,
+			),
+			observedRequests:
+				(previous?.observedRequests ?? 0) + (observation.observedRequests ?? 1),
+		};
+	}
+
+	const currentComplexity = current.complexity;
+	const nextComplexity = next.complexity;
+	const complexity =
+		currentComplexity || nextComplexity
+			? {
+					...currentComplexity,
+					...nextComplexity,
+					totalCost:
+						(currentComplexity?.totalCost ?? currentComplexity?.cost ?? 0) +
+						(nextComplexity?.totalCost ?? nextComplexity?.cost ?? 0),
+					minimumRemaining: minimumDefined(
+						currentComplexity?.minimumRemaining ?? currentComplexity?.remaining,
+						nextComplexity?.minimumRemaining ?? nextComplexity?.remaining,
+					),
+				}
+			: undefined;
+
+	return {
+		...current,
+		...next,
+		observedRequests:
+			(current.observedRequests ?? 1) + (next.observedRequests ?? 1),
+		minimumRemaining: minimumDefined(
+			current.minimumRemaining ?? current.remaining,
+			next.minimumRemaining ?? next.remaining,
+		),
+		...(complexity ? { complexity } : {}),
+		...(Object.keys(endpoints).length > 0 ? { endpoints } : {}),
+	};
+}
+
+/**
+ * Record a quota observation for the command's eventual output.
+ *
+ * The latest response remains authoritative for current remaining/reset
+ * values. Multi-request commands additionally retain their total observed
+ * request/complexity cost and the lowest headroom seen in every bucket.
+ */
+export function recordRateLimitInfo(info: RateLimitInfo): void {
+	const endpoints = Object.fromEntries(
+		Object.entries(info.endpoints ?? {}).map(([name, endpoint]) => [
+			name,
+			{
+				...endpoint,
+				minimumRemaining: endpoint.minimumRemaining ?? endpoint.remaining,
+				observedRequests: endpoint.observedRequests ?? 1,
+			},
+		]),
+	);
+	const observation: RateLimitInfo = {
+		...info,
+		observedRequests: info.observedRequests ?? 1,
+		minimumRemaining: info.minimumRemaining ?? info.remaining,
+		...(info.complexity
+			? {
+					complexity: {
+						...info.complexity,
+						totalCost: info.complexity.totalCost ?? info.complexity.cost,
+						minimumRemaining:
+							info.complexity.minimumRemaining ?? info.complexity.remaining,
+					},
+				}
+			: {}),
+		...(Object.keys(endpoints).length > 0 ? { endpoints } : {}),
+	};
+	rateLimitBuffer = rateLimitBuffer
+		? mergeRateLimitInfo(rateLimitBuffer, observation)
+		: observation;
+}
 
 export function setRawMode(enabled: boolean): void {
 	rawMode = enabled;
@@ -359,6 +493,7 @@ export function outputSuccess(data: unknown): void {
 	if (quietMode) {
 		logger.info(formatLine(output));
 		drainWarnings();
+		drainRateLimitInfo();
 		drainSummaryFieldWarnings();
 		return;
 	}
@@ -426,6 +561,10 @@ export function outputSuccess(data: unknown): void {
 	// the signal is visible without breaking the text contract.
 	if (outputFormat === "summary") {
 		emitSummary(output, inferredKind, fieldsFilter);
+		const rateLimit = drainRateLimitInfo();
+		if (rateLimit) {
+			logger.info(`_rateLimit: ${formatRateLimitInfo(rateLimit)}`);
+		}
 		const summaryWarnings = [
 			...drainWarnings(),
 			...drainSummaryFieldWarnings(),
@@ -467,6 +606,24 @@ export function outputSuccess(data: unknown): void {
 			for (const w of warnings) {
 				logger.error(`_warnings: ${w}`);
 			}
+		}
+	}
+
+	const rateLimit = drainRateLimitInfo();
+	if (rateLimit) {
+		if (
+			output !== null &&
+			typeof output === "object" &&
+			!Array.isArray(output)
+		) {
+			output = {
+				...(output as Record<string, unknown>),
+				_rateLimit: rateLimit,
+			};
+		} else {
+			// A bare array/primitive cannot carry metadata without changing its
+			// contract. Keep stdout machine-readable and surface the quota on stderr.
+			logger.error(`_rateLimit: ${formatRateLimitInfo(rateLimit)}`);
 		}
 	}
 
@@ -533,8 +690,55 @@ function drainWarnings(): string[] {
 	return warnings;
 }
 
+function drainRateLimitInfo(): RateLimitInfo | null {
+	const rateLimit = rateLimitBuffer;
+	rateLimitBuffer = null;
+	return rateLimit;
+}
+
+function formatRateLimitInfo(info: RateLimitInfo): string {
+	const parts: string[] = [];
+	if (info.remaining !== undefined && info.limit !== undefined) {
+		parts.push(`${info.remaining}/${info.limit} requests remaining`);
+	} else if (info.remaining !== undefined) {
+		parts.push(`${info.remaining} requests remaining`);
+	} else if (info.limit !== undefined) {
+		parts.push(`${info.limit} request limit`);
+	}
+	if (info.resetAt) {
+		parts.push(`resets at ${info.resetAt}`);
+	}
+	if ((info.observedRequests ?? 0) > 1) {
+		parts.push(`${info.observedRequests} responses observed`);
+	}
+	if (
+		info.minimumRemaining !== undefined &&
+		info.minimumRemaining !== info.remaining
+	) {
+		parts.push(`minimum ${info.minimumRemaining} requests remaining`);
+	}
+	if (info.complexity?.totalCost !== undefined) {
+		parts.push(`${info.complexity.totalCost} total complexity`);
+	}
+	const endpointEntries = Object.entries(info.endpoints ?? {});
+	if (endpointEntries.length > 0) {
+		parts.push(
+			endpointEntries
+				.map(([name, endpoint]) => {
+					const remaining = endpoint.minimumRemaining ?? endpoint.remaining;
+					return remaining === undefined
+						? `${name} endpoint observed`
+						: `${name} endpoint minimum ${remaining} remaining`;
+				})
+				.join(", "),
+		);
+	}
+	return parts.join("; ");
+}
+
 export function resetWarnings(): void {
 	warningBuffer.length = 0;
+	rateLimitBuffer = null;
 }
 
 function outputError(error: Error): void {
@@ -566,11 +770,13 @@ function outputError(error: Error): void {
 	// changes for callers that never looked at it. See the "Error
 	// envelope" section of the README for the published contract.
 	const errorDetail = readGraphQLErrorDetail(error);
+	const rateLimit = drainRateLimitInfo();
 	const payload = JSON.stringify(
 		{
 			error: sanitizeForLog(error.message),
 			activeProfile,
 			...(errorDetail ? { errorDetail } : {}),
+			...(rateLimit ? { _rateLimit: rateLimit } : {}),
 		},
 		null,
 		2,

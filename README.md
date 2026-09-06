@@ -111,6 +111,25 @@ el-linear init oauth --actor app
 App actor tokens can request `app:assignable` and `app:mentionable`, but not
 `admin`. The authorized app user ID is stored in `oauth.json` as `viewerId`.
 
+OAuth apps that have Linear's client-credentials grant enabled can obtain an
+app-user token without a browser. Keep the secret out of argv and source it
+through an environment variable:
+
+```bash
+export LINEAR_OAUTH_CLIENT_SECRET="..."
+el-linear init oauth --client-credentials --actor app \
+  --client-id your-linear-oauth-client-id
+```
+
+Use `--client-secret-env NAME` to read a differently named variable and
+`--scopes read,write,issues:create,comments:create` to override the configured
+scope set. The 0600 profile state stores the secret so el-linear can acquire a
+new token before expiry and once after an HTTP 401; client-credentials tokens
+do not have refresh tokens. Keep the scope set stable: Linear revokes an app's
+existing client-credentials tokens when a new token requests different scopes.
+This flow is opt-in. Remote automation can keep using `LINEAR_API_TOKEN`, which
+remains higher precedence than profile OAuth.
+
 At runtime, credentials are resolved in this order:
 
 1. `--api-token <token>` flag.
@@ -557,6 +576,83 @@ el-linear issues list --status "Todo,In Progress"   # any explicit status disabl
 list-shaped reads — single-issue `issues read DEV-123` is unaffected.
 
 ## Output formats
+
+Commands whose request path exposes Linear response headers include aggregate
+quota observations as optional `_rateLimit` metadata in JSON output:
+
+```json
+{
+  "identifier": "DEV-123",
+  "_rateLimit": {
+    "limit": 2500,
+    "remaining": 2498,
+    "resetAt": "2026-08-11T10:00:00.000Z",
+    "observedRequests": 2,
+    "minimumRemaining": 2498,
+    "complexity": {
+      "cost": 30,
+      "totalCost": 50,
+      "limit": 2000000,
+      "remaining": 1999950,
+      "minimumRemaining": 1999950,
+      "resetAt": "2026-08-11T10:00:00.000Z"
+    },
+    "endpoints": {
+      "Issue": {
+        "limit": 1000,
+        "remaining": 998,
+        "minimumRemaining": 998,
+        "resetAt": "2026-08-11T10:00:00.000Z",
+        "observedRequests": 2
+      }
+    }
+  }
+}
+```
+
+Summary output renders the same information as an `_rateLimit:` line. With a
+bare-array output such as `--raw`, the line goes to stderr so stdout remains
+valid JSON. Current remaining/reset values come from the most recent response;
+`observedRequests`, `minimumRemaining`, `complexity.totalCost`, and each
+endpoint entry expose the command's aggregate cost and lowest observed
+headroom. Rate-limited error envelopes include the same metadata. Commands
+served entirely from cache omit it.
+
+Automation can reserve a request floor before issuing another GraphQL call:
+
+```bash
+export EL_LINEAR_RATE_LIMIT_HEADROOM=250
+export EL_LINEAR_QUOTA_KEY=verticalint-shared-linear-user
+```
+
+When Linear's last observed remaining count reaches the configured floor,
+`el-linear` refuses the request until the observed reset time instead of
+consuming capacity reserved for higher-priority work. Admission and response
+observations are serialized across local processes. The state filename is a
+SHA-256 digest; neither the credential nor `EL_LINEAR_QUOTA_KEY` is written in
+clear text. Set the same non-secret quota key for API keys belonging to the
+same Linear user, because Linear pools those keys by user. Without an explicit
+key, API keys coordinate by credential and OAuth tokens coordinate by token.
+Profile OAuth uses its stable app/viewer identity so token refreshes keep the
+same local quota state.
+
+This file-backed admission is intentionally a same-machine boundary. Separate
+hosts can opt into the companion distributed coordinator:
+
+```bash
+export EL_LINEAR_RATE_LIMIT_COORDINATOR_URL=https://el-linear-control-plane.example.workers.dev
+export EL_LINEAR_RATE_LIMIT_COORDINATOR_TOKEN="..."
+```
+
+The URL switches admission and observations to the coordinator's atomic
+Durable Object for the hashed quota key. Admission fails closed when that
+service is unavailable; a completed Linear response is never replayed merely
+because its observation could not be persisted. Without the URL, do not
+interpret the file-backed setting as distributed admission.
+
+Read-through cache misses for teams, projects, labels, and similar cached lists
+are also single-flighted across local processes, preventing a cold-cache burst
+from issuing the same request once per command.
 
 Every command accepts `--format <kind>` at the root:
 

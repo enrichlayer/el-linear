@@ -64,12 +64,12 @@
 		"@inquirer/prompts": "^8.4.2",
 		"@linear/sdk": "^88.0.0",
 		"commander": "^15.0.0",
+		"graphql": "^17.0.1",
 		"picocolors": "^1.1.1"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.4.14",
 		"@types/node": "^26.0.0",
-		"graphql": "^17.0.1",
 		"tsx": "^4.21.0",
 		"typescript": "^6.0.3",
 		"vitest": "^4.0.18"
