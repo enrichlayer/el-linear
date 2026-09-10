@@ -14,12 +14,7 @@ For a field-only update, retain unrelated metadata and do not claim implementati
 
 ## Git/GitLab/GitHub Integration
 
-If your Linear workspace is connected to a code host, status transitions happen automatically:
-
-- Creating a PR/MR → linked issue moves to "In Review".
-- Merging a PR/MR → linked issue moves to "Done".
-
-No manual status updates needed after PR/MR events.
+Code-host integrations can move linked issues to "In Review" on PR/MR creation and "Done" on merge, according to workspace configuration. Report a transition only when returned issue or synchronization evidence confirms it; otherwise report the last observed status and that synchronization is unverified. Do not add a manual status write merely to reproduce an expected automatic transition.
 
 ### Intermediate Deliverable Rule
 
