@@ -27,6 +27,13 @@ project adheres to [Semantic Versioning](https://semver.org/).
 * **quality:** restore a clean full-repository lint baseline (DEV-6142)
 * **labels:** resolve `labels create --team` keys and names before creating the label (DEV-5749)
 
+## [1.45.1](https://github.com/enrichlayer/el-linear/compare/v1.45.0...v1.45.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* **graphql:** classify quota admission refusals (DEV-9503) ([#323](https://github.com/enrichlayer/el-linear/issues/323)) ([1f54b49](https://github.com/enrichlayer/el-linear/commit/1f54b498e53d75f132b915581f7150c4633c78e7))
+
 ## [1.45.0](https://github.com/enrichlayer/el-linear/compare/v1.44.2...v1.45.0) (2026-09-06)
 
 
