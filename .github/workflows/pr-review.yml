@@ -51,7 +51,11 @@ jobs:
         with:
           fetch-depth: 0 # full history so the review can diff against the base
 
+      - name: Test safe review diagnostics
+        run: node --test .github/scripts/claude-review-diagnostic.test.mjs
+
       - name: AI review
+        id: ai_review
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -110,3 +114,14 @@ jobs:
           claude_args: |
             --model claude-sonnet-5
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git diff:*),Bash(git log:*),Read,Grep,Glob"
+
+      # A successful diagnostic step does not replace the AI step's failure.
+      # Missing conclusion also covers action-level skips before SDK execution.
+      - name: Report safe review failure diagnostics
+        if: >-
+          always() && steps.ai_review.outcome != 'skipped' &&
+          (steps.ai_review.outcome == 'failure' || steps.ai_review.outputs.conclusion != 'success')
+        env:
+          REVIEW_OUTCOME: ${{ steps.ai_review.outcome }}
+          REVIEW_CONCLUSION: ${{ steps.ai_review.outputs.conclusion }}
+        run: node .github/scripts/claude-review-diagnostic.mjs
