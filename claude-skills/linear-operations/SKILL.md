@@ -267,18 +267,33 @@ Escape hatch: `--allow-missing-intake-decision`, which is recorded. It exists fo
 
 **Search before creating. No exceptions.**
 
-> **Now enforced at the CLI ([DEV-4823](https://linear.app/verticalint/issue/DEV-4823/)).** `el-linear issues create` runs a deterministic
+> **Now enforced at the CLI ([DEV-4823](https://linear.app/verticalint/issue/DEV-4823/), two-tier since [DEV-5590](https://linear.app/verticalint/issue/DEV-5590/)).** `el-linear issues create` runs a deterministic
 > duplicate-detection gate *before* the create POST: it tokenizes the title,
 > searches the salient keywords (including closed issues), scores candidates
-> by Jaccard title-overlap, and **blocks (exit non-zero) — listing the
-> matches (id · title · state · assignee)** — when one crosses the similarity
-> threshold (default `0.35`, set `validation.duplicateThreshold` to tune). This
-> is the deterministic backstop for the manual check below — don't skip the
-> manual review just because the gate exists (it catches title-keyword dupes,
-> not semantic ones with different wording). To proceed past a flagged dupe,
-> use `--allow-duplicate` (the narrow, correct flag for this gate);
-> `--skip-validation` also bypasses it but skips all field validation too, so
-> prefer `--allow-duplicate`. Disable just the gate with
+> by Jaccard title-overlap, and acts in **two tiers** keyed off the top score.
+> The two thresholds are owned by DEV-5590; the canonical constants live in
+> `src/utils/duplicate-detection.ts` (`DEFAULT_DUPLICATE_THRESHOLD`,
+> `DEFAULT_HARD_BLOCK_THRESHOLD`):
+>
+> - **Advisory** — at/above the detection floor (default `0.35`, override with
+>   `validation.duplicateThreshold`) but below the hard-block floor: the
+>   matches are **printed as a warning and creation proceeds** (recorded as
+>   `advisory`). This is *not* a stop — there is nothing to override here, so
+>   `--allow-duplicate` is neither needed nor meaningful. This is the escape
+>   hatch a real-but-distinct issue in the `0.35`–`0.6` band flows through.
+> - **Hard block** — at/above the hard-block floor (default `0.6`, override with
+>   `validation.duplicateHardBlockThreshold`): creation **refuses (exit
+>   non-zero), listing the matches (id · title · state · assignee)**. To
+>   proceed past it, pass `--allow-duplicate` (the narrow, correct flag for this
+>   gate); `--skip-validation` also bypasses it but skips all field validation
+>   too, so prefer `--allow-duplicate`.
+>
+> DEV-5590 split the tiers because a single-threshold gate at `0.35` hard-blocked
+> on a weak signal and was overridden more than half the time; only near-verbatim
+> overlap (Jaccard >= `0.6`) reliably marks a real duplicate. The gate is the
+> deterministic backstop for the manual check below — don't skip the manual
+> review just because it exists (it catches title-keyword dupes, not semantic
+> ones with different wording). Disable just the gate with
 > `validation.duplicateDetection: false` (field validation still runs);
 > `validation.enabled: false` turns off all validation.
 
