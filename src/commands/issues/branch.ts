@@ -142,3 +142,105 @@ export function currentGitBranch(): string | null {
 		return null;
 	}
 }
+
+/**
+ * Local bookmark names at `revset`, or `[]` when jj cannot answer.
+ *
+ * `local_bookmarks`, NOT `bookmarks`. The two names mean different things in
+ * jj's two languages and the mistake is silent: the REVSET `bookmarks()` is
+ * local-only, but the TEMPLATE keyword `bookmarks` also emits REMOTE bookmarks
+ * as `name@remote`. Using the wrong one resolves the branch to `name@origin`,
+ * which is not a branch anyone is on -- and `mark-branch` would then write its
+ * marker under that name. Carried deliberately from DEV-8469.
+ *
+ * The template is `local_bookmarks ++ "\n"` as jj's templating language sees
+ * it, so the BACKSLASH has to survive this TypeScript literal -- hence the
+ * doubling. Writing a real newline would embed one inside jj's own string.
+ *
+ * `jj log` is a read verb: it cannot alter history, the working copy, the
+ * operation log, or any remote.
+ */
+function jjBookmarksAt(revset: string): string[] {
+	try {
+		return execFileSync(
+			"jj",
+			["log", "-r", revset, "--no-graph", "-T", 'local_bookmarks ++ "\\n"'],
+			{ stdio: "pipe", timeout: 5000 },
+		)
+			.toString()
+			.trim()
+			.split(/\s+/)
+			.filter((name) => name.length > 0);
+	} catch {
+		// jj absent, not a jj repo, or the revset resolved to nothing. All three
+		// mean "jj does not name this work", which the caller treats as null.
+		return [];
+	}
+}
+
+/**
+ * The revsets asked, nearest-first, mirroring DEV-8469's monorepo resolver
+ * rung for rung. Each is deliberately the revset it is, and the reasons differ.
+ */
+const JJ_BOOKMARK_REVSETS = [
+	// 1. A bookmark on the working-copy commit itself -- the state immediately
+	//    after `jj bookmark create`, and the only rung a plain linear workflow
+	//    ever needs.
+	"@",
+	// 2. The nearest bookmark in `@`'s ancestry. `heads(...)` is what makes it
+	//    NEAREST: without it a long stack returns every ancestor bookmark, which
+	//    this resolver would read as ambiguous and refuse (DEV-8469).
+	"heads(bookmarks() & ::@)",
+	// 3. A bookmark elsewhere on this stack. `@-::` is "descendants of `@`'s
+	//    parent", which is the only rung that reaches a SIBLING -- where jj's own
+	//    recommended conflict-resolution flow leaves `@`, and the case the
+	//    original DEV-8220 design missed.
+	//
+	//    NOT the obvious-looking `mutable()`: that depends on the
+	//    `immutable_heads`/`trunk()` configuration, and `trunk()` silently
+	//    degrades to `root()` whenever `main@origin` is absent -- the normal state
+	//    of a `--single-branch` pilot clone. A resolver whose correctness depends
+	//    on configuration that is broken by default is not a resolver (DEV-8469).
+	"bookmarks() & @-::",
+] as const;
+
+/**
+ * The jj bookmark naming the current work, or `null` when there is not exactly
+ * one -- a FALLBACK for `currentGitBranch()`, never a replacement.
+ *
+ * WHY THIS EXISTS. In a colocated jj repo `.git/HEAD` points at `@`'s PARENT,
+ * so from the first `jj new` onward git reports a detached HEAD and
+ * `currentGitBranch()` correctly returns null -- while a jj bookmark names the
+ * work perfectly well. Without this, `issues mark-branch` is simply unusable
+ * inside a jj pilot clone (DEV-8479).
+ *
+ * WHY A LOCAL COPY rather than importing the monorepo's resolver: el-linear
+ * ships from a separate MIT repository with four lean runtime dependencies, and
+ * `@enrichlayer/shared-contracts` is a broad internal contract surface that is
+ * deliberately not published. This duplicates one rung-ladder, not a module.
+ * The tools-side note in `docs/jj-working-layer.md` records the duplication so
+ * it is findable rather than discovered later as drift.
+ *
+ * THE LADDER is JJ_BOOKMARK_REVSETS above, nearest-first: each rung is more
+ * specific than the next, so the first rung that answers wins. The reasoning
+ * for each revset sits on the revset itself.
+ *
+ * AMBIGUITY IS NULL, not a guess. When a rung returns more than one bookmark
+ * there is no basis for choosing, and `mark-branch` would write its marker
+ * under the wrong name. Falling through to a LATER rung would be worse still --
+ * it would answer with a bookmark strictly less relevant than the ambiguous
+ * ones. So the ladder stops and the caller fails loudly, which is el-linear's
+ * existing posture for "no named branch".
+ */
+export function currentJjBookmark(): string | null {
+	for (const revset of JJ_BOOKMARK_REVSETS) {
+		const names = jjBookmarksAt(revset);
+		if (names.length === 1) {
+			return names[0];
+		}
+		if (names.length > 1) {
+			return null;
+		}
+	}
+	return null;
+}
