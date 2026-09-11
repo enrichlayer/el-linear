@@ -5,9 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  '@apm-js-collab/code-transformer-bundler-plugins@0.7.1':
-    hash: d027750c4e8b974fe193210c0fd3466533faa6903ba3c911ac83a160f18182fb
-    path: patches/@apm-js-collab__code-transformer-bundler-plugins@0.7.1.patch
+  '@apm-js-collab/code-transformer-bundler-plugins@0.7.1': d027750c4e8b974fe193210c0fd3466533faa6903ba3c911ac83a160f18182fb
 
 importers:
 
@@ -17,8 +15,8 @@ importers:
         specifier: ^8.4.2
         version: 8.5.2(@types/node@26.1.1)
       '@linear/sdk':
-        specifier: ^88.0.0
-        version: 88.0.0(graphql@17.0.2)
+        specifier: ^89.0.0
+        version: 89.0.0(graphql@17.0.2)
       commander:
         specifier: ^15.0.0
         version: 15.0.0
@@ -426,8 +424,8 @@ packages:
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
 
-  '@linear/sdk@88.0.0':
-    resolution: {integrity: sha512-5m3bqEU7MmQwE+BUB8Z0UENnIiyqM0g4Tv0M7wm35qFAj3zCdvbX95102YcfkvwlRiH0etbKRD05JKQvzOgPpg==}
+  '@linear/sdk@89.0.0':
+    resolution: {integrity: sha512-LiV2wsIg1Wym4GgaAUMrALo953WEgIAAceyK8qL91q75Ws8+lqwAkPW252MHtwktZCR7exMBd5wCAdct3yLU7w==}
     engines: {node: '>=18.x'}
 
   '@napi-rs/wasm-runtime@1.1.6':
@@ -1327,7 +1325,7 @@ snapshots:
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
-  '@linear/sdk@88.0.0(graphql@17.0.2)':
+  '@linear/sdk@89.0.0(graphql@17.0.2)':
     dependencies:
       '@graphql-typed-document-node/core': 3.2.0(graphql@17.0.2)
     transitivePeerDependencies:
