@@ -24,6 +24,7 @@ import {
 	type WindowedMeta,
 	warnIfTruncated,
 } from "./output.js";
+import { RateLimitAdmissionRefusal } from "./rate-limit-admission.js";
 
 describe("outputSuccess", () => {
 	let stdoutSpy: ReturnType<typeof vi.spyOn>;
@@ -721,6 +722,24 @@ describe("handleAsyncCommand", () => {
 			code: "GRAPHQL_VALIDATION_FAILED",
 			retryable: false,
 		});
+	});
+
+	it("publishes a pre-request quota deadline without fabricating an HTTP response", async () => {
+		await handleAsyncCommand(async () => {
+			throw new RateLimitAdmissionRefusal(
+				"local quota refusal",
+				"2026-09-11T09:44:05.282Z",
+			);
+		})();
+		const parsed = JSON.parse(stdoutSpy.mock.calls[0]?.[0] as string);
+		expect(parsed.errorDetail).toEqual({
+			httpStatus: null,
+			code: "RATELIMITED",
+			retryable: true,
+			resetAt: "2026-09-11T09:44:05.282Z",
+		});
+		expect(parsed).not.toHaveProperty("_rateLimit");
+		expect(exitSpy).toHaveBeenCalledWith(1);
 	});
 
 	it("omits errorDetail entirely for an unclassified error", async () => {

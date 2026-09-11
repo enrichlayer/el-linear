@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import type { LinearCredential } from "../auth/linear-credential.js";
 import { atomicWrite, withFileLock } from "../auth/oauth-fs.js";
+import { LinearGraphQLError } from "./linear-graphql-error.js";
 import type { RateLimitInfo } from "./output.js";
 
 const STATE_VERSION = 1;
@@ -25,9 +26,14 @@ export interface RateLimitAdmission {
 }
 
 /** A local/coordinator quota gate refused before any Linear request was sent. */
-export class RateLimitAdmissionRefusal extends Error {
-	constructor(message: string) {
-		super(message);
+export class RateLimitAdmissionRefusal extends LinearGraphQLError {
+	constructor(message: string, resetAt?: string) {
+		super(message, {
+			httpStatus: null,
+			code: "RATELIMITED",
+			retryable: true,
+			resetAt,
+		});
 		this.name = "RateLimitAdmissionRefusal";
 	}
 }
@@ -135,6 +141,7 @@ function createCoordinatorAdmission(
 			const reset = state?.resetAt ? ` until ${state.resetAt}` : "";
 			throw new RateLimitAdmissionRefusal(
 				`Linear rate limit exceeded before request; distributed admission refused: ${remaining} requests remain, preserving configured headroom ${headroom}${reset}.`,
+				state?.resetAt,
 			);
 		},
 		async observe(info: RateLimitInfo): Promise<void> {
@@ -261,12 +268,16 @@ export function createRateLimitAdmission(
 				if (state.probeUntil !== undefined) {
 					throw new RateLimitAdmissionRefusal(
 						`Linear rate limit probe is already in flight; admission refused while preserving configured headroom ${headroom}.`,
+						typeof state.probeUntil === "number"
+							? (new Date(state.probeUntil).toJSON() ?? undefined)
+							: undefined,
 					);
 				}
 				if (state.remaining <= headroom) {
 					const reset = state.resetAt ? ` until ${state.resetAt}` : "";
 					throw new RateLimitAdmissionRefusal(
 						`Linear rate limit exceeded before request; admission refused: ${state.remaining} requests remain, preserving configured headroom ${headroom}${reset}.`,
+						state.resetAt,
 					);
 				}
 				// Reserve one request while holding the process-shared lock. The

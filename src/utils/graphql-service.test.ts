@@ -81,13 +81,17 @@ describe("GraphQLService", () => {
 			const before = mockRawRequest.mock.calls.length;
 			const refusal = new RateLimitAdmissionRefusal(
 				"Linear rate limit exceeded before request; admission refused: 25 requests remain, preserving configured headroom 25 until 2026-08-24T10:00:00Z.",
+				"2026-08-24T10:00:00Z",
 			);
+			const admit = vi.fn().mockRejectedValue(refusal);
+			const sleep = vi.fn();
 			const service = new GraphQLService(
 				{ apiKey: "test-token" },
 				{
+					sleep,
 					admission: {
 						enabled: true,
-						admit: vi.fn().mockRejectedValue(refusal),
+						admit,
 						observe: vi.fn().mockResolvedValue(undefined),
 					},
 				},
@@ -97,6 +101,14 @@ describe("GraphQLService", () => {
 				service.rawRequest(query, undefined, requestOptions),
 			).rejects.toBe(refusal);
 			expect(refusal.message).not.toContain("may have committed");
+			expect(admit).toHaveBeenCalledTimes(1);
+			expect(sleep).not.toHaveBeenCalled();
+			expect(refusal.detail).toEqual({
+				httpStatus: null,
+				code: "RATELIMITED",
+				retryable: true,
+				resetAt: "2026-08-24T10:00:00.000Z",
+			});
 			expect(mockRawRequest.mock.calls.length).toBe(before);
 		},
 	);

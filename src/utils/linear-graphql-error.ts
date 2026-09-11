@@ -32,9 +32,9 @@ const RETRYABLE_HTTP_STATUSES: readonly number[] = [408, 429];
 
 /**
  * The classification block `el-linear` publishes as `errorDetail` on a
- * failed command's JSON envelope. Every field is always present — `null`
- * means "the failure carried no such signal", which is itself information a
- * caller can act on.
+ * failed command's JSON envelope. Status, code and retryability are always
+ * present; `null` means no such response signal. A known admission deadline
+ * is additive and optional.
  */
 export interface LinearGraphQLErrorDetail {
 	/** HTTP status of the Linear response, or `null` if it never arrived. */
@@ -43,6 +43,25 @@ export interface LinearGraphQLErrorDetail {
 	code: string | null;
 	/** Whether retrying the identical request could plausibly succeed. */
 	retryable: boolean;
+	/** Known quota reset or recovery-probe deadline, when admission refused locally. */
+	resetAt?: string;
+}
+
+/** Accept explicit UTC timestamps only; error messages never establish a deadline. */
+function normalizeResetAt(value: unknown): string | undefined {
+	if (
+		typeof value !== "string" ||
+		!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value)
+	) {
+		return undefined;
+	}
+	const millis = Date.parse(value);
+	if (!Number.isFinite(millis)) return undefined;
+	const normalized = new Date(millis).toISOString();
+	// Date.parse normalizes impossible calendar dates rather than rejecting them.
+	return normalized.slice(0, 19) === value.slice(0, 19)
+		? normalized
+		: undefined;
 }
 
 /**
@@ -167,6 +186,7 @@ export class LinearGraphQLError extends Error {
 	readonly httpStatus: number | null;
 	readonly code: string | null;
 	readonly retryable: boolean;
+	readonly resetAt?: string;
 
 	constructor(message: string, detail: LinearGraphQLErrorDetail) {
 		super(message);
@@ -174,6 +194,7 @@ export class LinearGraphQLError extends Error {
 		this.httpStatus = detail.httpStatus;
 		this.code = detail.code;
 		this.retryable = detail.retryable;
+		this.resetAt = normalizeResetAt(detail.resetAt);
 	}
 
 	get detail(): LinearGraphQLErrorDetail {
@@ -181,6 +202,7 @@ export class LinearGraphQLError extends Error {
 			httpStatus: this.httpStatus,
 			code: this.code,
 			retryable: this.retryable,
+			...(this.resetAt ? { resetAt: this.resetAt } : {}),
 		};
 	}
 }
@@ -225,13 +247,16 @@ export function readGraphQLErrorDetail(
 		httpStatus?: unknown;
 		code?: unknown;
 		retryable?: unknown;
+		resetAt?: unknown;
 	};
 	if (typeof candidate.retryable !== "boolean") {
 		return null;
 	}
+	const resetAt = normalizeResetAt(candidate.resetAt);
 	return {
 		httpStatus: asNumber(candidate.httpStatus),
 		code: asString(candidate.code),
 		retryable: candidate.retryable,
+		...(resetAt ? { resetAt } : {}),
 	};
 }
