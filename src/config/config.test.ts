@@ -639,3 +639,159 @@ describe("loadConfig — local.json overlay", () => {
 		expect(config.defaultPriority).toBe("high");
 	});
 });
+
+// A team config found on this machine describes whichever workspace it was
+// captured from. Applied to a profile pointed somewhere else, its member, team,
+// and label maps resolve to UUIDs the target workspace has never seen, and the
+// API rejects them with "Entity not found in validateAccess" — a message that
+// names a field but neither the value nor the file it came from. DEV-8181.
+describe("loadConfig — team config from a different workspace (DEV-8181)", () => {
+	beforeEach(() => {
+		fsFiles.clear();
+		defaultExistsReturn = false;
+		defaultReadReturn = "{}";
+		vi.resetModules();
+		delete process.env.EL_LINEAR_TEAM_CONFIG;
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+		delete process.env.EL_LINEAR_TEAM_CONFIG;
+	});
+
+	const foreignTeamConfig = JSON.stringify({
+		workspaceUrlKey: "acme",
+		defaultTeam: "DEV",
+		defaultAssignee: "someone-at-acme",
+		teams: { DEV: "acme-team-uuid" },
+		teamAliases: { backend: "DEV" },
+		labels: { workspace: { claude: "acme-label-uuid" }, teams: {} },
+		members: {
+			aliases: { me: "acme-person" },
+			uuids: {},
+			fullNames: {},
+			handles: {},
+		},
+		validation: { intakeDecisionGate: "block" },
+		statusDefaults: { noProject: "Backlog", withAssigneeAndProject: "Started" },
+		terms: [{ correct: "Acme", incorrect: ["acme corp"] }],
+	});
+
+	it("drops the identifiers when the two configs name different workspaces", async () => {
+		const teamPath = "/shared/acme-team-config.json";
+		fsFiles.set(teamPath, foreignTeamConfig);
+		process.env.EL_LINEAR_TEAM_CONFIG = teamPath;
+		defaultExistsReturn = true;
+		defaultReadReturn = JSON.stringify({ workspaceUrlKey: "widgets" });
+
+		const { loadConfig } = await import("./config.js");
+		const config = loadConfig();
+
+		// None of these can resolve in the "widgets" workspace, so none survive.
+		expect(config.teams).toEqual({});
+		expect(config.teamAliases).toEqual({});
+		expect(config.labels.workspace).toEqual({});
+		expect(config.members.aliases).toEqual({});
+		expect(config.defaultTeam).toBe("");
+		expect(config.defaultAssignee).toBeUndefined();
+	});
+
+	it("keeps the policy half, which is workspace-agnostic", async () => {
+		const teamPath = "/shared/acme-team-config.json";
+		fsFiles.set(teamPath, foreignTeamConfig);
+		process.env.EL_LINEAR_TEAM_CONFIG = teamPath;
+		defaultExistsReturn = true;
+		defaultReadReturn = JSON.stringify({ workspaceUrlKey: "widgets" });
+
+		const { loadConfig } = await import("./config.js");
+		const config = loadConfig();
+
+		expect(config.validation?.intakeDecisionGate).toBe("block");
+		expect(config.statusDefaults.noProject).toBe("Backlog");
+		expect(config.terms).toHaveLength(1);
+	});
+
+	it("warns, naming both workspaces and the file", async () => {
+		const teamPath = "/shared/acme-team-config.json";
+		fsFiles.set(teamPath, foreignTeamConfig);
+		process.env.EL_LINEAR_TEAM_CONFIG = teamPath;
+		defaultExistsReturn = true;
+		defaultReadReturn = JSON.stringify({ workspaceUrlKey: "widgets" });
+
+		const { loadConfig } = await import("./config.js");
+		const { resetWarnings, outputSuccess } = await import("../utils/output.js");
+		const stdoutSpy = vi
+			.spyOn(process.stdout, "write")
+			.mockImplementation(() => true);
+		resetWarnings();
+		loadConfig();
+		outputSuccess({ check: true });
+		const output = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trimEnd());
+		stdoutSpy.mockRestore();
+
+		const warning = (output._warnings as string[]).join("\n");
+		expect(warning).toContain("acme");
+		expect(warning).toContain("widgets");
+		expect(warning).toContain(teamPath);
+	});
+
+	it("applies the whole layer when both name the SAME workspace", async () => {
+		const teamPath = "/shared/team-config.json";
+		fsFiles.set(teamPath, foreignTeamConfig);
+		process.env.EL_LINEAR_TEAM_CONFIG = teamPath;
+		defaultExistsReturn = true;
+		defaultReadReturn = JSON.stringify({ workspaceUrlKey: "acme" });
+
+		const { loadConfig } = await import("./config.js");
+		const config = loadConfig();
+
+		expect(config.teams).toEqual({ DEV: "acme-team-uuid" });
+		expect(config.labels.workspace).toEqual({ claude: "acme-label-uuid" });
+	});
+
+	// The overwhelmingly common setup is one workspace and a team config that
+	// predates this field. An undeclared layer cannot be shown to belong
+	// elsewhere, and dropping its identifiers on suspicion would break everyone.
+	it("leaves an UNDECLARED team config alone even when the profile declares a workspace", async () => {
+		const teamPath = "/shared/team-config.json";
+		fsFiles.set(
+			teamPath,
+			JSON.stringify({ defaultTeam: "DEV", teams: { DEV: "some-uuid" } }),
+		);
+		process.env.EL_LINEAR_TEAM_CONFIG = teamPath;
+		defaultExistsReturn = true;
+		defaultReadReturn = JSON.stringify({ workspaceUrlKey: "widgets" });
+
+		const { loadConfig } = await import("./config.js");
+		const config = loadConfig();
+
+		expect(config.defaultTeam).toBe("DEV");
+		expect(config.teams).toEqual({ DEV: "some-uuid" });
+	});
+
+	it("leaves the layer alone when the PROFILE declares no workspace", async () => {
+		const teamPath = "/shared/team-config.json";
+		fsFiles.set(teamPath, foreignTeamConfig);
+		process.env.EL_LINEAR_TEAM_CONFIG = teamPath;
+		defaultExistsReturn = true;
+		defaultReadReturn = JSON.stringify({});
+
+		const { loadConfig } = await import("./config.js");
+		expect(loadConfig().teams).toEqual({ DEV: "acme-team-uuid" });
+	});
+
+	// The reported case: the layer arrives through the onboarding marker rather
+	// than an explicit path, so nothing the operator wrote points at it.
+	it("isolates a marker-discovered layer the same way", async () => {
+		fsFiles.set(MARKER_PATH, "/fake-tools\n");
+		fsFiles.set(MARKER_SHARED_FILE, foreignTeamConfig);
+		defaultExistsReturn = true;
+		defaultReadReturn = JSON.stringify({ workspaceUrlKey: "widgets" });
+
+		const { loadConfig } = await import("./config.js");
+		const config = loadConfig();
+
+		expect(config.labels.workspace).toEqual({});
+		expect(config.validation?.intakeDecisionGate).toBe("block");
+	});
+});

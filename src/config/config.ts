@@ -210,6 +210,11 @@ export interface ElLinearConfig {
 	 * Optional override for the Linear workspace URL key (the part after
 	 * `linear.app/` in issue URLs). When omitted, el-linear queries the Linear API
 	 * once per session and caches the result.
+	 *
+	 * In a SHARED TEAM CONFIG this doubles as a declaration of which workspace
+	 * the file's identifiers came from. Set it there and in each profile, and a
+	 * team layer belonging to another workspace has its member/team/label maps
+	 * dropped instead of resolving to UUIDs that workspace has never seen.
 	 */
 	workspaceUrlKey?: string;
 	/**
@@ -268,12 +273,16 @@ export interface ElLinearConfig {
 	 *
 	 * Set to the empty string (`""`) to explicitly DISABLE the team layer for
 	 * this profile, including `~/.config/el-tools-root` marker auto-discovery.
-	 * This is the multi-account escape hatch: a marker-discovered team config
-	 * carries workspace-specific member/label UUIDs, and applying it to a
-	 * profile pointed at a different Linear workspace makes `--assignee <name>`
-	 * resolve to a foreign UUID that the API rejects with an opaque
-	 * "Entity not found in validateAccess" error. Profiles for secondary
-	 * workspaces should set `"teamConfigPath": ""`.
+	 *
+	 * That total opt-out is the blunt instrument. Prefer declaring
+	 * `workspaceUrlKey` in BOTH the team config and the profile: el-linear then
+	 * drops only the team layer's workspace-specific keys when the two disagree
+	 * (see `isolateForeignWorkspaceKeys`), keeping its validation rules, terms,
+	 * and status defaults, which are workspace-agnostic. Without either measure
+	 * a profile pointed at a second workspace inherits foreign member/label/team
+	 * UUIDs, and the API rejects them with an opaque
+	 * "Entity not found in validateAccess" that names a field but not the value,
+	 * the flag, or this file.
 	 */
 	teamConfigPath?: string;
 }
@@ -285,6 +294,83 @@ export interface ElLinearConfig {
  * excludes `teamConfigPath` itself to prevent circular references.
  */
 export type TeamConfig = Omit<ElLinearConfig, "teamConfigPath">;
+
+/**
+ * Config keys whose values only mean something inside one Linear workspace.
+ *
+ * Every one of them is an identifier — a UUID, a team key, or an alias that
+ * resolves to one. Carried into a different workspace they do not degrade
+ * gracefully: they resolve to something that is not there, and the API answers
+ * `Entity not found in validateAccess` naming a field but neither the value nor
+ * where it came from.
+ *
+ * The keys deliberately left out — `validation`, `terms`, `statusDefaults`,
+ * `footer`, cache settings — are policy rather than identity, expressed in names
+ * and rules that stay meaningful in any workspace. That split is what lets a
+ * mismatched team layer be dropped in part rather than wholesale, so a shared
+ * config still contributes the half that travels.
+ */
+const WORKSPACE_SCOPED_KEYS = [
+	"members",
+	"teams",
+	"teamAliases",
+	"labels",
+	"defaultTeam",
+	"defaultAssignee",
+] as const;
+
+/**
+ * Strips the workspace-scoped keys from a team config layer that describes a
+ * different workspace than the profile using it, and says so once.
+ *
+ * Only acts on a *declared* mismatch — both sides naming a `workspaceUrlKey`,
+ * and naming different ones. An undeclared team config is left entirely alone:
+ * it cannot be proven to belong elsewhere, and dropping identifiers on
+ * suspicion would break every existing single-workspace setup, which is the
+ * overwhelmingly common one.
+ */
+function isolateForeignWorkspaceKeys(
+	teamRaw: Record<string, unknown>,
+	personalRaw: Record<string, unknown>,
+	teamConfigPath: string,
+): Record<string, unknown> {
+	const teamWorkspace =
+		typeof teamRaw.workspaceUrlKey === "string"
+			? teamRaw.workspaceUrlKey.trim()
+			: "";
+	const personalWorkspace =
+		typeof personalRaw.workspaceUrlKey === "string"
+			? personalRaw.workspaceUrlKey.trim()
+			: "";
+	if (
+		!teamWorkspace ||
+		!personalWorkspace ||
+		teamWorkspace === personalWorkspace
+	) {
+		return teamRaw;
+	}
+
+	const dropped = WORKSPACE_SCOPED_KEYS.filter((key) => key in teamRaw);
+	if (dropped.length === 0) {
+		return teamRaw;
+	}
+
+	const isolated = { ...teamRaw };
+	for (const key of dropped) {
+		delete isolated[key];
+	}
+	// Name both workspaces and the file. The failure this replaces gave the
+	// operator a field name and nothing else, and the fix is only obvious once
+	// you know which of your two workspaces the config on disk describes.
+	outputWarning(
+		`Team config ${teamConfigPath} describes workspace "${teamWorkspace}", ` +
+			`but this profile targets "${personalWorkspace}". Ignoring its ` +
+			`workspace-specific keys (${dropped.join(", ")}) — identifiers from ` +
+			"another workspace do not resolve here. Its validation, terms, and " +
+			"status defaults still apply.",
+	);
+	return isolated;
+}
 
 /**
  * User-local overrides that live in `~/.config/el-linear/local.json` (or the
@@ -419,7 +505,7 @@ export function loadConfig(): ElLinearConfig {
 	}
 
 	// Load the team config layer (errors are warned, never thrown).
-	const teamRaw: Record<string, unknown> = teamConfigPath
+	let teamRaw: Record<string, unknown> = teamConfigPath
 		? loadTeamConfigRaw(teamConfigPath)
 		: {};
 	// teamConfigPath inside a team config file would be circular; strip it.
@@ -439,6 +525,13 @@ export function loadConfig(): ElLinearConfig {
 	// into their personal config at setup time; that keeps the decision with the
 	// machine's owner instead of with whoever can land a commit upstream.
 	delete teamRaw.identity;
+
+	// A shared config discovered on this machine describes whichever workspace it
+	// was captured from; a profile may target a different one. Drop the keys that
+	// cannot survive that crossing before they reach the merge.
+	if (teamConfigPath) {
+		teamRaw = isolateForeignWorkspaceKeys(teamRaw, personalRaw, teamConfigPath);
+	}
 
 	// Merge order: defaults → team config → personal config.
 	// Arrays (terms, defaultLabels, etc.) are concatenated so personal entries
