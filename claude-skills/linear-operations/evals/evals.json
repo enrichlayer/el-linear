@@ -4,12 +4,14 @@
 		{
 			"id": 1,
 			"prompt": "Create a Linear issue for fixing the login bug on the staging environment",
-			"expected_output": "The skill searches for duplicate issues first, selects appropriate labels from the taxonomy, creates an issue with a description containing 'Why we need this' section, and uses el-linear create command",
+			"expected_output": "Before creating, searches closed and open issues, records Needed/Worth doing/Existing work/Owner/Placement/PROCEED intake, resolves concrete metadata, and uses el-linear issues create with intent and acceptance criteria.",
 			"expectations": [
 				"Searches for existing issues to avoid duplicates before creating",
 				"Selects labels from the known label taxonomy (e.g., bug)",
 				"Description includes a 'Why we need this' section",
-				"Uses el-linear CLI to create the issue, not raw curl"
+				"Uses el-linear CLI to create the issue, not raw curl",
+				"Records the six required intake lines before create; no validation bypass",
+				"Resolves a concrete owner and placement using task evidence; asks only for consequential unresolved choices"
 			],
 			"assertions": [
 				{
@@ -31,6 +33,11 @@
 					"type": "output_contains",
 					"value": "Why we need this",
 					"description": "The issue body includes the required intent section."
+				},
+				{
+					"type": "output_contains",
+					"value": "Intake decision",
+					"description": "The issue body records the blocking intake decision."
 				}
 			]
 		},
@@ -41,7 +48,8 @@
 			"expectations": [
 				"Uses el-linear search command with appropriate query",
 				"Does not attempt to use curl against api.linear.app",
-				"Returns formatted results with issue IDs and titles"
+				"Returns formatted results with issue IDs and titles",
+				"Use version-matched command help directly for routine syntax; do not load the syntax reference unless its body-file or error guidance is needed."
 			],
 			"assertions": [
 				{
@@ -68,7 +76,9 @@
 			"expectations": [
 				"Uses el-linear update command with the issue identifier DEV-123",
 				"Sets the status to In Progress",
-				"Does not create a new issue"
+				"Does not create a new issue",
+				"Read the current issue and ownership before the authorized update.",
+				"Do not check repository/worktree claims for a tracker-only field update."
 			],
 			"assertions": [
 				{
@@ -91,17 +101,17 @@
 		{
 			"id": 4,
 			"prompt": "Create a git branch for DEV-456",
-			"expected_output": "This should NOT trigger linear-operations. Branch creation from Linear issues is handled by git-branch-from-linear skill.",
+			"expected_output": "Routes branch creation to git-branch-from-linear; loads linear-operations before that workflow reads issue metadata with el-linear. Does not create or update a Linear issue merely to read branch metadata.",
 			"expectations": [
-				"Does NOT trigger linear-operations skill",
+				"Loads linear-operations before the metadata read, while git-branch-from-linear owns the branch workflow",
 				"Routes to git-branch-from-linear instead",
 				"No el-linear create or update commands are issued"
 			],
 			"assertions": [
 				{
-					"type": "skill_not_used",
+					"type": "skill_used",
 					"name": "linear-operations",
-					"description": "Branch creation is outside linear-operations scope."
+					"description": "The branch workflow still loads the common contract before its el-linear read."
 				},
 				{
 					"type": "skill_used",
@@ -122,6 +132,206 @@
 					"type": "output_not_contains",
 					"value": "el-linear issues update",
 					"description": "Does not update issue fields for branch creation."
+				}
+			]
+		},
+		{
+			"id": 5,
+			"prompt": "In this UI copy, replace the label \"Assign owner\" with \"Choose owner\". Return only the revised text.",
+			"expected_output": "Returns revised UI copy without invoking Linear or its skill.",
+			"expectations": [
+				"No Linear skill, CLI call, issue lookup, tracker write, or clarification"
+			],
+			"assertions": [
+				{
+					"type": "skill_not_used",
+					"name": "linear-operations",
+					"description": "Routes by actual Linear operation intent."
+				}
+			]
+		},
+		{
+			"id": 6,
+			"prompt": "Explain why a linear equation has a constant slope, using one short example.",
+			"expected_output": "Explains the mathematical concept without invoking Linear operations.",
+			"expectations": ["No Linear skill, issue lookup or tracker write"],
+			"assertions": [
+				{
+					"type": "skill_not_used",
+					"name": "linear-operations",
+					"description": "Routes by actual Linear operation intent."
+				}
+			]
+		},
+		{
+			"id": 7,
+			"prompt": "Read-only fixture: summarize ENG-123. The stub read returns project=null, assignee=null and status=Todo. Do not change it.",
+			"expected_output": "Loads the entry and output reference, reads the issue, and summarizes current fields without starting implementation or asking for project assignment.",
+			"expectations": [
+				"Reads through el-linear with summary output",
+				"Does not load creation/intake procedures for this lookup",
+				"No claim, assignment, project update, relation, issue write or unnecessary question",
+				"Use version-matched command help directly for routine syntax; do not load the syntax reference unless its body-file or error guidance is needed."
+			],
+			"assertions": [
+				{
+					"type": "skill_used",
+					"name": "linear-operations",
+					"description": "Routes by actual Linear operation intent."
+				},
+				{
+					"type": "command_matches",
+					"pattern": "el-linear\\s+issues?\\s+read\\s+ENG-123\\b.*--format\\s+summary",
+					"description": "Reads the requested issue for a summary."
+				},
+				{
+					"type": "tool_not_used",
+					"name": "AskUserQuestion",
+					"description": "An unassigned issue does not require a question during a read-only lookup."
+				}
+			]
+		},
+		{
+			"id": 8,
+			"prompt": "Creation fixture: create the already approved issue \"Fix staging login redirect\". Same-task confirmed metadata: team ENG, project Auth Refactor, owner Alice, labels bug/backend; the canonical map and live team/project/member stubs confirm these values. Need: staging redirects fail. Worth doing: they prevent QA from signing in. Done when: staging sign-in reaches the dashboard and a regression check covers it. Search stubs (including closed) return no duplicate or relation candidates.",
+			"expected_output": "Reuses confirmed metadata and records all six intake fields before one validated create; no repeated placement question.",
+			"expectations": [
+				"Searches with --include-closed before create",
+				"No repeated question about known team/project/assignee",
+				"Uses exactly one type and one or two domain labels",
+				"Records Needed, Worth doing, Existing work, Owner, Placement, Decision: PROCEED and acceptance criteria",
+				"Creates once through el-linear; never uses skip-validation or intake/duplicate bypass"
+			],
+			"assertions": [
+				{
+					"type": "skill_used",
+					"name": "linear-operations",
+					"description": "Routes by actual Linear operation intent."
+				},
+				{
+					"type": "command_matches",
+					"pattern": "el-linear\\s+issues?\\s+search\\b.*--include-closed",
+					"description": "Search includes closed duplicates."
+				},
+				{
+					"type": "command_matches",
+					"pattern": "el-linear\\s+issues?\\s+create\\b",
+					"description": "Creates after intake."
+				},
+				{
+					"type": "output_contains",
+					"value": "Intake decision",
+					"description": "Includes Intake decision"
+				},
+				{
+					"type": "tool_not_used",
+					"name": "AskUserQuestion",
+					"description": "Confirmed placement is reused within the same task."
+				}
+			]
+		},
+		{
+			"id": 9,
+			"prompt": "Creation fixture: create a feature issue under the user-named project \"Beacon\". Team ENG and owner Alice are confirmed. After dropping filters and increasing the limit, project discovery stubs still return only \"Beacon Legacy\". There is no canonical alias from Beacon to Beacon Legacy.",
+			"expected_output": "Finishes bounded discovery, asks for the missing named project, and does not substitute or create the issue.",
+			"expectations": [
+				"Broadens project discovery before asking",
+				"Asks the one consequential unresolved placement question",
+				"Does not substitute Beacon Legacy",
+				"No issue create or project mutation"
+			],
+			"assertions": [
+				{
+					"type": "skill_used",
+					"name": "linear-operations",
+					"description": "Routes by actual Linear operation intent."
+				},
+				{
+					"type": "command_matches",
+					"pattern": "el-linear\\s+projects?\\s+list\\b",
+					"description": "Attempts project discovery."
+				},
+				{
+					"type": "output_contains",
+					"value": "Beacon",
+					"description": "Includes Beacon"
+				}
+			]
+		},
+		{
+			"id": 10,
+			"prompt": "Read-only fixture: search Linear for auth issues and report the results. Stub rows include ENG-21 and ENG-22, a relation_candidates warning, and a claude label. No tracker mutations or task pickup are authorized.",
+			"expected_output": "Searches and reports results without creating relations or starting labeled work.",
+			"expectations": [
+				"Loads only entry/output material needed for search",
+				"No create/update/relate/claim/comment or branch operation",
+				"A relation warning and claude label do not expand authority",
+				"Use version-matched command help directly for routine syntax; do not load the syntax reference unless its body-file or error guidance is needed."
+			],
+			"assertions": [
+				{
+					"type": "skill_used",
+					"name": "linear-operations",
+					"description": "Routes by actual Linear operation intent."
+				},
+				{
+					"type": "command_matches",
+					"pattern": "el-linear\\s+issues?\\s+search\\b.*auth",
+					"description": "Runs the requested search."
+				},
+				{
+					"type": "output_not_contains",
+					"value": "el-linear issues relate",
+					"description": "Does not claim or perform el-linear issues relate"
+				}
+			]
+		},
+		{
+			"id": 11,
+			"prompt": "Account fixture: read customer A issue ENG-123. Current stub profile is customer B; the task supplies no customer A profile or access authority. Do not change machine-global configuration.",
+			"expected_output": "Resolves the account mismatch before any issue-data access; asks only for the missing authorized customer A profile and keeps configuration unchanged.",
+			"expectations": [
+				"No customer B issue read as a substitute",
+				"No token disclosure, global profile switch or customer write",
+				"A material account/access question remains required"
+			],
+			"assertions": [
+				{
+					"type": "skill_used",
+					"name": "linear-operations",
+					"description": "Routes by actual Linear operation intent."
+				},
+				{
+					"type": "output_contains",
+					"value": "customer A",
+					"description": "Includes customer A"
+				}
+			]
+		},
+		{
+			"id": 12,
+			"prompt": "Mutation fixture: update the confirmed issue ENG-123 to In Progress. Its current read and ownership are valid. The update stub returns an error envelope and exits nonzero with \"permission denied\". Report the actual outcome.",
+			"expected_output": "Reports permission denied and preserves the pending update; never reports success or changes identity to bypass the error.",
+			"expectations": [
+				"Reads current issue before the attempted update",
+				"Reports the exact failed command outcome",
+				"No blind retry, identity substitution or success claim"
+			],
+			"assertions": [
+				{
+					"type": "skill_used",
+					"name": "linear-operations",
+					"description": "Routes by actual Linear operation intent."
+				},
+				{
+					"type": "command_matches",
+					"pattern": "el-linear\\s+issues?\\s+read\\s+ENG-123\\b",
+					"description": "Reads before mutation."
+				},
+				{
+					"type": "output_contains",
+					"value": "permission denied",
+					"description": "Includes permission denied"
 				}
 			]
 		}
