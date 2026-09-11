@@ -1,5 +1,6 @@
 import type { Command, OptionValues } from "commander";
 import { loadConfig } from "../config/config.js";
+import { resolvedProfileLabel } from "../config/paths.js";
 import { resolveTeam } from "../config/resolver.js";
 import {
 	ARCHIVE_PROJECT_MUTATION,
@@ -965,7 +966,7 @@ export function setupProjectsCommands(program: Command): void {
 				} else {
 					outputSuccess({
 						data: sorted,
-						meta: { count: sorted.length },
+						meta: { count: sorted.length, profile: resolvedProfileLabel() },
 					});
 				}
 			}),

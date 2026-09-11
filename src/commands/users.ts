@@ -1,4 +1,5 @@
 import type { Command, OptionValues } from "commander";
+import { resolvedProfileLabel } from "../config/paths.js";
 import { createLinearService } from "../utils/linear-service.js";
 import {
 	handleAsyncCommand,
@@ -48,7 +49,10 @@ export function setupUsersCommands(program: Command): void {
 					options.name as string | undefined,
 				);
 				warnIfTruncated(result.length, limit);
-				outputSuccess({ data: result, meta: { count: result.length } });
+				outputSuccess({
+					data: result,
+					meta: { count: result.length, profile: resolvedProfileLabel() },
+				});
 			}),
 		);
 }

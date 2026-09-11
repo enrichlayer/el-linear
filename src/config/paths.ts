@@ -156,6 +156,24 @@ export function resolveActiveProfile(
 	};
 }
 
+/**
+ * Human-facing label for the resolved profile, safe on any output path.
+ * Returns `"<default>"` for the legacy single-file layout and `"<unknown>"`
+ * when resolution throws (e.g. an invalid EL_LINEAR_PROFILE value), so list
+ * output never fails to render a `Profile:` line just because the env is
+ * malformed. (DEV-8991)
+ */
+export function resolvedProfileLabel(
+	env: NodeJS.ProcessEnv = process.env,
+	fsImpl: ProfileFsOps = DEFAULT_FS_OPS,
+): string {
+	try {
+		return resolveActiveProfile(env, fsImpl).name ?? "<default>";
+	} catch {
+		return "<unknown>";
+	}
+}
+
 /** Build profile-relative paths for a named profile. Pure. */
 export function profilePaths(name: string): ProfilePaths {
 	const dir = path.join(PROFILES_DIR, name);

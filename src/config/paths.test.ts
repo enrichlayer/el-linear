@@ -12,6 +12,7 @@ import {
 	type ProfileFsOps,
 	profilePaths,
 	resolveActiveProfile,
+	resolvedProfileLabel,
 	setActiveProfileForSession,
 	TOKEN_PATH,
 } from "./paths.js";
@@ -113,5 +114,27 @@ describe("resolveActiveProfile — priority order", () => {
 		const fsOps = makeFsOps({ [ACTIVE_PROFILE_FILE]: "  ondisk  \n" });
 		const r = resolveActiveProfile({}, fsOps);
 		expect(r.name).toBe("ondisk");
+	});
+});
+
+describe("resolvedProfileLabel", () => {
+	beforeEach(() => setActiveProfileForSession(null));
+	afterEach(() => setActiveProfileForSession(null));
+
+	it("returns <default> for the legacy single-file layout", () => {
+		const fsOps = makeFsOps({});
+		expect(resolvedProfileLabel({}, fsOps)).toBe("<default>");
+	});
+
+	it("returns the resolved profile name", () => {
+		const fsOps = makeFsOps({ [ACTIVE_PROFILE_FILE]: "verticalint\n" });
+		expect(resolvedProfileLabel({}, fsOps)).toBe("verticalint");
+	});
+
+	it("returns <unknown> when resolution throws (invalid env)", () => {
+		const fsOps = makeFsOps({});
+		expect(resolvedProfileLabel({ EL_LINEAR_PROFILE: "bad/name" }, fsOps)).toBe(
+			"<unknown>",
+		);
 	});
 });
