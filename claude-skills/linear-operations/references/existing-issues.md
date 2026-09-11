@@ -18,7 +18,7 @@ Code-host integrations can move linked issues to "In Review" on PR/MR creation a
 
 ### Intermediate Deliverable Rule
 
-**Any PR/MR whose branch contains an issue ID will auto-close that issue on merge.** This is dangerous for multi-phase issues where a PR delivers only part of the work.
+**Configured merge automation can close a linked issue.** [GitHub](https://linear.app/docs/github-integration) and [GitLab](https://linear.app/docs/gitlab) transitions depend on workspace rules; a branch name alone does not prove closure. Keep partial deliverables on child issues to protect the parent's remaining work.
 
 **Rule:** if the PR doesn't complete ALL acceptance criteria of the parent issue, create a sub-issue and branch from that. The parent stays open.
 
