@@ -15,8 +15,10 @@ and action success are separate fields; neither proves a posted advisory.
 Run the real subprocess fixtures with:
 
 ```sh
-node --test .github/scripts/claude-review-diagnostic.test.mjs
+node --test .github/scripts/claude-review-diagnostic.node-test.mjs
 ```
+
+The `.node-test.mjs` filename keeps these Node fixtures out of Vitest discovery.
 
 Contracts: [action execution file](https://github.com/anthropics/claude-code-action/blob/v1/base-action/src/execution-file.ts),
 [Agent SDK envelopes](https://code.claude.com/docs/en/agent-sdk/typescript), and

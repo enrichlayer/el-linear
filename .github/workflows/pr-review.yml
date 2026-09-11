@@ -52,7 +52,7 @@ jobs:
           fetch-depth: 0 # full history so the review can diff against the base
 
       - name: Test safe review diagnostics
-        run: node --test .github/scripts/claude-review-diagnostic.test.mjs
+        run: node --test .github/scripts/claude-review-diagnostic.node-test.mjs
 
       - name: AI review
         id: ai_review
