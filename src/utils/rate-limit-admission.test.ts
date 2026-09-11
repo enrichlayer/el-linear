@@ -54,12 +54,24 @@ describe("rate-limit admission", () => {
 		await expect(gate.admit()).rejects.toThrow(
 			"2 requests remain, preserving configured headroom 2",
 		);
+		await expect(gate.admit()).rejects.toMatchObject({
+			httpStatus: null,
+			code: "RATELIMITED",
+			retryable: true,
+			resetAt: "2026-08-24T09:00:00.000Z",
+		});
 	});
 
 	it("permits only one initial probe before the first observation", async () => {
 		const gate = admission();
 		await expect(gate.admit()).resolves.toBeUndefined();
 		await expect(gate.admit()).rejects.toThrow("probe is already in flight");
+		await expect(gate.admit()).rejects.toMatchObject({
+			httpStatus: null,
+			code: "RATELIMITED",
+			retryable: true,
+			resetAt: "2026-08-24T08:00:30.000Z",
+		});
 	});
 
 	it("admits one probe after reset and holds followers until observation", async () => {
@@ -237,6 +249,10 @@ describe("rate-limit admission", () => {
 		);
 		await expect(gate.admit()).rejects.toMatchObject({
 			name: "RateLimitAdmissionRefusal",
+			httpStatus: null,
+			code: "RATELIMITED",
+			retryable: true,
+			resetAt: "2026-08-24T10:00:00.000Z",
 			message: expect.stringContaining(
 				"distributed admission refused: 25 requests remain",
 			),
@@ -245,6 +261,27 @@ describe("rate-limit admission", () => {
 			RateLimitAdmissionRefusal,
 		);
 	});
+
+	it.each([
+		undefined,
+		"not a date",
+		"2026-02-30T10:00:00Z",
+		"2026-08-24",
+		"2026-08-24T25:00:00Z",
+	])(
+		"omits an invalid or missing deadline %s without reading message text",
+		(resetAt) => {
+			const refusal = new RateLimitAdmissionRefusal(
+				"quota until 2026-08-24T10:00:00Z",
+				resetAt,
+			);
+			expect(refusal.detail).toEqual({
+				httpStatus: null,
+				code: "RATELIMITED",
+				retryable: true,
+			});
+		},
+	);
 
 	it("requires a coordinator token instead of failing open", () => {
 		expect(() =>

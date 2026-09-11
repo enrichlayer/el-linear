@@ -779,16 +779,17 @@ capturing one stream always gets exactly one parseable object).
 | --------------- | -------------- | -------------------------------------------------------------------- |
 | `error`         | yes            | The failure message, token-sanitized.                                |
 | `activeProfile` | yes            | Which profile the command ran under — distinguishes "not found" from "wrong workspace". |
-| `errorDetail`   | no             | Classification of a **Linear GraphQL** failure. See below.           |
+| `errorDetail`   | no             | Classification of a **Linear GraphQL** failure or quota admission refusal. See below. |
 
-`errorDetail` is emitted only when the failure came from a request to the
-Linear GraphQL API. Its fields:
+`errorDetail` is emitted when the failure came from a request to the
+Linear GraphQL API or the quota admission that precedes it. Its fields:
 
 | Field        | Type             | Meaning                                                                 |
 | ------------ | ---------------- | ----------------------------------------------------------------------- |
 | `httpStatus` | `number \| null` | HTTP status of Linear's response; `null` when no response arrived.      |
 | `code`       | `string \| null` | The first GraphQL error's `extensions.code`; `null` when absent.        |
 | `retryable`  | `boolean`        | Whether the failure is transient — retrying after an appropriate wait could succeed. |
+| `resetAt`    | optional `string` | Known quota reset or recovery-probe deadline, normalized to a UTC ISO timestamp. |
 
 `retryable` is `true` for HTTP 408 / 429 / 5xx, for the `RATELIMITED`,
 `INTERNAL_SERVER_ERROR` and `SERVICE_UNAVAILABLE` GraphQL codes, and for a
@@ -801,8 +802,16 @@ rate limit under a status that would otherwise read as permanent, so
 immediately is a good idea. A rate limit is transient and reported as such,
 but its window may be minutes away; the wait is the caller's policy.
 
+A local or distributed quota admission refusal uses `code: "RATELIMITED"`,
+`retryable: true` and `httpStatus: null`: no request was sent to Linear.
+When known, `resetAt` comes from the quota state or the existing recovery-probe
+lease. Missing or malformed deadlines are omitted; message text never supplies
+a deadline. These refusals retain the configured headroom and do not trigger an
+immediate retry inside the CLI. The deadline permits a later attempt, not a
+guarantee of capacity or permission.
+
 **A missing `errorDetail` is not "not retryable".** It means the failure
-was not a Linear GraphQL request at all — a bad argument, an unreadable
+was not a classified Linear request or quota refusal — a bad argument, an unreadable
 `--file`, a missing token. Treat its absence as *unclassified* and apply
 your own policy; emitting a fabricated `retryable: false` there would let
 an argv typo masquerade as a verdict about Linear.

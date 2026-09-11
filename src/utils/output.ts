@@ -765,7 +765,7 @@ function outputError(error: Error): void {
 		// leave activeProfile as "<unknown>"
 	}
 	// `errorDetail` (DEV-7987) is the classification block: present only
-	// when the failure came from a Linear GraphQL request, absent for
+	// when the failure came from a Linear GraphQL request or its quota admission, absent for
 	// every other error, so nothing about the existing two-key envelope
 	// changes for callers that never looked at it. See the "Error
 	// envelope" section of the README for the published contract.
