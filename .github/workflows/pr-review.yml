@@ -13,6 +13,14 @@ name: pr-review
 #   Without it the review step fails; see CONTRIBUTING.md.
 #
 # The review is ADVISORY: it posts comments, never approves or blocks a merge.
+#
+# NON-BLOCKING BY CONSTRUCTION (DEV-9670): the review step runs with
+# `continue-on-error: true`, so a failed review (API refusal, quota, outage)
+# leaves this job's conclusion `success`. This job is not branch-protected, but
+# the tools `ci_green` approve gate reads every job at HEAD, so a red advisory
+# job was withholding el-bot's approval on every PR. A failed review is
+# surfaced as a `::warning::` annotation plus the SDK result payload in the job
+# log; it is never a merge signal.
 
 on:
   pull_request:
@@ -45,6 +53,9 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    # A healthy review finishes in ~4 minutes; the failure mode this guards
+    # against is ~3 minutes of API retries. Bound the runner time either way.
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -52,6 +63,12 @@ jobs:
           fetch-depth: 0 # full history so the review can diff against the base
 
       - name: AI review
+        id: ai_review
+        # STEP-level continue-on-error (not job-level): a job-level flag keeps
+        # the workflow run green but GitHub still reports the job's own
+        # conclusion as `failure`, and the tools approve gate reads job
+        # conclusions. Step-level keeps the job itself `success`.
+        continue-on-error: true
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -110,3 +127,26 @@ jobs:
           claude_args: |
             --model claude-sonnet-5
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git diff:*),Bash(git log:*),Read,Grep,Glob"
+
+      # The action hides Claude's output unless `show_full_output` is set, which
+      # is how a three-week run of `is_error:true` failures stayed undiagnosed
+      # (DEV-9670). On failure only, print the SDK `result` message — subtype,
+      # is_error, turn count, duration, and the error text — so the cause is in
+      # the job log without echoing a full review transcript. Secrets never
+      # appear in that payload, and GitHub masks the API key regardless.
+      - name: Surface advisory review failure
+        if: steps.ai_review.outcome != 'success'
+        env:
+          AI_REVIEW_OUTCOME: ${{ steps.ai_review.outcome }}
+          EXECUTION_FILE: ${{ steps.ai_review.outputs.execution_file }}
+        run: |
+          echo "::warning title=pr-review is advisory::The AI review step did not complete (outcome: $AI_REVIEW_OUTCOME). This job is non-blocking by design (DEV-9670); a green check here does not mean a review was posted."
+          if [ -n "$EXECUTION_FILE" ] && [ -f "$EXECUTION_FILE" ]; then
+            echo "SDK result message(s) from $EXECUTION_FILE:"
+            jq -c 'if type == "array" then .[] else . end
+                   | select(.type == "result")
+                   | {subtype, is_error, num_turns, duration_ms, result, errors}' \
+              "$EXECUTION_FILE" || echo "(execution file is not parseable JSON)"
+          else
+            echo "(no execution file was produced — the action failed before running Claude)"
+          fi
