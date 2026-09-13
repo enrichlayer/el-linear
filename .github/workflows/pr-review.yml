@@ -21,6 +21,21 @@ name: pr-review
 # job was withholding el-bot's approval on every PR. A failed review is
 # surfaced as a `::warning::` annotation plus the SDK result payload in the job
 # log; it is never a merge signal.
+#
+# DIAGNOSED FAILURE MODE (DEV-9670, as of 2026-09-13): from run 87 (2026-08-25)
+# on, every same-repo run ended in the action's `is_error:true` with
+# `num_turns: 1`, `total_cost_usd: 0`, `modelUsage: {}` after ~172-183 s — no
+# model response was ever received, and the elapsed time matches the SDK's
+# ten-attempt retry backoff, which only runs for retryable API errors
+# (429/5xx/529/network), never for a bad key (401), bad request (400) or bad
+# model id (404). The `ANTHROPIC_API_KEY` secret was unchanged since 2026-07-15
+# and run 86 (2026-08-24) succeeded on the same secret, model id and `@v1`
+# action. Cause: an account-side refusal (spend/rate limit family) on the
+# Anthropic organization/workspace that owns the secret — NOT the key's
+# presence, the model id, an action pin, permissions or diff size. The owner
+# action is to check that organization/workspace in the Anthropic Console; the
+# failure-surfacing step below now prints the retried error's status so the
+# next failure carries its own evidence. Full log table on DEV-9670.
 
 on:
   pull_request:
