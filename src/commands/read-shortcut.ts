@@ -1,7 +1,11 @@
 import type { Command } from "commander";
 import { GET_ISSUE_RELATIONS_QUERY } from "../queries/issues.js";
 import type { GetIssueRelationsResponse } from "../queries/issues-types.js";
-import { downloadLinearUploads } from "../utils/download-uploads.js";
+import type { LinearIssue } from "../types/linear.js";
+import {
+	downloadLinearUploads,
+	shouldDownloadUploads,
+} from "../utils/download-uploads.js";
 import { extractField, extractFields } from "../utils/extract-field.js";
 import { createFileService } from "../utils/file-service.js";
 import type { GraphQLService } from "../utils/graphql-service.js";
@@ -26,6 +30,23 @@ import {
  * Issue ID pattern: 1-5 uppercase letters, dash, 1+ digits (e.g. ADM-652, DEV-12).
  */
 const ISSUE_ID_PATTERN = /^[A-Z]{1,5}-\d+$/;
+
+/**
+ * Help text for the `--downloads` / `--no-downloads` pair (DEV-9667). Shared
+ * with `issues read` and the `issues <id>` shorthand in `commands/issues.ts`
+ * so the three read routes document one contract.
+ */
+export const READ_DOWNLOADS_HELP =
+	"Download uploads.linear.app attachments to a temp directory and rewrite " +
+	"their URLs to the local paths in the output. Default for the JSON " +
+	"envelope and --format summary; pass explicitly to opt a raw-text route " +
+	"(--body / --field / --sections) back in.";
+export const READ_NO_DOWNLOADS_HELP =
+	"Skip attachment downloads and print description/comment text exactly " +
+	"as Linear stores it (uploads.linear.app links intact, no " +
+	"el-linear-downloads side effect). Default for --body / --field / " +
+	"--sections; required on the JSON envelope / --format summary when the " +
+	"text will be diffed, hashed, or written back with issues update.";
 
 /**
  * Registers a top-level `read` command and a catch-all that auto-detects
@@ -64,9 +85,11 @@ export function setupReadShortcut(program: Command): void {
 				'block of data and adds it to the JSON envelope. Currently supported: "relations" ' +
 				"(adds an array of cross-issue relations under a top-level `relations` key).",
 		)
+		.option("--downloads", READ_DOWNLOADS_HELP)
+		.option("--no-downloads", READ_NO_DOWNLOADS_HELP)
 		.addHelpText(
 			"after",
-			'\nExamples:\n  el-linear read ADM-652\n  el-linear get DEV-123 DEV-456\n  el-linear ADM-652          (auto-detected)\n  el-linear read DEV-123 --body                 (full description, raw text)\n  el-linear read DEV-123 --field "Done when"   (just that section)\n  el-linear read DEV-123 --sections "Done when,Out of scope"\n  el-linear read DEV-123 --with relations       (issue + cross-issue links)',
+			'\nExamples:\n  el-linear read ADM-652\n  el-linear get DEV-123 DEV-456\n  el-linear ADM-652          (auto-detected)\n  el-linear read DEV-123 --body                 (full description, raw text)\n  el-linear read DEV-123 --field "Done when"   (just that section)\n  el-linear read DEV-123 --sections "Done when,Out of scope"\n  el-linear read DEV-123 --with relations       (issue + cross-issue links)\n  el-linear read DEV-123 --no-downloads         (JSON envelope, attachment links as stored)',
 		)
 		.action(handleAsyncCommand(readIssues));
 
@@ -184,6 +207,25 @@ export async function readIssues(
 		);
 	}
 
+	// DEV-9667: raw-text routes print the description as stored unless the
+	// caller explicitly asks for the rewrite; envelope routes keep the
+	// image-viewing rewrite unless --no-downloads. `downloads` is registered
+	// as a --downloads / --no-downloads pair with no default, so the merged
+	// value is `undefined` when neither flag was passed (a lone --no-downloads
+	// would default the parent AND child to `true`, and the child's default
+	// would then mask the parent's CLI-set `false` in the merge above).
+	const rawTextRoute = bodyOnly || fieldName !== null || sectionNames !== null;
+	const downloads = shouldDownloadUploads(
+		typeof readOptions.downloads === "boolean"
+			? readOptions.downloads
+			: undefined,
+		rawTextRoute,
+	);
+	const resolveUploads = (issue: LinearIssue): Promise<LinearIssue> =>
+		downloads
+			? downloadLinearUploads(issue, fileService)
+			: Promise.resolve(issue);
+
 	// --field is also an extract-this-section operation; pairing it with
 	// --with would produce ambiguous output (section text vs. JSON envelope).
 	// Reject up front rather than silently dropping one.
@@ -195,7 +237,7 @@ export async function readIssues(
 
 	if (issueIds.length === 1) {
 		const issue = await issuesService.getIssueById(issueIds[0]);
-		const resolved = await downloadLinearUploads(issue, fileService);
+		const resolved = await resolveUploads(issue);
 		if (bodyOnly) {
 			const description = resolved.description ?? "";
 			if (description.trim() === "") {
@@ -261,16 +303,16 @@ export async function readIssues(
 	} else {
 		// DEV-4477: one batched GraphQL call instead of N parallel single-issue
 		// queries. The service preserves input order and throws notFoundError
-		// on any missing ref. Attachment download still fans out per-issue —
-		// that's HTTP, not GraphQL, and downloadLinearUploads is a no-op when
-		// there's nothing to download.
+		// on any missing ref. Attachment download (when enabled) still fans
+		// out per-issue — that's HTTP, not GraphQL, and downloadLinearUploads
+		// is a no-op when there's nothing to download.
 		const issues = await issuesService.getIssuesByRefs(issueIds);
 		const results = await Promise.all(
 			// Apply --with relations over the batch-fetched issues (DEV-4476),
 			// preserving DEV-4477's single batched GraphQL fetch above — don't
 			// re-fetch per id, which would defeat the batch optimization.
 			issues.map(async (issue) => {
-				const resolved = await downloadLinearUploads(issue, fileService);
+				const resolved = await resolveUploads(issue);
 				if (!includes.relations) {
 					return resolved;
 				}

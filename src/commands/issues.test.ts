@@ -125,6 +125,18 @@ vi.mock("../utils/file-service.js", () => ({
 	},
 }));
 
+// DEV-9667: the read routes gate attachment downloads per route. Mock the
+// downloader (it would otherwise mkdir under tmpdir and call
+// fileService.downloadFile) but keep the real shouldDownloadUploads policy.
+const mockDownloadLinearUploads = vi.fn(
+	(issue: unknown, _fileService: unknown) => issue,
+);
+vi.mock("../utils/download-uploads.js", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../utils/download-uploads.js")>()),
+	downloadLinearUploads: (issue: unknown, fileService: unknown) =>
+		mockDownloadLinearUploads(issue, fileService),
+}));
+
 const mockCreateAttachment = vi.fn();
 vi.mock("../utils/graphql-attachments-service.js", () => ({
 	createGraphQLAttachmentsService: vi.fn().mockResolvedValue({
@@ -543,6 +555,58 @@ describe("issues commands", () => {
 			);
 			expect(mockGetIssueById).not.toHaveBeenCalled();
 		});
+
+		describe("attachment downloads on the nested route (DEV-9667)", () => {
+			const storedUrl = "https://uploads.linear.app/ws/aaaa/bbbb/shot.png";
+			const issueWithUpload = {
+				id: "uuid-1",
+				identifier: "DEV-123",
+				title: "My issue",
+				description: `![shot](${storedUrl})`,
+			};
+
+			it.each(["issues", "issue"])(
+				"%s read --body never downloads and prints the stored link",
+				async (commandName) => {
+					mockGetIssueById.mockResolvedValue(issueWithUpload);
+
+					const program = createTestProgram();
+					setupIssuesCommands(program);
+					await runCommand(program, [commandName, "read", "DEV-123", "--body"]);
+
+					expect(mockDownloadLinearUploads).not.toHaveBeenCalled();
+					expect(stdoutSpy).toHaveBeenCalledWith(
+						`${issueWithUpload.description}\n`,
+					);
+				},
+			);
+
+			it("issues read downloads by default on the JSON envelope", async () => {
+				mockGetIssueById.mockResolvedValue(issueWithUpload);
+
+				const program = createTestProgram();
+				setupIssuesCommands(program);
+				await runCommand(program, ["issues", "read", "DEV-123"]);
+
+				expect(mockDownloadLinearUploads).toHaveBeenCalledTimes(1);
+			});
+
+			it("issues read --no-downloads reaches readIssues through the parent-owned option merge", async () => {
+				mockGetIssueById.mockResolvedValue(issueWithUpload);
+
+				const program = createTestProgram();
+				setupIssuesCommands(program);
+				await runCommand(program, [
+					"issues",
+					"read",
+					"DEV-123",
+					"--no-downloads",
+				]);
+
+				expect(mockDownloadLinearUploads).not.toHaveBeenCalled();
+				expect(mockOutputSuccess).toHaveBeenCalledWith(issueWithUpload);
+			});
+		});
 	});
 
 	describe("issues <id> shorthand (DEV-5174)", () => {
@@ -594,6 +658,24 @@ describe("issues commands", () => {
 			await runCommand(program, ["issues", "DEV-123", "--field", "Done when"]);
 
 			expect(stdoutWriteSpy).toHaveBeenCalledWith("Ship it.\n");
+		});
+
+		it("carries --no-downloads on the shorthand path (DEV-9667)", async () => {
+			const issueData = {
+				id: "uuid-1",
+				identifier: "DEV-123",
+				title: "My issue",
+				description:
+					"![shot](https://uploads.linear.app/ws/aaaa/bbbb/shot.png)",
+			};
+			mockGetIssueById.mockResolvedValue(issueData);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, ["issues", "DEV-123", "--no-downloads"]);
+
+			expect(mockDownloadLinearUploads).not.toHaveBeenCalled();
+			expect(mockOutputSuccess).toHaveBeenCalledWith(issueData);
 		});
 
 		it("falls through to help with no issue ID (does not call getIssueById)", async () => {

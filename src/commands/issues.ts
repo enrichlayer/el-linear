@@ -119,7 +119,11 @@ import {
 	type RelatedIssueEntry,
 } from "./issues/relations.js";
 import { setupTreeCommand } from "./issues/tree.js";
-import { readIssues } from "./read-shortcut.js";
+import {
+	READ_DOWNLOADS_HELP,
+	READ_NO_DOWNLOADS_HELP,
+	readIssues,
+} from "./read-shortcut.js";
 
 const IMAGE_EXTENSIONS = new Set([
 	".png",
@@ -1872,10 +1876,12 @@ export function setupIssuesCommands(program: Command): void {
 				'block of data and adds it to the JSON envelope. Currently supported: "relations" ' +
 				"(adds an array of cross-issue relations under a top-level `relations` key).",
 		)
+		.option("--downloads", READ_DOWNLOADS_HELP)
+		.option("--no-downloads", READ_NO_DOWNLOADS_HELP)
 		.addHelpText(
 			"after",
 			"\nNo-subcommand shorthand: `el-linear issue DEV-123` behaves like `issues read DEV-123`, " +
-				"including its options (--body, --field, --sections, --with).",
+				"including its options (--body, --field, --sections, --with, --downloads / --no-downloads).",
 		);
 	issues.action(
 		handleAsyncCommand(
@@ -2164,9 +2170,11 @@ export function setupIssuesCommands(program: Command): void {
 				'block of data and adds it to the JSON envelope. Currently supported: "relations" ' +
 				"(adds an array of cross-issue relations under a top-level `relations` key).",
 		)
+		.option("--downloads", READ_DOWNLOADS_HELP)
+		.option("--no-downloads", READ_NO_DOWNLOADS_HELP)
 		.addHelpText(
 			"after",
-			'\nBoth UUID and identifiers like ABC-123 are supported.\nMultiple IDs: el-linear issue get DEV-123 DEV-456 DEV-789\nFull description: el-linear issue read DEV-123 --body\nExtract a section: el-linear issue read DEV-123 --field "Done when"\nMulti-section: el-linear issue read DEV-123 --sections "Done when,Out of scope"\nWith relations: el-linear issue read DEV-123 --with relations',
+			'\nBoth UUID and identifiers like ABC-123 are supported.\nMultiple IDs: el-linear issue get DEV-123 DEV-456 DEV-789\nFull description: el-linear issue read DEV-123 --body\nExtract a section: el-linear issue read DEV-123 --field "Done when"\nMulti-section: el-linear issue read DEV-123 --sections "Done when,Out of scope"\nWith relations: el-linear issue read DEV-123 --with relations\nEnvelope, attachment links as stored: el-linear issue read DEV-123 --no-downloads',
 		)
 		.action(handleAsyncCommand(readIssues));
 

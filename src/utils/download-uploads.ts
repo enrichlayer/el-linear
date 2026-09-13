@@ -21,9 +21,41 @@ function replaceUrls(text: string, urlMap: Map<string, string>): string {
 }
 
 /**
+ * Decide whether an issue read should download attachments and rewrite
+ * `uploads.linear.app` URLs to local paths (DEV-9667).
+ *
+ * The rewrite is an affordance for viewing images from the JSON / summary
+ * envelope, so those routes keep it on by default. The raw-text routes
+ * (`--body`, `--field`, `--sections`) exist to hand the description back to
+ * scripts that diff it, hash it, or write it back with
+ * `issues update --description-file` — for them the rewrite is a defect
+ * (it persisted host-local temp paths into Linear in place of attachment
+ * links), so they default to byte-exact. An explicit `--downloads` /
+ * `--no-downloads` wins over the route default either way.
+ *
+ * @param explicit `true` for `--downloads`, `false` for `--no-downloads`,
+ *   `undefined` when neither was passed.
+ * @param rawTextRoute whether the read prints description text directly
+ *   (`--body` / `--field` / `--sections`) rather than an envelope.
+ */
+export function shouldDownloadUploads(
+	explicit: boolean | undefined,
+	rawTextRoute: boolean,
+): boolean {
+	if (explicit !== undefined) {
+		return explicit;
+	}
+	return !rawTextRoute;
+}
+
+/**
  * Downloads all uploads.linear.app URLs found in an issue's description
  * and comments, replacing them with local file paths so Claude Code
  * can read the images directly.
+ *
+ * Callers on a raw-text route must gate this behind
+ * {@link shouldDownloadUploads}: the returned copy is not the description
+ * Linear stores, and must never be written back.
  */
 export async function downloadLinearUploads(
 	issue: LinearIssue,

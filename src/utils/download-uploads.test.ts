@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LinearIssue } from "../types/linear.js";
+import { shouldDownloadUploads } from "./download-uploads.js";
 
 // Test the URL collection and replacement logic without network calls
 describe("downloadLinearUploads", () => {
@@ -62,5 +63,28 @@ describe("downloadLinearUploads", () => {
 			}
 		}
 		expect(allUrls.size).toBe(0);
+	});
+});
+
+describe("shouldDownloadUploads (DEV-9667)", () => {
+	it("keeps the rewrite on by default for envelope routes (JSON / summary)", () => {
+		expect(shouldDownloadUploads(undefined, false)).toBe(true);
+	});
+
+	it("defaults raw-text routes (--body / --field / --sections) to byte-exact", () => {
+		expect(shouldDownloadUploads(undefined, true)).toBe(false);
+	});
+
+	it("honors an explicit --no-downloads on an envelope route", () => {
+		expect(shouldDownloadUploads(false, false)).toBe(false);
+	});
+
+	it("honors an explicit --downloads on a raw-text route", () => {
+		expect(shouldDownloadUploads(true, true)).toBe(true);
+	});
+
+	it("treats an explicit flag as authoritative regardless of route", () => {
+		expect(shouldDownloadUploads(true, false)).toBe(true);
+		expect(shouldDownloadUploads(false, true)).toBe(false);
 	});
 });

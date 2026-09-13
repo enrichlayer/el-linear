@@ -31,7 +31,10 @@ vi.mock("../utils/auth.js", () => ({
 	getApiToken: vi.fn().mockReturnValue("test-token"),
 }));
 
-vi.mock("../utils/download-uploads.js", () => ({
+vi.mock("../utils/download-uploads.js", async (importOriginal) => ({
+	// Keep the real shouldDownloadUploads policy (DEV-9667) — the tests below
+	// pin the per-route defaults it produces, not a re-implementation.
+	...(await importOriginal<typeof import("../utils/download-uploads.js")>()),
 	downloadLinearUploads: (issue: unknown, fileService: unknown) =>
 		mockDownloadLinearUploads(issue, fileService),
 }));
@@ -526,5 +529,168 @@ describe("read-shortcut --body (full description, raw text — DEV-4650)", () =>
 		await expect(
 			runCommand(program, ["read", "DEV-999", "DEV-998", "--body"]),
 		).rejects.toThrow(/single-issue only/);
+	});
+});
+
+describe("read-shortcut attachment downloads (DEV-9667)", () => {
+	const STORED_URL = "https://uploads.linear.app/ws/aaaa/bbbb/recording.mp4";
+	const LOCAL_PATH = "/tmp/el-linear-downloads/bbbb-recording.mp4";
+	const issueWithUpload = {
+		id: "uuid-u",
+		identifier: "FE-1388",
+		title: "Has an attachment",
+		description: `## Done when\n- Watch [the recording](${STORED_URL}) and confirm.`,
+	};
+
+	let stdoutSpy: ReturnType<typeof vi.spyOn>;
+	let stderrSpy: ReturnType<typeof vi.spyOn>;
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		// Simulate the real rewrite so a call that should NOT happen is
+		// visible in the printed bytes, not just in the call count.
+		mockDownloadLinearUploads.mockImplementation((issue: unknown) => {
+			const typed = issue as { description?: string };
+			return {
+				...(issue as Record<string, unknown>),
+				description: typed.description?.replaceAll(STORED_URL, LOCAL_PATH),
+			};
+		});
+		stdoutSpy = vi
+			.spyOn(process.stdout, "write")
+			.mockImplementation(() => true);
+		stderrSpy = vi
+			.spyOn(process.stderr, "write")
+			.mockImplementation(() => true);
+	});
+
+	afterEach(() => {
+		stdoutSpy.mockRestore();
+		stderrSpy.mockRestore();
+		mockDownloadLinearUploads.mockImplementation(
+			(issue: unknown, _fileService: unknown) => issue,
+		);
+	});
+
+	it("--body prints the description byte-for-byte as stored — no download, no rewrite", async () => {
+		mockGetIssueById.mockResolvedValue(issueWithUpload);
+
+		const program = createTestProgram();
+		setupReadShortcut(program);
+		await runCommand(program, ["read", "FE-1388", "--body"]);
+
+		expect(mockDownloadLinearUploads).not.toHaveBeenCalled();
+		expect(stdoutSpy).toHaveBeenCalledWith(`${issueWithUpload.description}\n`);
+		const printed = String(stdoutSpy.mock.calls[0][0]);
+		expect(printed).toContain(STORED_URL);
+		expect(printed).not.toContain("el-linear-downloads");
+	});
+
+	it("--field extracts from the stored description — no download", async () => {
+		mockGetIssueById.mockResolvedValue(issueWithUpload);
+
+		const program = createTestProgram();
+		setupReadShortcut(program);
+		await runCommand(program, ["read", "FE-1388", "--field", "Done when"]);
+
+		expect(mockDownloadLinearUploads).not.toHaveBeenCalled();
+		expect(String(stdoutSpy.mock.calls[0][0])).toContain(STORED_URL);
+	});
+
+	it("--sections extracts from the stored description — no download", async () => {
+		mockGetIssueById.mockResolvedValue(issueWithUpload);
+
+		const program = createTestProgram();
+		setupReadShortcut(program);
+		await runCommand(program, ["read", "FE-1388", "--sections", "Done when"]);
+
+		expect(mockDownloadLinearUploads).not.toHaveBeenCalled();
+		const payload = mockOutputSuccess.mock.calls[0][0] as {
+			sections: Record<string, string | null>;
+		};
+		expect(payload.sections["Done when"]).toContain(STORED_URL);
+	});
+
+	it("the JSON envelope still downloads and rewrites by default (backward compatible)", async () => {
+		mockGetIssueById.mockResolvedValue(issueWithUpload);
+
+		const program = createTestProgram();
+		setupReadShortcut(program);
+		await runCommand(program, ["read", "FE-1388"]);
+
+		expect(mockDownloadLinearUploads).toHaveBeenCalledTimes(1);
+		expect(mockOutputSuccess).toHaveBeenCalledWith(
+			expect.objectContaining({
+				description: expect.stringContaining(LOCAL_PATH),
+			}),
+		);
+	});
+
+	it("--no-downloads gives the JSON envelope the stored links, with no download", async () => {
+		mockGetIssueById.mockResolvedValue(issueWithUpload);
+
+		const program = createTestProgram();
+		setupReadShortcut(program);
+		await runCommand(program, ["read", "FE-1388", "--no-downloads"]);
+
+		expect(mockDownloadLinearUploads).not.toHaveBeenCalled();
+		expect(mockOutputSuccess).toHaveBeenCalledWith(issueWithUpload);
+	});
+
+	it("--no-downloads applies to every issue in the batch path", async () => {
+		const other = { ...issueWithUpload, id: "uuid-v", identifier: "FE-1389" };
+		mockGetIssuesByRefs.mockResolvedValue([issueWithUpload, other]);
+
+		const program = createTestProgram();
+		setupReadShortcut(program);
+		await runCommand(program, ["read", "FE-1388", "FE-1389", "--no-downloads"]);
+
+		expect(mockDownloadLinearUploads).not.toHaveBeenCalled();
+		expect(mockOutputSuccess).toHaveBeenCalledWith([issueWithUpload, other]);
+	});
+
+	it("--downloads opts --body back into the rewrite explicitly", async () => {
+		mockGetIssueById.mockResolvedValue(issueWithUpload);
+
+		const program = createTestProgram();
+		setupReadShortcut(program);
+		await runCommand(program, ["read", "FE-1388", "--body", "--downloads"]);
+
+		expect(mockDownloadLinearUploads).toHaveBeenCalledTimes(1);
+		const printed = String(stdoutSpy.mock.calls[0][0]);
+		expect(printed).toContain(LOCAL_PATH);
+		expect(printed).not.toContain(STORED_URL);
+	});
+
+	it("--no-downloads composes with --with relations on the envelope", async () => {
+		mockGetIssueById.mockResolvedValue(issueWithUpload);
+		mockRawRequest.mockResolvedValue({
+			issue: {
+				id: "uuid-u",
+				identifier: "FE-1388",
+				title: "Has an attachment",
+				description: null,
+				relations: { nodes: [] },
+				inverseRelations: { nodes: [] },
+			},
+		});
+
+		const program = createTestProgram();
+		setupReadShortcut(program);
+		await runCommand(program, [
+			"read",
+			"FE-1388",
+			"--with",
+			"relations",
+			"--no-downloads",
+		]);
+
+		expect(mockDownloadLinearUploads).not.toHaveBeenCalled();
+		expect(mockOutputSuccess).toHaveBeenCalledWith(
+			expect.objectContaining({
+				description: issueWithUpload.description,
+				relations: [],
+			}),
+		);
 	});
 });
