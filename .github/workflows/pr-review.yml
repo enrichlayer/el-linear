@@ -130,10 +130,13 @@ jobs:
 
       # The action hides Claude's output unless `show_full_output` is set, which
       # is how a three-week run of `is_error:true` failures stayed undiagnosed
-      # (DEV-9670). On failure only, print the SDK `result` message — subtype,
-      # is_error, turn count, duration, and the error text — so the cause is in
-      # the job log without echoing a full review transcript. Secrets never
-      # appear in that payload, and GitHub masks the API key regardless.
+      # (DEV-9670). On failure only, print the SDK envelope records that carry
+      # the cause — every `api_retry` system record (error family + HTTP status
+      # of the retried request) and the final `result` message (subtype,
+      # is_error, turn count, duration, error text) — without echoing a review
+      # transcript. Secrets never appear in those records, and GitHub masks the
+      # API key regardless. The action's `execution_file` output is preferred;
+      # the fixed runner-temp path is the fallback when a failure omits outputs.
       - name: Surface advisory review failure
         if: steps.ai_review.outcome != 'success'
         env:
@@ -141,12 +144,15 @@ jobs:
           EXECUTION_FILE: ${{ steps.ai_review.outputs.execution_file }}
         run: |
           echo "::warning title=pr-review is advisory::The AI review step did not complete (outcome: $AI_REVIEW_OUTCOME). This job is non-blocking by design (DEV-9670); a green check here does not mean a review was posted."
-          if [ -n "$EXECUTION_FILE" ] && [ -f "$EXECUTION_FILE" ]; then
-            echo "SDK result message(s) from $EXECUTION_FILE:"
+          file="${EXECUTION_FILE:-$RUNNER_TEMP/claude-execution-output.json}"
+          if [ -f "$file" ]; then
+            echo "SDK retry and result records from $file:"
             jq -c 'if type == "array" then .[] else . end
-                   | select(.type == "result")
-                   | {subtype, is_error, num_turns, duration_ms, result, errors}' \
-              "$EXECUTION_FILE" || echo "(execution file is not parseable JSON)"
+                   | select(.type == "result" or (.type == "system" and .subtype == "api_retry"))
+                   | if .type == "result"
+                     then {type, subtype, is_error, num_turns, duration_ms, result, errors}
+                     else {type, subtype, attempt, error, error_status, retry_delay_ms}
+                     end' "$file" || echo "(execution file is not parseable JSON)"
           else
             echo "(no execution file was produced — the action failed before running Claude)"
           fi
