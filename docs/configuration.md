@@ -226,7 +226,13 @@ intended flow for the CLI.
     "intakeDecisionGate": false,
     // Section headers accepted for the intake decision. Default
     // ["Intake decision"].
-    "intakeSectionHeaders": ["Intake decision"]
+    "intakeSectionHeaders": ["Intake decision"],
+    // OPT-IN consent-label receipt gate (default: off). When true, applying a
+    // consent label is refused unless the description carries one valid
+    // el-intake-decision:v1 receipt for that issue. See below.
+    "consentReceiptGate": false,
+    // Labels treated as consent for `consentReceiptGate`. Default ["bot"].
+    "consentLabels": ["bot"]
   }
 }
 ```
@@ -330,6 +336,74 @@ Any script satisfying the contract works. A trivial one:
 curl -fsS -H "Authorization: Bearer $(get-my-secret)" \
      "https://registry.internal/people/$1" | jq -r .linearId
 ```
+
+### Label advisor hook (`labelAdvisor`)
+
+**Optional.** A command `issues create` consults to suggest extra labels, for
+example an organization rubric that marks small, well-specified issues for an
+automation lane.
+
+```jsonc
+{
+  "labelAdvisor": {
+    "command": ["my-rubric", "--advise"],
+    // Milliseconds before the advisor counts as failed (default 5000).
+    "timeoutMs": 5000
+  }
+}
+```
+
+**Contract.** el-linear runs the argv (no shell) with the proposed issue as one
+JSON object on stdin:
+
+```json
+{"team": "DEV", "project": "Tools", "title": "...", "description": "...", "labels": ["bug"], "state": "Todo"}
+```
+
+and reads JSON from stdout: either a bare array (`["bot"]`) or
+`{"labels": ["bot"], "reason": "rubric: small and specified"}` (one level of
+`{"data": ...}` envelope is unwrapped). `{"labels": []}` means nothing to add.
+Added labels are reported as a warning (`labels added by advisor: bot (rubric:
+...)`) and under `labelAdvisor` in the JSON output.
+
+**Fail-closed on labels.** A non-zero exit, timeout, missing binary, or
+malformed output warns and creates the issue with only the labels you passed —
+a broken advisor never adds a label. `--no-label-advisor` skips the advisor for
+one create. `LINEAR_API_TOKEN` is removed from the advisor's environment.
+
+**Personal config only — the team layer cannot set this**, for the same reason
+as `identity.resolver`: it names a binary el-linear spawns. Override or disable
+per invocation with `EL_LINEAR_LABEL_ADVISOR` (whitespace-separated command;
+empty string = off).
+
+### Consent-label receipt gate (`validation.consentReceiptGate`)
+
+An **opt-in** gate for workspaces where a label is consent for unattended work
+and an automation additionally requires a machine-readable receipt in the
+description:
+
+```
+<!-- el-intake-decision:v1 {"policyVersion":"intake-policy/v1","decision":"automatic-implementation","capabilities":["manual-review","automatic-implementation"],"reason":"...","provenance":{"source":"issue-triage","actor":"<name>","issue":"DEV-123","repo":"<namespace/repo>"}} -->
+```
+
+With `"consentReceiptGate": true`, applying a consent label (`consentLabels`,
+default `["bot"]`) is checked:
+
+- `issues create --labels bot` is refused. The receipt must name the issue,
+  which does not exist yet; create without the label, then apply it with
+  `issues update <ID> --labels bot` and the receipt in the same update.
+- A consent label proposed by the label advisor on create is dropped with a
+  warning; the rest of the advice applies.
+- `issues update` that newly applies a consent label is refused unless the
+  resulting description (the new `--description` / `--description-file` /
+  `--append-description`, else the current one) carries exactly one valid
+  automatic-implementation receipt naming that issue. The refusal names what
+  is missing.
+
+el-linear checks the receipt's structure and issue; it does not write the
+receipt, because the target repository and its admissibility are the
+automation's policy. The gate is independent of `validation.enabled` and
+`--skip-validation`, and has no override flag.
 
 ### SOP-label parent gate (`validation.sopLabelParentGate`)
 
