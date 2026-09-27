@@ -1376,6 +1376,18 @@ async function enforceUpdateConsentLabels(
 	}
 }
 
+/**
+ * The configured team key for a resolved team UUID, so the label advisor sees
+ * the canonical key (`DEV`) rather than whatever alias the author typed.
+ */
+function teamKeyForId(teamId: string | undefined): string | undefined {
+	if (!teamId) return undefined;
+	for (const [key, id] of Object.entries(loadConfig().teams ?? {})) {
+		if (id === teamId) return key;
+	}
+	return undefined;
+}
+
 /** Reverse-map a configured label UUID to its name, so a UUID cannot bypass the gate. */
 function labelNameForId(value: string): string | undefined {
 	const labels = loadConfig().labels;
@@ -1429,7 +1441,7 @@ async function handleCreateIssue(
 	// DEV-10372: optional label advisor. Runs after validation/normalization so
 	// it sees the canonical labels, and before every gate that reads labels.
 	const labelAdvice = adviseLabels(title, options, {
-		teamInput,
+		teamInput: teamKeyForId(teamId) ?? teamInput,
 		description: rawDescription,
 		status,
 	});

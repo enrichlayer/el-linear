@@ -2828,6 +2828,29 @@ describe("issues commands", () => {
 			});
 		});
 
+		it("sends the advisor the canonical team key, not the alias typed", async () => {
+			const seen = join(dir, "stdin.json");
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				teams: { DEV: "team-id-backend" },
+				labelAdvisor: {
+					command: advisor(`
+						import { readFileSync, writeFileSync } from "node:fs";
+						writeFileSync(${JSON.stringify(seen)}, readFileSync(0, "utf8"));
+						process.stdout.write("[]");
+					`),
+				},
+			});
+			await run([
+				...createArgs.slice(0, 3),
+				"--team",
+				"backend",
+				...createArgs.slice(5),
+			]);
+
+			expect(JSON.parse(readFileSync(seen, "utf8")).team).toBe("DEV");
+		});
+
 		it("creates without extra labels and warns when the advisor fails", async () => {
 			mockLoadConfig.mockReturnValue({
 				...baseConfig,
