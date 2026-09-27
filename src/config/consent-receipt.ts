@@ -247,3 +247,43 @@ export function formatUpdateConsentRefusal(
 	const names = labels.map((label) => `"${label}"`).join(", ");
 	return `Label ${names} is consent for unattended work and requires an el-intake-decision:v1 receipt for ${identifier}, but ${problem}. Include the receipt in the same update (--description / --description-file / --append-description), e.g.:\n\n${receiptTemplate(identifier)}`;
 }
+
+export interface ConsentReceiptFields {
+	/** Repository the organization's intake policy maps the issue to. */
+	repo: string;
+	/** Why that policy consents to unattended work. */
+	reason: string;
+	/** The acting Linear user, as named by the API. */
+	actor: string;
+	/** The issue identifier the receipt is for. */
+	issue: string;
+}
+
+/**
+ * The canonical `issue-triage` receipt marker for `fields` (DEV-10455). The
+ * caller supplies every policy field; this only serializes them in the
+ * `intake-policy/v1` shape that `evaluateConsentReceipt` accepts.
+ */
+export function formatConsentReceipt(fields: ConsentReceiptFields): string {
+	return `<!-- el-intake-decision:v1 ${JSON.stringify({
+		policyVersion: INTAKE_POLICY_VERSION,
+		decision: "automatic-implementation",
+		capabilities: ["manual-review", "automatic-implementation"],
+		reason: fields.reason,
+		provenance: {
+			source: "issue-triage",
+			actor: fields.actor,
+			issue: fields.issue,
+			repo: fields.repo,
+		},
+	})} -->`;
+}
+
+/** `description` with `receipt` appended as its final paragraph. */
+export function appendConsentReceipt(
+	description: string,
+	receipt: string,
+): string {
+	const body = description.trimEnd();
+	return body ? `${body}\n\n${receipt}` : receipt;
+}

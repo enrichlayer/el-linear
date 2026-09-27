@@ -366,6 +366,24 @@ and reads JSON from stdout: either a bare array (`["bot"]`) or
 Added labels are reported as a warning (`labels added by advisor: bot (rubric:
 ...)`) and under `labelAdvisor` in the JSON output.
 
+**Consent labels with a receipt.** When the advice includes a consent label
+(`validation.consentLabels`, default `["bot"]`), the advisor may also return the
+receipt's policy fields:
+
+```json
+{"labels": ["bot"], "reason": "rubric: BOT", "receipt": {"repo": "acme/tools", "reason": "why unattended work is consented"}}
+```
+
+el-linear then creates the issue without the consent label and, right after,
+applies it in one update together with an `el-intake-decision:v1` receipt (see
+below) naming the new issue, the acting Linear user as `actor`, and the
+advisor's `repo` and `reason`. It never guesses `repo`. The update is skipped
+with a warning — the issue stays without the consent label — when the Linear
+viewer is an app rather than a person, the description already carries a
+receipt marker, or the write fails. The JSON output reports the result under
+`labelAdvisor.consent` (`{labels, applied, repo, problem?}`). A malformed
+`receipt` object fails the whole answer, like any other malformed output.
+
 **Fail-closed on labels.** A non-zero exit, timeout, missing binary, or
 malformed output warns and creates the issue with only the labels you passed —
 a broken advisor never adds a label. `--no-label-advisor` skips the advisor for
@@ -392,17 +410,19 @@ default `["bot"]`) is checked:
 - `issues create --labels bot` is refused. The receipt must name the issue,
   which does not exist yet; create without the label, then apply it with
   `issues update <ID> --labels bot` and the receipt in the same update.
-- A consent label proposed by the label advisor on create is dropped with a
-  warning; the rest of the advice applies.
+- A consent label proposed by the label advisor on create is applied after
+  create with a receipt when the advisor supplied the receipt fields (see the
+  label advisor above); without them it is dropped with a warning and the rest
+  of the advice applies.
 - `issues update` that newly applies a consent label is refused unless the
   resulting description (the new `--description` / `--description-file` /
   `--append-description`, else the current one) carries exactly one valid
   automatic-implementation receipt naming that issue. The refusal names what
   is missing.
 
-el-linear checks the receipt's structure and issue; it does not write the
-receipt, because the target repository and its admissibility are the
-automation's policy. The gate is independent of `validation.enabled` and
+el-linear checks the receipt's structure and issue. It writes a receipt only
+from policy fields a configured label advisor returns, because the target
+repository and its admissibility are the automation's policy. The gate is independent of `validation.enabled` and
 `--skip-validation`, and has no override flag.
 
 ### SOP-label parent gate (`validation.sopLabelParentGate`)

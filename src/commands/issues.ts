@@ -2,8 +2,10 @@ import { execFileSync } from "node:child_process";
 import type { Command, OptionValues } from "commander";
 import { loadConfig } from "../config/config.js";
 import {
+	appendConsentReceipt,
 	consentLabelsIn,
 	evaluateConsentReceipt,
+	formatConsentReceipt,
 	formatCreateConsentRefusal,
 	formatUpdateConsentRefusal,
 	getConsentReceiptGateConfig,
@@ -26,7 +28,10 @@ import {
 	enforceValidation,
 	validateIssueCreation,
 } from "../config/issue-validation.js";
-import { runLabelAdvisor } from "../config/label-advisor.js";
+import {
+	type LabelAdvisorReceipt,
+	runLabelAdvisor,
+} from "../config/label-advisor.js";
 import { maybeEmitPinMismatchHint } from "../config/pin-hint.js";
 import {
 	resolveAssignee,
@@ -1116,6 +1121,23 @@ function enforceCreateConsentLabels(options: OptionValues): void {
 interface LabelAdvice {
 	added: string[];
 	reason: string | null;
+	/**
+	 * DEV-10455: consent labels the advisor proposed together with receipt
+	 * policy fields. They are applied after create, with the receipt, by
+	 * `applyAdvisorConsent`; `added` never contains them.
+	 */
+	consent?: { labels: string[]; receipt: LabelAdvisorReceipt };
+}
+
+interface LabelAdvisorOutput {
+	added: string[];
+	reason: string | null;
+	consent?: {
+		labels: string[];
+		applied: boolean;
+		repo: string;
+		problem?: string;
+	};
 }
 
 /**
@@ -1163,23 +1185,130 @@ function adviseLabels(
 		(label) => !present.has(label.toLowerCase()),
 	);
 	const gate = getConsentReceiptGateConfig();
-	if (gate.enabled) {
-		const consent = consentLabelsIn(added, gate.labels);
-		if (consent.length > 0) {
-			const blocked = new Set(consent.map((label) => label.toLowerCase()));
-			added = added.filter((label) => !blocked.has(label.toLowerCase()));
+	const consent = consentLabelsIn(added, gate.labels);
+	let deferred: LabelAdvice["consent"];
+	if (consent.length > 0 && (gate.enabled || result.receipt)) {
+		const held = new Set(consent.map((label) => label.toLowerCase()));
+		added = added.filter((label) => !held.has(label.toLowerCase()));
+		if (result.receipt) {
+			// DEV-10455: the advisor supplied the receipt policy fields, so the
+			// consent label is applied right after create, in one update with a
+			// receipt naming the new issue (see applyAdvisorConsent).
+			deferred = { labels: consent, receipt: result.receipt };
+		} else {
 			outputWarning(
 				`label advisor proposed ${consent.join(", ")}, not applied: a consent label needs an el-intake-decision:v1 receipt naming the issue. Apply it after creation with \`el-linear issues update <ID> --labels ${consent.join(",")}\` and the receipt in the description.`,
 			);
 		}
 	}
-	if (added.length === 0) {
+	if (added.length === 0 && !deferred) {
 		return null;
 	}
-	outputWarning(
-		`labels added by advisor: ${added.join(", ")}${result.reason ? ` (${result.reason})` : ""}`,
-	);
-	return { added, reason: result.reason };
+	if (added.length > 0) {
+		outputWarning(
+			`labels added by advisor: ${added.join(", ")}${result.reason ? ` (${result.reason})` : ""}`,
+		);
+	}
+	return {
+		added,
+		reason: result.reason,
+		...(deferred ? { consent: deferred } : {}),
+	};
+}
+
+/**
+ * DEV-10455: apply advisor-proposed consent labels after create, in ONE
+ * update that also appends an `el-intake-decision:v1` receipt naming the new
+ * issue. The advisor supplied the policy fields (`repo`, `reason`); el-linear
+ * adds only the identifier and the acting Linear user, read from the API.
+ *
+ * Fail-closed: any problem (an app viewer, a description that already holds a
+ * receipt marker, a failed update, a stored receipt that does not read back
+ * as valid) warns and leaves the issue without the consent label — or, when
+ * the write landed but the read-back fails, says so loudly. Never throws: the
+ * issue already exists.
+ */
+async function applyAdvisorConsent(
+	created: { id: string; identifier: string },
+	consent: NonNullable<LabelAdvice["consent"]>,
+	services: {
+		graphQLService: GraphQLService;
+		issuesService: GraphQLIssuesService;
+	},
+): Promise<{ applied: boolean; problem?: string; issue?: LinearIssue }> {
+	const labels = consent.labels.join(", ");
+	const skip = (problem: string) => {
+		outputWarning(
+			`label advisor proposed ${labels}, not applied: ${problem}. Apply it with \`el-linear issues update ${created.identifier} --labels ${consent.labels.join(",")}\` and a receipt in the description.`,
+		);
+		return { applied: false, problem };
+	};
+	try {
+		const current = await services.graphQLService.rawRequest<{
+			viewer: {
+				name: string | null;
+				email: string | null;
+				app: boolean | null;
+			} | null;
+			issue: { identifier: string; description: string | null } | null;
+		}>(
+			"query($id: String!) { viewer { name email app } issue(id: $id) { identifier description } }",
+			{ id: created.id },
+		);
+		if (!current.issue) {
+			return skip(`issue ${created.identifier} could not be read back`);
+		}
+		const viewer = current.viewer;
+		if (!viewer || viewer.app === true) {
+			return skip(
+				"consent must be attributable to a person, and the authenticated Linear viewer is not one",
+			);
+		}
+		const actor = (viewer.name?.trim() || viewer.email?.trim() || "").slice(
+			0,
+			160,
+		);
+		if (!actor) {
+			return skip("the authenticated Linear viewer has no name or email");
+		}
+		const existing = current.issue.description ?? "";
+		const description = appendConsentReceipt(
+			existing,
+			formatConsentReceipt({
+				repo: consent.receipt.repo,
+				reason: consent.receipt.reason,
+				actor,
+				issue: current.issue.identifier,
+			}),
+		);
+		const planned = evaluateConsentReceipt(
+			description,
+			current.issue.identifier,
+		);
+		if (!planned.ok) {
+			return skip(planned.problem);
+		}
+		const updated = await services.issuesService.updateIssue(
+			{ id: created.id, description, labelIds: consent.labels },
+			"adding",
+		);
+		const stored = evaluateConsentReceipt(
+			updated.description ?? "",
+			current.issue.identifier,
+		);
+		if (!stored.ok) {
+			outputWarning(
+				`label advisor applied ${labels} to ${created.identifier}, but the stored receipt does not read back as valid (${stored.problem}); fix the receipt or remove the label.`,
+			);
+			return { applied: true, problem: stored.problem, issue: updated };
+		}
+		outputWarning(
+			`labels added by advisor: ${labels} with an el-intake-decision:v1 receipt for ${current.issue.identifier} (repo ${consent.receipt.repo}, actor ${actor})`,
+		);
+		return { applied: true, issue: updated };
+	} catch (error) {
+		return skip(error instanceof Error ? error.message : String(error));
+	}
 }
 
 /**
@@ -1416,6 +1545,32 @@ async function handleCreateIssue(
 		{ team: options.team ?? loadConfig().defaultTeam, title },
 		{ graphQLService, linearService },
 	);
+	// DEV-10455: advisor-proposed consent label + receipt, applied now that
+	// the issue (and its identifier) exists.
+	let issue = result;
+	let labelAdvisorOutput: LabelAdvisorOutput | undefined;
+	if (labelAdvice) {
+		labelAdvisorOutput = {
+			added: [...labelAdvice.added],
+			reason: labelAdvice.reason,
+		};
+		if (labelAdvice.consent) {
+			const outcome = await applyAdvisorConsent(result, labelAdvice.consent, {
+				graphQLService,
+				issuesService,
+			});
+			if (outcome.issue) issue = { ...result, ...outcome.issue };
+			if (outcome.applied) {
+				labelAdvisorOutput.added.push(...labelAdvice.consent.labels);
+			}
+			labelAdvisorOutput.consent = {
+				labels: labelAdvice.consent.labels,
+				applied: outcome.applied,
+				repo: labelAdvice.consent.receipt.repo,
+				...(outcome.problem ? { problem: outcome.problem } : {}),
+			};
+		}
+	}
 	const relations = await createRelations(
 		result.id,
 		options,
@@ -1483,8 +1638,8 @@ async function handleCreateIssue(
 	}
 
 	const output = {
-		...result,
-		...(labelAdvice ? { labelAdvisor: labelAdvice } : {}),
+		...issue,
+		...(labelAdvisorOutput ? { labelAdvisor: labelAdvisorOutput } : {}),
 		...(branch ? { branch } : {}),
 		...(claim ? { claim } : {}),
 		...(relations.length > 0 ? { relations } : {}),

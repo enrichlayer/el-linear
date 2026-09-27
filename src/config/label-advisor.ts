@@ -20,7 +20,10 @@ import type { ElLinearConfig } from "./config.js";
  *   - stdout: JSON. Either a bare array of label names (`["bot"]`) or an
  *     object `{"labels": ["bot"], "reason": "…"}`; one level of `{data: …}`
  *     envelope is unwrapped (the el-* CLI shape). `{"labels": []}` means
- *     "nothing to add".
+ *     "nothing to add". With a consent label (see `consent-receipt.ts`) the
+ *     object may also carry `"receipt": {"repo": "…", "reason": "…"}`; then
+ *     el-linear applies the consent label after create together with an
+ *     `el-intake-decision:v1` receipt naming the new issue.
  *   - exit 0 on success.
  *
  * **Fail-closed on labels.** A label may carry meaning — in some workspaces a
@@ -44,6 +47,8 @@ const DEFAULT_TIMEOUT_MS = 5000;
 const MAX_LABELS = 10;
 const MAX_LABEL_LENGTH = 80;
 const MAX_REASON_LENGTH = 300;
+const MAX_RECEIPT_REPO_LENGTH = 200;
+const MAX_RECEIPT_REASON_LENGTH = 500;
 
 /** True when `text` has no ASCII control character (U+0000–U+001F, U+007F). */
 function isSafeText(text: string): boolean {
@@ -63,8 +68,26 @@ export interface LabelAdvisorInput {
 	state: string | null;
 }
 
+/**
+ * Receipt policy fields an advisor may return with a consent label
+ * (DEV-10455). el-linear never guesses these: `repo` is the repository the
+ * organization's intake policy maps this issue to, and `reason` is why that
+ * policy consents to unattended work. el-linear adds only what it knows
+ * itself (the new issue's identifier and the acting Linear user) and writes
+ * the receipt after the issue exists. See `consent-receipt.ts`.
+ */
+export interface LabelAdvisorReceipt {
+	repo: string;
+	reason: string;
+}
+
 export type LabelAdvisorResult =
-	| { ok: true; labels: string[]; reason: string | null }
+	| {
+			ok: true;
+			labels: string[];
+			reason: string | null;
+			receipt: LabelAdvisorReceipt | null;
+	  }
 	| { ok: false; error: string };
 
 /**
@@ -136,11 +159,13 @@ export function parseLabelAdvisorOutput(stdout: string): LabelAdvisorResult {
 
 	let rawLabels: unknown;
 	let rawReason: unknown = null;
+	let rawReceipt: unknown = null;
 	if (Array.isArray(parsed)) {
 		rawLabels = parsed;
 	} else if (isRecord(parsed)) {
 		rawLabels = parsed.labels;
 		rawReason = parsed.reason ?? null;
+		rawReceipt = parsed.receipt ?? null;
 	} else {
 		return {
 			ok: false,
@@ -184,7 +209,43 @@ export function parseLabelAdvisorOutput(stdout: string): LabelAdvisorResult {
 		typeof rawReason === "string" && rawReason.trim()
 			? rawReason.replace(/\s+/g, " ").trim().slice(0, MAX_REASON_LENGTH)
 			: null;
-	return { ok: true, labels, reason };
+	const receipt = parseReceiptFields(rawReceipt);
+	if (typeof receipt === "string") {
+		return { ok: false, error: receipt };
+	}
+	return { ok: true, labels, reason, receipt };
+}
+
+/**
+ * Validate the optional `receipt` object. A malformed one fails the whole
+ * answer (returned as an error string): a receipt is consent, so half of one
+ * is never used.
+ */
+function parseReceiptFields(raw: unknown): LabelAdvisorReceipt | null | string {
+	if (raw === null) {
+		return null;
+	}
+	if (!isRecord(raw)) {
+		return "advisor receipt must be an object";
+	}
+	const { repo, reason } = raw;
+	if (
+		typeof repo !== "string" ||
+		repo.trim().length === 0 ||
+		repo.length > MAX_RECEIPT_REPO_LENGTH ||
+		!isSafeText(repo)
+	) {
+		return "advisor receipt.repo must be a non-empty plain string";
+	}
+	if (
+		typeof reason !== "string" ||
+		reason.trim().length === 0 ||
+		reason.length > MAX_RECEIPT_REASON_LENGTH ||
+		!isSafeText(reason)
+	) {
+		return `advisor receipt.reason must be a non-empty plain string of at most ${MAX_RECEIPT_REASON_LENGTH} characters`;
+	}
+	return { repo: repo.trim(), reason: reason.trim() };
 }
 
 /**

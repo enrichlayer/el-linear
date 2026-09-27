@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+	appendConsentReceipt,
 	consentLabelsIn,
 	evaluateConsentReceipt,
+	formatConsentReceipt,
 	formatCreateConsentRefusal,
 } from "./consent-receipt.js";
 
@@ -97,5 +99,43 @@ describe("formatCreateConsentRefusal", () => {
 		expect(message).toContain('"bot"');
 		expect(message).toContain("el-intake-decision:v1");
 		expect(message).toContain("el-linear issues update <ID> --labels bot");
+	});
+});
+
+describe("formatConsentReceipt (DEV-10455)", () => {
+	const fields = {
+		repo: "acme/tools",
+		reason: "rubric consent",
+		actor: "Test Person",
+		issue: "DEV-7",
+	};
+
+	it("writes a receipt the gate accepts for that issue only", () => {
+		const description = appendConsentReceipt(
+			"Body\n",
+			formatConsentReceipt(fields),
+		);
+		expect(description.startsWith("Body\n\n<!-- el-intake-decision:v1 ")).toBe(
+			true,
+		);
+		expect(evaluateConsentReceipt(description, "DEV-7")).toEqual({ ok: true });
+		expect(evaluateConsentReceipt(description, "DEV-8").ok).toBe(false);
+	});
+
+	it("still reads back after Linear escapes the brackets", () => {
+		const escaped = formatConsentReceipt(fields)
+			.replace("[", "\\[")
+			.replace("]", "\\]");
+		expect(evaluateConsentReceipt(escaped, "DEV-7")).toEqual({ ok: true });
+	});
+
+	it("keeps quotes in the reason as valid JSON", () => {
+		const receipt = formatConsentReceipt({ ...fields, reason: 'say "yes"' });
+		expect(evaluateConsentReceipt(receipt, "DEV-7")).toEqual({ ok: true });
+	});
+
+	it("uses the receipt alone for an empty description", () => {
+		const receipt = formatConsentReceipt(fields);
+		expect(appendConsentReceipt("  ", receipt)).toBe(receipt);
 	});
 });
