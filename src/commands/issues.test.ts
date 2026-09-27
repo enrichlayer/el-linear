@@ -2927,6 +2927,24 @@ describe("issues commands", () => {
 			);
 		});
 
+		it("refuses a consent label passed as its configured UUID on create", async () => {
+			mockLoadConfig.mockReturnValue({
+				...gateConfig,
+				labels: { workspace: { bot: "bot-label-uuid" }, teams: {} },
+			});
+			await run([
+				...createArgs.slice(0, 5),
+				"--labels",
+				"bug,bot-label-uuid",
+				...createArgs.slice(7),
+			]);
+
+			expect(mockCreateIssue).not.toHaveBeenCalled();
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("el-intake-decision:v1 receipt"),
+			);
+		});
+
 		it("drops an advisor-proposed consent label on create when the gate is on", async () => {
 			mockLoadConfig.mockReturnValue({
 				...gateConfig,
@@ -3158,6 +3176,33 @@ describe("issues commands", () => {
 				"bot",
 				"--description",
 				`Body\n\n${receipt("DEV-1")}`,
+				"--no-auto-link",
+			]);
+
+			expect(mockUpdateIssue).toHaveBeenCalledTimes(1);
+		});
+
+		it("applies bot on update when --append-description adds the receipt", async () => {
+			mockLoadConfig.mockReturnValue(gateConfig);
+			mockGraphQLService.rawRequest.mockImplementation(async (query: string) =>
+				query.includes("labels")
+					? {
+							issue: {
+								identifier: "DEV-1",
+								description: "Body",
+								labels: { nodes: [] },
+							},
+						}
+					: { issue: { description: "Body" } },
+			);
+			await run([
+				"issues",
+				"update",
+				"DEV-1",
+				"--labels",
+				"bot",
+				"--append-description",
+				receipt("DEV-1"),
 				"--no-auto-link",
 			]);
 

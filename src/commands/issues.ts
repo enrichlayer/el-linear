@@ -1110,7 +1110,10 @@ function enforceCreateConsentLabels(options: OptionValues): void {
 	if (!gate.enabled || !options.labels) {
 		return;
 	}
-	const consent = consentLabelsIn(splitList(options.labels), gate.labels);
+	const requested = splitList(options.labels).map(
+		(label) => labelNameForId(label) ?? label,
+	);
+	const consent = consentLabelsIn(requested, gate.labels);
 	if (consent.length > 0) {
 		throw new Error(
 			`Issue creation blocked: ${formatCreateConsentRefusal(consent)}`,
