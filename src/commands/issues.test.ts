@@ -1,5 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -2728,6 +2734,501 @@ describe("issues commands", () => {
 					parentId: "DEV-7",
 				}),
 			);
+		});
+	});
+
+	describe("issues create/update — label advisor and consent receipt (DEV-10372)", () => {
+		let dir: string;
+		const createArgs = [
+			"issues",
+			"create",
+			"Fix the thing",
+			"--team",
+			"DEV",
+			"--labels",
+			"bug",
+			"--description",
+			"## Done when\n- [ ] it works",
+			"--no-auto-link",
+		];
+
+		function advisor(body: string): string[] {
+			const path = join(dir, "advisor.mjs");
+			writeFileSync(path, body);
+			return [process.execPath, path];
+		}
+
+		function receipt(issue: string): string {
+			return `<!-- el-intake-decision:v1 ${JSON.stringify({
+				policyVersion: "intake-policy/v1",
+				decision: "automatic-implementation",
+				capabilities: ["manual-review", "automatic-implementation"],
+				reason: "Maintainer consented to unattended authoring",
+				provenance: {
+					source: "issue-triage",
+					actor: "Test Person",
+					issue,
+					repo: "acme/tools",
+				},
+			})} -->`;
+		}
+
+		beforeEach(() => {
+			dir = mkdtempSync(join(tmpdir(), "el-linear-advisor-cmd-"));
+			mockResolveLabels.mockImplementation((names: string[]) =>
+				names.map((name) => `label-${name}`),
+			);
+			mockCreateIssue.mockResolvedValue({ id: "x", identifier: "DEV-999" });
+			mockUpdateIssue.mockResolvedValue({ id: "x", identifier: "DEV-1" });
+			mockLinearService.resolveIssueId.mockResolvedValue("issue-uuid");
+		});
+
+		afterEach(() => {
+			rmSync(dir, { recursive: true, force: true });
+		});
+
+		async function run(args: string[]): Promise<void> {
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, args);
+		}
+
+		it("adds the advisor's labels, sends it the proposed issue, and reports them", async () => {
+			const seen = join(dir, "stdin.json");
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				labelAdvisor: {
+					command: advisor(`
+						import { readFileSync, writeFileSync } from "node:fs";
+						writeFileSync(${JSON.stringify(seen)}, readFileSync(0, "utf8"));
+						process.stdout.write(JSON.stringify({ labels: ["bot"], reason: "rubric: BOT" }));
+					`),
+				},
+			});
+			await run(createArgs);
+
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ labelIds: ["label-bug", "label-bot"] }),
+			);
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				"labels added by advisor: bot (rubric: BOT)",
+			);
+			expect(mockOutputSuccess).toHaveBeenCalledWith(
+				expect.objectContaining({
+					labelAdvisor: { added: ["bot"], reason: "rubric: BOT" },
+				}),
+			);
+			expect(JSON.parse(readFileSync(seen, "utf8"))).toEqual({
+				team: "DEV",
+				project: null,
+				title: "Fix the thing",
+				description: "## Done when\n- [ ] it works",
+				labels: ["bug"],
+				state: null,
+			});
+		});
+
+		it("sends the advisor the canonical team key, not the alias typed", async () => {
+			const seen = join(dir, "stdin.json");
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				teams: { DEV: "team-id-backend" },
+				labelAdvisor: {
+					command: advisor(`
+						import { readFileSync, writeFileSync } from "node:fs";
+						writeFileSync(${JSON.stringify(seen)}, readFileSync(0, "utf8"));
+						process.stdout.write("[]");
+					`),
+				},
+			});
+			await run([
+				...createArgs.slice(0, 3),
+				"--team",
+				"backend",
+				...createArgs.slice(5),
+			]);
+
+			expect(JSON.parse(readFileSync(seen, "utf8")).team).toBe("DEV");
+		});
+
+		it("creates without extra labels and warns when the advisor fails", async () => {
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				labelAdvisor: {
+					command: advisor(`process.stdout.write('["bot"]'); process.exit(2);`),
+				},
+			});
+			await run(createArgs);
+
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ labelIds: ["label-bug"] }),
+			);
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringContaining("label advisor failed"),
+			);
+			expect(mockOutputSuccess).toHaveBeenCalledWith(
+				expect.not.objectContaining({ labelAdvisor: expect.anything() }),
+			);
+		});
+
+		it("adds nothing when the advisor prints invalid JSON", async () => {
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				labelAdvisor: { command: advisor(`process.stdout.write("bot");`) },
+			});
+			await run(createArgs);
+
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ labelIds: ["label-bug"] }),
+			);
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringContaining("not valid JSON"),
+			);
+		});
+
+		it("skips the advisor entirely with --no-label-advisor", async () => {
+			const ran = join(dir, "ran");
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				labelAdvisor: {
+					command: advisor(`
+						import { writeFileSync } from "node:fs";
+						writeFileSync(${JSON.stringify(ran)}, "yes");
+						process.stdout.write('["bot"]');
+					`),
+				},
+			});
+			await run([...createArgs, "--no-label-advisor"]);
+
+			expect(existsSync(ran)).toBe(false);
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ labelIds: ["label-bug"] }),
+			);
+		});
+
+		const gateConfig = {
+			...baseConfig,
+			validation: { enabled: false, consentReceiptGate: true },
+		};
+
+		it("refuses an explicit consent label on create and names the missing receipt", async () => {
+			mockLoadConfig.mockReturnValue(gateConfig);
+			await run([
+				...createArgs.slice(0, 5),
+				"--labels",
+				"bug,bot",
+				...createArgs.slice(7),
+			]);
+
+			expect(mockCreateIssue).not.toHaveBeenCalled();
+			expect(process.exit).toHaveBeenCalledWith(1);
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("el-intake-decision:v1 receipt"),
+			);
+		});
+
+		it("refuses a consent label passed as its configured UUID on create", async () => {
+			mockLoadConfig.mockReturnValue({
+				...gateConfig,
+				labels: { workspace: { bot: "bot-label-uuid" }, teams: {} },
+			});
+			await run([
+				...createArgs.slice(0, 5),
+				"--labels",
+				"bug,bot-label-uuid",
+				...createArgs.slice(7),
+			]);
+
+			expect(mockCreateIssue).not.toHaveBeenCalled();
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("el-intake-decision:v1 receipt"),
+			);
+		});
+
+		it("drops an advisor-proposed consent label on create when the gate is on", async () => {
+			mockLoadConfig.mockReturnValue({
+				...gateConfig,
+				labelAdvisor: {
+					command: advisor(
+						`process.stdout.write('{"labels":["bot","docs"]}');`,
+					),
+				},
+			});
+			await run(createArgs);
+
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ labelIds: ["label-bug", "label-docs"] }),
+			);
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringContaining("label advisor proposed bot, not applied"),
+			);
+		});
+
+		function receiptAdvisor(): string[] {
+			return advisor(
+				`process.stdout.write(JSON.stringify({ labels: ["bot", "docs"], reason: "rubric: BOT", receipt: { repo: "acme/tools", reason: "rubric consent" } }));`,
+			);
+		}
+
+		it("applies an advisor-proposed bot after create with a receipt naming the new issue (DEV-10455)", async () => {
+			mockLoadConfig.mockReturnValue({
+				...gateConfig,
+				labelAdvisor: { command: receiptAdvisor() },
+			});
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				viewer: { name: "Test Person", email: "t@example.com", app: false },
+				issue: {
+					identifier: "DEV-999",
+					description: "## Done when\n- [ ] it works",
+				},
+			});
+			mockUpdateIssue.mockImplementation(
+				async (args: { description: string }) => ({
+					id: "x",
+					identifier: "DEV-999",
+					description: args.description,
+					labels: [{ name: "bug" }, { name: "docs" }, { name: "bot" }],
+				}),
+			);
+			await run(createArgs);
+
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ labelIds: ["label-bug", "label-docs"] }),
+			);
+			expect(mockUpdateIssue).toHaveBeenCalledTimes(1);
+			const [args, mode] = mockUpdateIssue.mock.calls[0] as [
+				{ id: string; description: string; labelIds: string[] },
+				string,
+			];
+			expect(mode).toBe("adding");
+			expect(args.id).toBe("x");
+			expect(args.labelIds).toEqual(["bot"]);
+			const marker = args.description.match(
+				/<!-- el-intake-decision:v1 (.+) -->$/,
+			);
+			expect(JSON.parse(marker?.[1] ?? "null")).toEqual({
+				policyVersion: "intake-policy/v1",
+				decision: "automatic-implementation",
+				capabilities: ["manual-review", "automatic-implementation"],
+				reason: "rubric consent",
+				provenance: {
+					source: "issue-triage",
+					actor: "Test Person",
+					issue: "DEV-999",
+					repo: "acme/tools",
+				},
+			});
+			expect(mockOutputSuccess).toHaveBeenCalledWith(
+				expect.objectContaining({
+					identifier: "DEV-999",
+					labelAdvisor: {
+						added: ["docs", "bot"],
+						reason: "rubric: BOT",
+						consent: { labels: ["bot"], applied: true, repo: "acme/tools" },
+					},
+				}),
+			);
+		});
+
+		it("uses the receipt route even when the gate is off", async () => {
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				labelAdvisor: { command: receiptAdvisor() },
+			});
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				viewer: { name: "Test Person", email: null, app: false },
+				issue: { identifier: "DEV-999", description: "" },
+			});
+			mockUpdateIssue.mockImplementation(
+				async (args: { description: string }) => ({
+					id: "x",
+					identifier: "DEV-999",
+					description: args.description,
+				}),
+			);
+			await run(createArgs);
+
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ labelIds: ["label-bug", "label-docs"] }),
+			);
+			expect(mockUpdateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ labelIds: ["bot"] }),
+				"adding",
+			);
+		});
+
+		it("does not apply bot when the viewer is an app, and says why", async () => {
+			mockLoadConfig.mockReturnValue({
+				...gateConfig,
+				labelAdvisor: { command: receiptAdvisor() },
+			});
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				viewer: { name: "Some Bot", email: null, app: true },
+				issue: { identifier: "DEV-999", description: "Body" },
+			});
+			await run(createArgs);
+
+			expect(mockCreateIssue).toHaveBeenCalledTimes(1);
+			expect(mockUpdateIssue).not.toHaveBeenCalled();
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringContaining("label advisor proposed bot, not applied"),
+			);
+			expect(mockOutputSuccess).toHaveBeenCalledWith(
+				expect.objectContaining({
+					labelAdvisor: expect.objectContaining({
+						added: ["docs"],
+						consent: expect.objectContaining({ applied: false }),
+					}),
+				}),
+			);
+		});
+
+		it("does not apply bot when the description already holds a receipt marker", async () => {
+			mockLoadConfig.mockReturnValue({
+				...gateConfig,
+				labelAdvisor: { command: receiptAdvisor() },
+			});
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				viewer: { name: "Test Person", email: null, app: false },
+				issue: {
+					identifier: "DEV-999",
+					description: `Body\n\n${receipt("DEV-1")}`,
+				},
+			});
+			await run(createArgs);
+
+			expect(mockUpdateIssue).not.toHaveBeenCalled();
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringContaining("more than one el-intake-decision:v1 receipt"),
+			);
+		});
+
+		it("keeps the created issue when the consent update fails", async () => {
+			mockLoadConfig.mockReturnValue({
+				...gateConfig,
+				labelAdvisor: { command: receiptAdvisor() },
+			});
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				viewer: { name: "Test Person", email: null, app: false },
+				issue: { identifier: "DEV-999", description: "Body" },
+			});
+			mockUpdateIssue.mockRejectedValue(new Error("Linear said no"));
+			await run(createArgs);
+
+			expect(process.exit).not.toHaveBeenCalledWith(1);
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringContaining("Linear said no"),
+			);
+			expect(mockOutputSuccess).toHaveBeenCalledWith(
+				expect.objectContaining({ identifier: "DEV-999" }),
+			);
+		});
+
+		it("refuses to apply bot on update when the issue has no receipt", async () => {
+			mockLoadConfig.mockReturnValue(gateConfig);
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				issue: {
+					identifier: "DEV-1",
+					description: "## Intake decision\n- Decision: PROCEED",
+					labels: { nodes: [{ name: "bug" }] },
+				},
+			});
+			await run(["issues", "update", "DEV-1", "--labels", "bot"]);
+
+			expect(mockUpdateIssue).not.toHaveBeenCalled();
+			expect(process.exit).toHaveBeenCalledWith(1);
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("has no el-intake-decision:v1 receipt"),
+			);
+		});
+
+		it("refuses a receipt that names a different issue", async () => {
+			mockLoadConfig.mockReturnValue(gateConfig);
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				issue: {
+					identifier: "DEV-1",
+					description: `Body\n\n${receipt("DEV-2")}`,
+					labels: { nodes: [] },
+				},
+			});
+			await run(["issues", "update", "DEV-1", "--labels", "bot"]);
+
+			expect(mockUpdateIssue).not.toHaveBeenCalled();
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("names DEV-2, not DEV-1"),
+			);
+		});
+
+		it("applies bot on update when the same update writes the receipt", async () => {
+			mockLoadConfig.mockReturnValue(gateConfig);
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				issue: {
+					identifier: "DEV-1",
+					description: "Body",
+					labels: { nodes: [] },
+				},
+			});
+			await run([
+				"issues",
+				"update",
+				"DEV-1",
+				"--labels",
+				"bot",
+				"--description",
+				`Body\n\n${receipt("DEV-1")}`,
+				"--no-auto-link",
+			]);
+
+			expect(mockUpdateIssue).toHaveBeenCalledTimes(1);
+		});
+
+		it("applies bot on update when --append-description adds the receipt", async () => {
+			mockLoadConfig.mockReturnValue(gateConfig);
+			mockGraphQLService.rawRequest.mockImplementation(async (query: string) =>
+				query.includes("labels")
+					? {
+							issue: {
+								identifier: "DEV-1",
+								description: "Body",
+								labels: { nodes: [] },
+							},
+						}
+					: { issue: { description: "Body" } },
+			);
+			await run([
+				"issues",
+				"update",
+				"DEV-1",
+				"--labels",
+				"bot",
+				"--append-description",
+				receipt("DEV-1"),
+				"--no-auto-link",
+			]);
+
+			expect(mockUpdateIssue).toHaveBeenCalledTimes(1);
+		});
+
+		it("does not re-check an issue that already carries bot", async () => {
+			mockLoadConfig.mockReturnValue(gateConfig);
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				issue: {
+					identifier: "DEV-1",
+					description: "",
+					labels: { nodes: [{ name: "bot" }] },
+				},
+			});
+			await run(["issues", "update", "DEV-1", "--labels", "bot"]);
+
+			expect(mockUpdateIssue).toHaveBeenCalledTimes(1);
+		});
+
+		it("leaves bot alone when the gate is off (open-source default)", async () => {
+			mockLoadConfig.mockReturnValue(baseConfig);
+			await run(["issues", "update", "DEV-1", "--labels", "bot"]);
+
+			expect(mockGraphQLService.rawRequest).not.toHaveBeenCalled();
+			expect(mockUpdateIssue).toHaveBeenCalledTimes(1);
 		});
 	});
 

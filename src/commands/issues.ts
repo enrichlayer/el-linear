@@ -2,6 +2,15 @@ import { execFileSync } from "node:child_process";
 import type { Command, OptionValues } from "commander";
 import { loadConfig } from "../config/config.js";
 import {
+	appendConsentReceipt,
+	consentLabelsIn,
+	evaluateConsentReceipt,
+	formatConsentReceipt,
+	formatCreateConsentRefusal,
+	formatUpdateConsentRefusal,
+	getConsentReceiptGateConfig,
+} from "../config/consent-receipt.js";
+import {
 	enrichProjectResolverError,
 	enrichValidationErrors,
 } from "../config/error-enrichment.js";
@@ -19,6 +28,10 @@ import {
 	enforceValidation,
 	validateIssueCreation,
 } from "../config/issue-validation.js";
+import {
+	type LabelAdvisorReceipt,
+	runLabelAdvisor,
+} from "../config/label-advisor.js";
 import { maybeEmitPinMismatchHint } from "../config/pin-hint.js";
 import {
 	resolveAssignee,
@@ -1085,6 +1098,311 @@ async function enforceIntakeDecision(
 	throw new Error(`Issue creation blocked: ${message}`);
 }
 
+/**
+ * DEV-10372: consent-label receipt gate on create. A consent label (default
+ * `bot`) needs a receipt naming the issue, which cannot exist before the issue
+ * does, so an explicit consent label on create is refused with the two-step
+ * route. Dormant unless `validation.consentReceiptGate` is true; not bypassed
+ * by `--skip-validation`.
+ */
+function enforceCreateConsentLabels(options: OptionValues): void {
+	const gate = getConsentReceiptGateConfig();
+	if (!gate.enabled || !options.labels) {
+		return;
+	}
+	const requested = splitList(options.labels).map(
+		(label) => labelNameForId(label) ?? label,
+	);
+	const consent = consentLabelsIn(requested, gate.labels);
+	if (consent.length > 0) {
+		throw new Error(
+			`Issue creation blocked: ${formatCreateConsentRefusal(consent)}`,
+		);
+	}
+}
+
+interface LabelAdvice {
+	added: string[];
+	reason: string | null;
+	/**
+	 * DEV-10455: consent labels the advisor proposed together with receipt
+	 * policy fields. They are applied after create, with the receipt, by
+	 * `applyAdvisorConsent`; `added` never contains them.
+	 */
+	consent?: { labels: string[]; receipt: LabelAdvisorReceipt };
+}
+
+interface LabelAdvisorOutput {
+	added: string[];
+	reason: string | null;
+	consent?: {
+		labels: string[];
+		applied: boolean;
+		repo: string;
+		problem?: string;
+	};
+}
+
+/**
+ * DEV-10372: consult the optional label advisor and return the labels to add.
+ * Fail-closed on labels: an advisor failure warns and adds nothing. Labels the
+ * author already passed are not re-added. When the consent-receipt gate is on,
+ * an advisor-proposed consent label is dropped with a warning — the advisor
+ * cannot supply the receipt, and a create cannot carry one.
+ */
+function adviseLabels(
+	title: string | undefined,
+	options: OptionValues,
+	context: {
+		teamInput: string;
+		description: string | undefined;
+		status: string | undefined;
+	},
+): LabelAdvice | null {
+	if (options.labelAdvisor === false) {
+		return null;
+	}
+	const current = options.labels ? splitList(options.labels) : [];
+	const result = runLabelAdvisor(
+		{
+			team: context.teamInput || null,
+			project: typeof options.project === "string" ? options.project : null,
+			title: title ?? null,
+			description: context.description ?? null,
+			labels: current,
+			state: context.status ?? null,
+		},
+		loadConfig(),
+	);
+	if (result === null) {
+		return null;
+	}
+	if (!result.ok) {
+		outputWarning(
+			`label advisor failed; creating without advisor labels: ${result.error}`,
+		);
+		return null;
+	}
+	const present = new Set(current.map((label) => label.toLowerCase()));
+	let added = result.labels.filter(
+		(label) => !present.has(label.toLowerCase()),
+	);
+	const gate = getConsentReceiptGateConfig();
+	const consent = consentLabelsIn(added, gate.labels);
+	let deferred: LabelAdvice["consent"];
+	if (consent.length > 0 && (gate.enabled || result.receipt)) {
+		const held = new Set(consent.map((label) => label.toLowerCase()));
+		added = added.filter((label) => !held.has(label.toLowerCase()));
+		if (result.receipt) {
+			// DEV-10455: the advisor supplied the receipt policy fields, so the
+			// consent label is applied right after create, in one update with a
+			// receipt naming the new issue (see applyAdvisorConsent).
+			deferred = { labels: consent, receipt: result.receipt };
+		} else {
+			outputWarning(
+				`label advisor proposed ${consent.join(", ")}, not applied: a consent label needs an el-intake-decision:v1 receipt naming the issue. Apply it after creation with \`el-linear issues update <ID> --labels ${consent.join(",")}\` and the receipt in the description.`,
+			);
+		}
+	}
+	if (added.length === 0 && !deferred) {
+		return null;
+	}
+	if (added.length > 0) {
+		outputWarning(
+			`labels added by advisor: ${added.join(", ")}${result.reason ? ` (${result.reason})` : ""}`,
+		);
+	}
+	return {
+		added,
+		reason: result.reason,
+		...(deferred ? { consent: deferred } : {}),
+	};
+}
+
+/**
+ * DEV-10455: apply advisor-proposed consent labels after create, in ONE
+ * update that also appends an `el-intake-decision:v1` receipt naming the new
+ * issue. The advisor supplied the policy fields (`repo`, `reason`); el-linear
+ * adds only the identifier and the acting Linear user, read from the API.
+ *
+ * Fail-closed: any problem (an app viewer, a description that already holds a
+ * receipt marker, a failed update, a stored receipt that does not read back
+ * as valid) warns and leaves the issue without the consent label — or, when
+ * the write landed but the read-back fails, says so loudly. Never throws: the
+ * issue already exists.
+ *
+ * Raw GraphQL for the read: it batches `viewer` (including the `app` flag the
+ * SDK's typed viewer wrapper does not expose) with the issue in one round
+ * trip.
+ */
+async function applyAdvisorConsent(
+	created: { id: string; identifier: string },
+	consent: NonNullable<LabelAdvice["consent"]>,
+	services: {
+		graphQLService: GraphQLService;
+		issuesService: GraphQLIssuesService;
+	},
+): Promise<{ applied: boolean; problem?: string; issue?: LinearIssue }> {
+	const labels = consent.labels.join(", ");
+	const skip = (problem: string) => {
+		outputWarning(
+			`label advisor proposed ${labels}, not applied: ${problem}. Apply it with \`el-linear issues update ${created.identifier} --labels ${consent.labels.join(",")}\` and a receipt in the description.`,
+		);
+		return { applied: false, problem };
+	};
+	try {
+		const current = await services.graphQLService.rawRequest<{
+			viewer: {
+				name: string | null;
+				email: string | null;
+				app: boolean | null;
+			} | null;
+			issue: { identifier: string; description: string | null } | null;
+		}>(
+			"query($id: String!) { viewer { name email app } issue(id: $id) { identifier description } }",
+			{ id: created.id },
+		);
+		if (!current.issue) {
+			return skip(`issue ${created.identifier} could not be read back`);
+		}
+		const viewer = current.viewer;
+		if (!viewer || viewer.app === true) {
+			return skip(
+				"consent must be attributable to a person, and the authenticated Linear viewer is not one",
+			);
+		}
+		const actor = (viewer.name?.trim() || viewer.email?.trim() || "").slice(
+			0,
+			160,
+		);
+		if (!actor) {
+			return skip("the authenticated Linear viewer has no name or email");
+		}
+		const existing = current.issue.description ?? "";
+		const description = appendConsentReceipt(
+			existing,
+			formatConsentReceipt({
+				repo: consent.receipt.repo,
+				reason: consent.receipt.reason,
+				actor,
+				issue: current.issue.identifier,
+			}),
+		);
+		const planned = evaluateConsentReceipt(
+			description,
+			current.issue.identifier,
+		);
+		if (!planned.ok) {
+			return skip(planned.problem);
+		}
+		const updated = await services.issuesService.updateIssue(
+			{ id: created.id, description, labelIds: consent.labels },
+			"adding",
+		);
+		const stored = evaluateConsentReceipt(
+			updated.description ?? "",
+			current.issue.identifier,
+		);
+		if (!stored.ok) {
+			outputWarning(
+				`label advisor applied ${labels} to ${created.identifier}, but the stored receipt does not read back as valid (${stored.problem}); fix the receipt or remove the label.`,
+			);
+			return { applied: true, problem: stored.problem, issue: updated };
+		}
+		outputWarning(
+			`labels added by advisor: ${labels} with an el-intake-decision:v1 receipt for ${current.issue.identifier} (repo ${consent.receipt.repo}, actor ${actor})`,
+		);
+		return { applied: true, issue: updated };
+	} catch (error) {
+		return skip(error instanceof Error ? error.message : String(error));
+	}
+}
+
+/**
+ * DEV-10372: consent-label receipt gate on update. When the update newly
+ * applies a consent label, the resulting description must carry exactly one
+ * valid automatic-implementation receipt for this issue; otherwise refuse and
+ * name what is missing. Labels already on the issue are not re-checked.
+ */
+async function enforceUpdateConsentLabels(
+	issueId: string,
+	options: OptionValues,
+	graphQLService: GraphQLService,
+	linearService: LinearService,
+): Promise<void> {
+	const gate = getConsentReceiptGateConfig();
+	if (!gate.enabled || !options.labels) {
+		return;
+	}
+	const requested = splitList(options.labels).map(
+		(label) => labelNameForId(label) ?? label,
+	);
+	const consent = consentLabelsIn(requested, gate.labels);
+	if (consent.length === 0) {
+		return;
+	}
+	const resolved = await linearService.resolveIssueId(issueId);
+	const current = await graphQLService.rawRequest<{
+		issue: {
+			identifier: string;
+			description: string | null;
+			labels: { nodes: { name: string }[] };
+		} | null;
+	}>(
+		"query($id: String!) { issue(id: $id) { identifier description labels { nodes { name } } } }",
+		{ id: resolved },
+	);
+	if (!current.issue) {
+		throw new Error(`Issue "${issueId}" not found`);
+	}
+	const existing = new Set(
+		current.issue.labels.nodes.map((label) => label.name.toLowerCase()),
+	);
+	const newlyApplied = consent.filter(
+		(label) => !existing.has(label.toLowerCase()),
+	);
+	if (newlyApplied.length === 0) {
+		return;
+	}
+	const description =
+		typeof options.description === "string"
+			? options.description
+			: (current.issue.description ?? "");
+	const evaluation = evaluateConsentReceipt(
+		description,
+		current.issue.identifier,
+	);
+	if (!evaluation.ok) {
+		throw new Error(
+			`Issue update blocked: ${formatUpdateConsentRefusal(newlyApplied, current.issue.identifier, evaluation.problem)}`,
+		);
+	}
+}
+
+/**
+ * The configured team key for a resolved team UUID, so the label advisor sees
+ * the canonical key (`DEV`) rather than whatever alias the author typed.
+ */
+function teamKeyForId(teamId: string | undefined): string | undefined {
+	if (!teamId) return undefined;
+	for (const [key, id] of Object.entries(loadConfig().teams ?? {})) {
+		if (id === teamId) return key;
+	}
+	return undefined;
+}
+
+/** Reverse-map a configured label UUID to its name, so a UUID cannot bypass the gate. */
+function labelNameForId(value: string): string | undefined {
+	const labels = loadConfig().labels;
+	const maps = [labels?.workspace ?? {}, ...Object.values(labels?.teams ?? {})];
+	for (const map of maps) {
+		for (const [name, id] of Object.entries(map)) {
+			if (id === value) return name;
+		}
+	}
+	return undefined;
+}
+
 async function handleCreateIssue(
 	title: string | undefined,
 	options: OptionValues,
@@ -1111,6 +1429,7 @@ async function handleCreateIssue(
 	// intentionally contains backslash sequences.
 	const rawDescription = resolveDescription(options);
 	await enforceIntakeDecision(rawDescription ?? "", options);
+	enforceCreateConsentLabels(options);
 	const {
 		teamInput,
 		teamId,
@@ -1121,6 +1440,23 @@ async function handleCreateIssue(
 		subscriberIds,
 		priority,
 	} = await resolveCreateInputs(title ?? "", options, rootOpts, rawDescription);
+
+	// DEV-10372: optional label advisor. Runs after validation/normalization so
+	// it sees the canonical labels, and before every gate that reads labels.
+	const labelAdvice = adviseLabels(title, options, {
+		teamInput: teamKeyForId(teamId) ?? teamInput,
+		description: rawDescription,
+		status,
+	});
+	if (labelAdvice) {
+		for (const id of resolveLabels(labelAdvice.added)) {
+			if (!labelIds.includes(id)) labelIds.push(id);
+		}
+		options.labels = [
+			...(options.labels ? splitList(options.labels) : []),
+			...labelAdvice.added,
+		].join(",");
+	}
 
 	const uploadResults = await uploadAttachmentsIfNeeded(options, rootOpts);
 	const descriptionWithAttachments = buildDescriptionWithAttachments(
@@ -1228,6 +1564,32 @@ async function handleCreateIssue(
 		{ team: options.team ?? loadConfig().defaultTeam, title },
 		{ graphQLService, linearService },
 	);
+	// DEV-10455: advisor-proposed consent label + receipt, applied now that
+	// the issue (and its identifier) exists.
+	let issue = result;
+	let labelAdvisorOutput: LabelAdvisorOutput | undefined;
+	if (labelAdvice) {
+		labelAdvisorOutput = {
+			added: [...labelAdvice.added],
+			reason: labelAdvice.reason,
+		};
+		if (labelAdvice.consent) {
+			const outcome = await applyAdvisorConsent(result, labelAdvice.consent, {
+				graphQLService,
+				issuesService,
+			});
+			if (outcome.issue) issue = { ...result, ...outcome.issue };
+			if (outcome.applied) {
+				labelAdvisorOutput.added.push(...labelAdvice.consent.labels);
+			}
+			labelAdvisorOutput.consent = {
+				labels: labelAdvice.consent.labels,
+				applied: outcome.applied,
+				repo: labelAdvice.consent.receipt.repo,
+				...(outcome.problem ? { problem: outcome.problem } : {}),
+			};
+		}
+	}
 	const relations = await createRelations(
 		result.id,
 		options,
@@ -1295,7 +1657,8 @@ async function handleCreateIssue(
 	}
 
 	const output = {
-		...result,
+		...issue,
+		...(labelAdvisorOutput ? { labelAdvisor: labelAdvisorOutput } : {}),
 		...(branch ? { branch } : {}),
 		...(claim ? { claim } : {}),
 		...(relations.length > 0 ? { relations } : {}),
@@ -1559,6 +1922,12 @@ async function handleUpdateIssue(
 			strict: options.strict,
 		});
 	}
+	await enforceUpdateConsentLabels(
+		issueId,
+		options,
+		graphQLService,
+		linearService,
+	);
 	// Save the original (pre-wrap) description so we can pass it to maybeAutoLink later.
 	// The wrapped form breaks prose-keyword inference because the inserted `[` defeats the
 	// trailing-whitespace anchor in patterns like /\bblocked by\s*$/.
@@ -2092,6 +2461,10 @@ export function setupIssuesCommands(program: Command): void {
 		.option(
 			"--no-auto-link",
 			"skip auto-linking issue references found in the description",
+		)
+		.option(
+			"--no-label-advisor",
+			"skip the configured label advisor (config.labelAdvisor / EL_LINEAR_LABEL_ADVISOR) for this issue",
 		)
 		.option(
 			"--footer <text>",
