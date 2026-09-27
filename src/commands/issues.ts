@@ -1227,6 +1227,10 @@ function adviseLabels(
  * as valid) warns and leaves the issue without the consent label — or, when
  * the write landed but the read-back fails, says so loudly. Never throws: the
  * issue already exists.
+ *
+ * Raw GraphQL for the read: it batches `viewer` (including the `app` flag the
+ * SDK's typed viewer wrapper does not expose) with the issue in one round
+ * trip.
  */
 async function applyAdvisorConsent(
 	created: { id: string; identifier: string },
