@@ -468,6 +468,23 @@ The label is plain config — set it to anything you want, or skip it entirely. 
 
 ---
 
+## Label advisor defaults and consent labels (`bot`)
+
+A workspace can configure a **label advisor** (`labelAdvisor.command` in personal config, or `EL_LINEAR_LABEL_ADVISOR`): a command `issues create` consults with the proposed issue. Whatever labels it returns are added and reported — a `labels added by advisor: … (<reason>)` warning on stderr and a `labelAdvisor` field in the JSON output. In Enrich Layer's Tools setup the advisor is `el-bot linear-rubric --advise`, the bot-suitability rubric: an issue it marks BOT gets `bot` **by default**, and an EXCLUDE issue is unchanged.
+
+- **Opt out for one create** with `--no-label-advisor` (for example, work you intend to do yourself, or an issue whose consent you are not in a position to give).
+- **Read the create output.** `labelAdvisor.added` lists what the advisor added; `labelAdvisor.consent` reports a consent label (`{labels, applied, repo, problem?}`). `applied: false` means the issue exists without that label, and `problem` says why.
+
+**Consent labels need a receipt.** Where `validation.consentReceiptGate` is on (Enrich Layer's shared config turns it on), a consent label (`validation.consentLabels`, default `bot`) is only valid with exactly one `<!-- el-intake-decision:v1 {...} -->` receipt in the description that names the issue — bot-layer intake silently skips a `bot` issue without one. So:
+
+- **Default route: let the advisor apply it.** When the advisor returns `bot` with its receipt fields, el-linear creates the issue and then, in one update, applies `bot` with a receipt naming the new issue and you (the acting Linear user) as `actor`.
+- **Never pass `--labels bot` on create.** It is refused: the receipt must name an issue that does not exist yet.
+- **Adding `bot` to an existing issue** needs the receipt in the same update, or the update is refused and the error names what is missing. Enrich Layer: run `el-bot linear-consent <ID> --automatic-implementation --reason "<why>"`, which writes the label and a valid receipt together. Elsewhere: `el-linear issues update <ID> --labels bot --description-file <body-ending-with-the-receipt>`.
+
+The gate has no override flag and ignores `--skip-validation`: it protects consent, not field hygiene.
+
+---
+
 ## User @Mentions
 
 Reference team members by name in comments. el-linear resolves both explicit `@name` tokens and bare capitalized references to proper Linear mentions.
