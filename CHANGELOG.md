@@ -27,6 +27,13 @@ project adheres to [Semantic Versioning](https://semver.org/).
 * **quality:** restore a clean full-repository lint baseline (DEV-6142)
 * **labels:** resolve `labels create --team` keys and names before creating the label (DEV-5749)
 
+## [1.46.0](https://github.com/enrichlayer/el-linear/compare/v1.45.1...v1.46.0) (2026-09-27)
+
+
+### Features
+
+* label advisor hook and consent-label receipt gate (DEV-10372) ([#332](https://github.com/enrichlayer/el-linear/issues/332)) ([959c733](https://github.com/enrichlayer/el-linear/commit/959c7334e9ed9bfa7714d0b7277cfdb3e1dd1cd7))
+
 ## [1.45.1](https://github.com/enrichlayer/el-linear/compare/v1.45.0...v1.45.1) (2026-09-11)
 
 
