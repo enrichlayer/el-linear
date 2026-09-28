@@ -155,24 +155,44 @@ function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
-function warnClaimFailure(issueId: string, error: unknown): void {
+function warnClaimFailure(
+	issueId: string,
+	error: unknown,
+	context = "Branch operation succeeded",
+): void {
 	outputWarning(
-		`Branch operation succeeded for ${issueId}, but auto-claim failed: ${errorMessage(error)}`,
+		`${context} for ${issueId}, but auto-claim failed: ${errorMessage(error)}`,
 	);
 }
 
-async function maybeClaimBranchIssue(
-	issueId: string,
+/**
+ * Whether `issues create` should claim the issue it just made.
+ *
+ * `--claim` and `--no-claim` are a commander pair, so `options.claim` has
+ * THREE states, not two: `true` (--claim), `false` (--no-claim) and
+ * `undefined` (neither). Before --claim existed, the lone `--no-claim`
+ * declaration made the default `true`; declaring both flips that default to
+ * `undefined`. Every decision here is therefore written against the explicit
+ * values, so the pre-existing `--checkout` behaviour is unchanged: a branch
+ * claims unless the claim was explicitly suppressed.
+ */
+function shouldClaimCreatedIssue(
 	options: OptionValues,
+	branchCreated: boolean,
+): boolean {
+	if (options.claim === false) return false;
+	return options.claim === true || branchCreated;
+}
+
+async function maybeClaimIssue(
+	issueId: string,
 	issuesService: GraphQLIssuesService,
+	context: string,
 ): Promise<ClaimIssueResult | undefined> {
-	if (options.claim === false) {
-		return undefined;
-	}
 	try {
 		return await issuesService.claimIssue(issueId);
 	} catch (error) {
-		warnClaimFailure(issueId, error);
+		warnClaimFailure(issueId, error, context);
 		return undefined;
 	}
 }
@@ -1648,12 +1668,18 @@ async function handleCreateIssue(
 						`Run 'el-linear issues mark-branch ${result.identifier}' from the branch to set it.`,
 				);
 			}
-			claim = await maybeClaimBranchIssue(
-				result.identifier,
-				options,
-				issuesService,
-			);
 		}
+	}
+	// DEV-10654: `--claim` claims WITHOUT cutting a branch. Remote-workspace
+	// authoring (Factory) needs the claim -- an unclaimed issue sitting in an
+	// unstarted state is eligible for the bot-layer sweep -- but a local branch
+	// there is wrong, and `--checkout` welds the two together.
+	if (shouldClaimCreatedIssue(options, branch !== undefined)) {
+		claim = await maybeClaimIssue(
+			result.identifier,
+			issuesService,
+			branch ? "Branch operation succeeded" : "Issue was created",
+		);
 	}
 
 	const output = {
@@ -2435,8 +2461,12 @@ export function setupIssuesCommands(program: Command): void {
 			"create and checkout a git branch named after the issue",
 		)
 		.option(
+			"--claim",
+			"assign the issue to the current Linear user and move it to the first started state, without creating a git branch (use --checkout to also cut one)",
+		)
+		.option(
 			"--no-claim",
-			"with --checkout, skip assigning the issue to the current Linear user and moving it to the first started state",
+			"skip the claim that --checkout and --claim perform (assigning the issue to the current Linear user and moving it to the first started state)",
 		)
 		.option(
 			"--skip-validation",

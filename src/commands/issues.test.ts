@@ -2075,6 +2075,147 @@ describe("issues commands", () => {
 		});
 	});
 
+	// DEV-10654: `--claim` is the branchless half of `--checkout`. Filing an
+	// issue and leaving it in an unstarted state makes it eligible for the
+	// bot-layer sweep, so an author who will work it in a remote workspace still
+	// needs the claim -- but a local branch there is wrong.
+	//
+	// These run in a real temp git repo so "no branch was created" is an
+	// observation, not an assumption: a regression that re-welded the claim to a
+	// checkout would leave HEAD somewhere new.
+	describe("issues create --claim claims without a branch (DEV-10654)", () => {
+		const STARTED_CLAIM = {
+			issue: { id: "new-issue-id", identifier: "DEV-10654" },
+			claimed: true,
+			alreadyClaimed: false,
+			assigned: true,
+			started: true,
+			assignee: {
+				id: "user-1",
+				name: "Nico Appel",
+				displayName: "Nico",
+				email: "nico@example.com",
+			},
+			previousState: { id: "state-todo", name: "Todo", type: "unstarted" },
+			targetState: { id: "state-first", name: "In Progress" },
+		};
+
+		let repo: string;
+		let cwd: string;
+		let startingBranch: string;
+
+		const head = () =>
+			execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+				stdio: "pipe",
+			})
+				.toString()
+				.trim();
+
+		const branches = () =>
+			execFileSync("git", ["branch", "--format=%(refname:short)"], {
+				stdio: "pipe",
+			})
+				.toString()
+				.trim()
+				.split("\n")
+				.filter(Boolean);
+
+		const create = async (...flags: string[]) => {
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Claim without a branch",
+				"--team",
+				"DEV",
+				"--assignee",
+				"bob",
+				"--project",
+				"Infrastructure",
+				...flags,
+			]);
+		};
+
+		beforeEach(() => {
+			cwd = process.cwd();
+			repo = mkdtempSync(join(tmpdir(), "create-claim-"));
+			process.chdir(repo);
+			execFileSync("git", ["init", "-q"], { stdio: "pipe" });
+			execFileSync("git", ["config", "user.email", "t@example.com"], {
+				stdio: "pipe",
+			});
+			execFileSync("git", ["config", "user.name", "Test"], { stdio: "pipe" });
+			execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "init"], {
+				stdio: "pipe",
+			});
+			startingBranch = head();
+			mockCreateIssue.mockResolvedValue({
+				id: "new-issue-id",
+				identifier: "DEV-10654",
+				branchName: "dev-10654-claim-without-a-branch",
+			});
+			mockClaimIssue.mockResolvedValue(STARTED_CLAIM);
+		});
+
+		afterEach(() => {
+			process.chdir(cwd);
+			rmSync(repo, { recursive: true, force: true });
+		});
+
+		it("moves the issue to a started state and leaves the branch alone", async () => {
+			await create("--claim");
+
+			expect(mockClaimIssue).toHaveBeenCalledWith("DEV-10654");
+			// The point of the flag: the issue left its unstarted state, which is
+			// what makes it ineligible for the sweep.
+			const output = mockOutputSuccess.mock.calls.at(-1)?.[0];
+			expect(output.claim.started).toBe(true);
+			expect(output.claim.previousState.type).toBe("unstarted");
+			expect(output.claim.targetState).toEqual({
+				id: "state-first",
+				name: "In Progress",
+			});
+			// ...and no branch was cut or checked out.
+			expect(output.branch).toBeUndefined();
+			expect(head()).toBe(startingBranch);
+			expect(branches()).toEqual([startingBranch]);
+		});
+
+		it("still claims for --checkout alone, which --claim must not have disturbed", async () => {
+			// Regression guard for the commander pairing: declaring `--claim`
+			// alongside the pre-existing `--no-claim` flips `options.claim`'s
+			// default from `true` to `undefined`. Anything that had read the
+			// default as truthy would silently stop claiming here.
+			await create("--checkout");
+
+			expect(mockClaimIssue).toHaveBeenCalledWith("DEV-10654");
+			expect(head()).toBe("feature/DEV-10654-claim-without-a-branch");
+		});
+
+		it("--no-claim alone neither claims nor branches", async () => {
+			await create("--no-claim");
+
+			expect(mockClaimIssue).not.toHaveBeenCalled();
+			expect(head()).toBe(startingBranch);
+			expect(branches()).toEqual([startingBranch]);
+		});
+
+		it("--no-claim after --claim wins, matching commander's last-one-wins pairing", async () => {
+			await create("--claim", "--no-claim");
+
+			expect(mockClaimIssue).not.toHaveBeenCalled();
+			expect(head()).toBe(startingBranch);
+		});
+
+		it("--claim and --checkout together claim exactly once", async () => {
+			await create("--claim", "--checkout");
+
+			expect(mockClaimIssue).toHaveBeenCalledTimes(1);
+			expect(head()).toBe("feature/DEV-10654-claim-without-a-branch");
+		});
+	});
+
 	describe("issues mark-branch auto-claims the issue (DEV-4500)", () => {
 		let repo: string;
 		let cwd: string;
