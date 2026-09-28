@@ -224,6 +224,14 @@ export interface GetIssueTeamResponse {
 	} | null;
 }
 
+export interface GetIssueUpdateContextResponse {
+	issue: {
+		id: string;
+		team: { id: string } | null;
+		labels: { nodes: Array<{ id: string }> };
+	} | null;
+}
+
 type WorkflowStateType =
 	| "triage"
 	| "backlog"

@@ -20,6 +20,7 @@ import {
 	GET_ISSUE_CLAIM_CONTEXT_QUERY,
 	GET_ISSUE_START_CONTEXT_QUERY,
 	GET_ISSUE_TEAM_QUERY,
+	GET_ISSUE_UPDATE_CONTEXT_QUERY,
 	GET_ISSUES_QUERY,
 	SEARCH_ISSUES_QUERY,
 	TEAM_SCOPED_FILTERED_ISSUES_QUERY,
@@ -41,6 +42,7 @@ import type {
 	GetIssueByIdResponse,
 	GetIssuesResponse,
 	GetIssueTeamResponse,
+	GetIssueUpdateContextResponse,
 	IssueArchiveEntity,
 	IssueClaimContextResponse,
 	IssueNode,
@@ -1943,6 +1945,20 @@ export class GraphQLIssuesService {
 			resolveVariables.hasMilestoneName = true;
 		}
 
+		// DEV-10603: the batch resolver loads the issue's labels only when
+		// the issue is addressed by identifier (team key + number). An update
+		// by UUID that sets labels must load them here, or "adding" mode
+		// merges into an empty list and overwrites the labels the issue has.
+		// The same query supplies the team id that label resolution would
+		// otherwise fetch separately.
+		const uuidContextPromise =
+			isUuid(args.id) && args.labelIds && args.labelIds.length > 0
+				? this.graphQLService.rawRequest<GetIssueUpdateContextResponse>(
+						GET_ISSUE_UPDATE_CONTEXT_QUERY,
+						{ issueId: args.id },
+					)
+				: undefined;
+
 		const { __labelNames, ...updateQueryVars } = resolveVariables;
 		const batchPromise =
 			this.graphQLService.rawRequest<BatchResolveForUpdateResponse>(
@@ -1977,6 +1993,13 @@ export class GraphQLIssuesService {
 			resolvedIssueId = resolvedIssueNodes[0].id;
 			issueTeamId = resolvedIssueNodes[0].team?.id;
 			currentIssueLabels = resolvedIssueNodes[0].labels.nodes.map((l) => l.id);
+		} else if (uuidContextPromise) {
+			const context = await uuidContextPromise;
+			if (!context.issue) {
+				throw notFoundError("Issue", args.id);
+			}
+			issueTeamId = context.issue.team?.id;
+			currentIssueLabels = context.issue.labels.nodes.map((l) => l.id);
 		}
 
 		return { resolvedIssueId, issueTeamId, currentIssueLabels, resolveResult };
