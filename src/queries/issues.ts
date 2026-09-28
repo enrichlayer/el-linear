@@ -541,6 +541,19 @@ export const GET_ISSUE_TEAM_QUERY = `
   }
 `;
 
+// DEV-10603: an update addressed by issue UUID skips the batch resolver's
+// identifier lookup, so it needs this query for the issue's current labels.
+// Otherwise "adding" mode merges into an empty list and overwrites them.
+export const GET_ISSUE_UPDATE_CONTEXT_QUERY = `
+  query GetIssueUpdateContext($issueId: String!) {
+    issue(id: $issueId) {
+      id
+      team { id }
+      labels { nodes { id } }
+    }
+  }
+`;
+
 export const GET_ISSUE_START_CONTEXT_QUERY = `
   query GetIssueStartContext($id: String!) {
     issue(id: $id) {
