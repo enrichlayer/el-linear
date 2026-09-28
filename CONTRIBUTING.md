@@ -105,9 +105,11 @@ merge; a green CI and a human review still gate landing.
 - It runs on `pull_request` (not `pull_request_target`), so a PR from a **fork**
   runs without repository secrets and the review is skipped — a maintainer
   reviews those by hand. Draft PRs are skipped until marked ready.
-- **Setup (one-time, repo admin):** add an `ANTHROPIC_API_KEY` repository secret
-  under *Settings → Secrets and variables → Actions*. Without it the review step
-  fails on same-repo PRs. Change the reviewer model in the workflow's
+- **Setup (one-time, repo admin):** add a `CLAUDE_CODE_OAUTH_TOKEN` repository
+  secret under *Settings → Secrets and variables → Actions*, valued from Vault
+  `secret/claude-tools-token/token`. Without it the review step fails on
+  same-repo PRs. It authenticates on the Claude subscription seat, not a metered
+  API key — DEV-5390 makes raw Messages-API auth a policy violation. Change the reviewer model in the workflow's
   `claude_args` if you want a different tier.
 - **Non-blocking by construction.** The review step runs with
   `continue-on-error: true`, so the `pr-review` job stays green when the review
