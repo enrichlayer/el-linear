@@ -912,6 +912,39 @@ el-linear issues read DEV-123 --body
 
 Mutually exclusive with `--field` / `--sections` / `--with`.
 
+`--body` (like `--field` and `--sections`) prints the description **as
+Linear stores it** — `uploads.linear.app` attachment links intact, nothing
+downloaded. That makes it the right input for diffing, hashing, and writing
+back with `issues update --description-file`. See the next section for the
+envelope routes, which download attachments by default.
+
+### Attachment downloads: `--downloads` / `--no-downloads`
+
+The JSON envelope and `--format summary` download every
+`uploads.linear.app` attachment referenced by the description or comments
+into `<tmpdir>/el-linear-downloads/` and rewrite those URLs to the local
+paths, so an agent reading the envelope can open the images directly. That
+rewrite is an affordance for *viewing*, not a faithful copy of the
+description: the text now carries host-local temp paths, and the read takes
+as long as the largest attachment takes to download.
+
+The raw-text routes (`--body`, `--field`, `--sections`) therefore skip the
+download by default. Two flags override the per-route default:
+
+```bash
+# JSON envelope with the stored links and no download side effect —
+# use this when the text will be diffed, hashed, or written back.
+el-linear issues read DEV-123 --no-downloads
+
+# Opt a raw-text route back into the rewrite (local image paths in --body).
+el-linear issues read DEV-123 --body --downloads
+```
+
+Never feed a description read *with* the rewrite back into
+`issues update --description-file`: the local paths would replace the
+attachment links in Linear, and the originals are not recoverable from the
+description afterwards.
+
 ### Read full comment bodies without JSON parsing
 
 `comments read <comment-id>` reads one comment by full UUID, `comment-<hash>`

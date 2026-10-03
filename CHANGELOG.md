@@ -18,6 +18,7 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Bug Fixes
 
+* **issues:** stop `issues read --body` / `--field` / `--sections` from downloading attachments and rewriting `uploads.linear.app` links to local `el-linear-downloads` paths. Those routes hand the description to scripts that diff it, hash it, or write it back with `issues update --description-file`, and the rewrite persisted host-local temp paths into Linear in place of the attachment links (and made every read wait on the largest attachment). They now print the description as Linear stores it; the JSON envelope and `--format summary` keep the image-viewing rewrite by default and gain `--no-downloads` to opt out, while `--downloads` opts a raw-text route back in (DEV-9667)
 * **graphql:** publish typed pre-request quota refusals and known reset/probe deadlines in `errorDetail`, preserving configured headroom and avoiding immediate retries (DEV-9503).
 * **graphql:** classify SDK and raw GraphQL failures by HTTP status and extension code, preserving permanent failures separately from transient errors in the additive `errorDetail` output field (DEV-7987, #302); declare the request printer as a runtime dependency for production installs (DEV-7874).
 * **graphql:** stop immediate retries after server rate limits, refuse locally before configured shared/distributed headroom is consumed, preserve preflight refusals separately from possibly-committed mutations, report request/endpoint/complexity reset budgets, and expose the latest budget as `_rateLimit` output metadata (DEV-7874)

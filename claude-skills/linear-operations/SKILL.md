@@ -99,6 +99,21 @@ el-linear issues read DEV-123 --format json 2>&1 | python3 -c "import json,sys; 
 
 `--body` is mutually exclusive with `--field` / `--sections` / `--with` (those extract named parts or extend the JSON envelope; `--body` is the whole thing as text).
 
+#### Gotcha: attachment links rewritten to local download paths (el-linear ≤ 1.45.1)
+
+**Symptom.** A description read through `issues read` and written back with `issues update --description-file` now carries `/var/folders/.../el-linear-downloads/...` (or other `<tmpdir>/el-linear-downloads/`) paths where `https://uploads.linear.app/...` attachment links used to be, and the original links are gone — [FE-1388](https://linear.app/verticalint/issue/FE-1388/) lost two this way. Reads of issues with large attachments also stall (a 24 MB recording made `--body` take 11–19 s). **Cause.** Through el-linear 1.45.1, every read route — including `--body` — downloaded each attachment into `<tmpdir>/el-linear-downloads/` and rewrote the URLs to the local paths before printing, so "raw description" was not the description Linear stores. **Correct action.** In releases after 1.45.1 (the one carrying DEV-9667 onward), `--body` / `--field` / `--sections` are byte-exact by default (no download, no rewrite); the JSON envelope and `--format summary` still download by default and take `--no-downloads` to opt out. On an older el-linear, read the description with `el-linear graphql` instead of `issues read` before any write-back. Never write a description back that contains `el-linear-downloads` paths. Background: [DEV-9667](https://linear.app/verticalint/issue/DEV-9667/) (the el-linear fix), [DEV-9640](https://linear.app/verticalint/issue/DEV-9640/) and [DEV-9658](https://linear.app/verticalint/issue/DEV-9658/) (the tools consumers that moved to a raw GraphQL read).
+
+```bash
+# ✅ Byte-exact description (releases after 1.45.1) — safe to diff, hash, and write back
+el-linear issues read DEV-123 --body 2>&1
+
+# ✅ Byte-exact JSON envelope (no attachment download, stored links intact)
+el-linear issues read DEV-123 --no-downloads 2>&1
+
+# ❌ Don't write back text produced by a download-rewriting read
+el-linear issues update DEV-123 --description-file body-with-local-paths.md 2>&1
+```
+
 #### Citing an issue's stated rationale: `--body` or `--field`, never `--format summary`
 
 **`--format summary` truncates the description.** That is correct for scanning a board and wrong the moment you quote, cite, or reason from what an issue *says*. A research pass once read an issue with `--format summary`, saw a truncated description, and published the opposite of the design position that issue states outright — the fix was one command with a different flag, run twenty minutes too late.
