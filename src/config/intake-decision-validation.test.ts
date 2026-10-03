@@ -207,6 +207,32 @@ describe("evaluateIntakeDecision", () => {
 		});
 	});
 
+	it.each(["PROCEED", "PROCEED.", "PROCEED!", "PROCEED;"])(
+		"accepts the terminal decision %s",
+		(decision) => {
+			expect(
+				evaluateIntakeDecision(
+					VALID.replace("Decision: PROCEED", `Decision: ${decision}`),
+				),
+			).toEqual({ ok: true, header: "Intake decision" });
+		},
+	);
+
+	it.each(["PROCEED if approved", "PROCEED later", "PROCEED,"])(
+		"rejects the expanded or non-terminal decision %s",
+		(decision) => {
+			expect(
+				evaluateIntakeDecision(
+					VALID.replace("Decision: PROCEED", `Decision: ${decision}`),
+				),
+			).toEqual({
+				ok: false,
+				reason: "not-proceeding",
+				decision,
+			});
+		},
+	);
+
 	it("does not erase literal underscores to manufacture a PROCEED decision", () => {
 		const misspelled = VALID.replace("Decision: PROCEED", "Decision: PRO_CEED");
 		expect(evaluateIntakeDecision(misspelled)).toEqual({
