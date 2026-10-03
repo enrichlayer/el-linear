@@ -321,6 +321,18 @@ A full reference with every key documented lives in [config.example.json](./conf
 UUIDs come from the Linear UI (URL bars, settings pages) or via el-linear
 itself: `el-linear teams list --raw | jq '.[] | {key, id}'`, etc.
 
+### Caller-selected issue identity
+
+`issues create --issue-id <uuid-v4>` supplies a stable ID through the normal
+create flow, including its intake, duplicate, field, SOP, and checkout guards.
+The value must be a UUIDv4 and is forwarded unchanged. Omit the option to let
+Linear assign the issue ID as usual.
+
+Persist the ID before creation. If the response is lost or a later create reports
+a duplicate ID, use `el-linear issues get <uuid-v4>` to reconcile against Linear's
+authoritative issue record. Supplying an ID does not guarantee that replaying a
+create succeeds and does not enable automatic mutation retries.
+
 ### Gate telemetry (optional)
 
 `issues create` has a duplicate-detection gate (on by default), an opt-in

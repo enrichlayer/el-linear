@@ -108,6 +108,7 @@ import {
 	parsePositiveInt,
 	parsePriorityFilter,
 	splitList,
+	validateIssueId,
 	validatePriority,
 } from "../utils/validators.js";
 import {
@@ -1408,6 +1409,10 @@ async function handleCreateIssue(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
+	const issueId =
+		options.issueId !== undefined
+			? validateIssueId(options.issueId)
+			: undefined;
 	const rootOpts = getRootOpts(command);
 	// DEV-7277: non-blocking nudge when this write is landing via the
 	// machine-global active profile in a repo that hasn't pinned a workspace.
@@ -1537,6 +1542,7 @@ async function handleCreateIssue(
 	const result = await withProjectResolverEnrichment(
 		() =>
 			issuesService.createIssue({
+				...(issueId !== undefined ? { id: issueId } : {}),
 				// title is omitted when --from-template is set without an override,
 				// so Linear copies the template's title server-side.
 				...(title ? { title } : {}),
@@ -2359,6 +2365,10 @@ export function setupIssuesCommands(program: Command): void {
 		.option(
 			"-t, --title <title>",
 			"issue title (alternative to positional argument)",
+		)
+		.option(
+			"--issue-id <uuid-v4>",
+			"caller-selected issue UUIDv4 for stable identity; after a lost response or duplicate-ID error, look up this ID (replay success is not guaranteed)",
 		)
 		.option("-d, --description <desc>", "issue description")
 		.option(

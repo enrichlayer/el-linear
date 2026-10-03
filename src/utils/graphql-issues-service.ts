@@ -70,6 +70,7 @@ import {
 import type { LinearService } from "./linear-service.js";
 import { logger } from "./logger.js";
 import { isUuid } from "./uuid.js";
+import { validateIssueId } from "./validators.js";
 
 const TEAM_KEY_REGEX = /^[A-Z0-9]+$/i;
 
@@ -214,6 +215,8 @@ export interface UpdateIssueArgs extends IssueMutationFields {
  * the typed shape, `tsc` catches the typo.
  */
 export interface CreateIssueArgs extends IssueMutationFields {
+	/** Caller-selected UUIDv4 for the new issue; omitted to let Linear assign it. */
+	id?: string;
 	/** Original team token (key or name) — used in label resolution error messages. */
 	teamInput?: string;
 	/** Cycle number, name, or UUID — resolved per team. (No `null` on create.) */
@@ -852,6 +855,7 @@ export class GraphQLIssuesService {
 	}
 
 	private async createIssueImpl(args: CreateIssueArgs): Promise<LinearIssue> {
+		if (args.id !== undefined) validateIssueId(args.id);
 		// Pre-resolve URL/slug-id forms of --project to a UUID so the batch
 		// resolver below (which uses a `name eqIgnoreCase` filter) can skip
 		// the project lookup entirely. Plain name inputs flow through unchanged
@@ -1585,6 +1589,7 @@ export class GraphQLIssuesService {
 		},
 	): Record<string, unknown> {
 		const input: Record<string, unknown> = {};
+		if (args.id !== undefined) input.id = args.id;
 		// Title is required by Linear's API unless --from-template is set,
 		// in which case Linear copies the template's title. We only include
 		// the field when explicitly set so a missing title with templateId

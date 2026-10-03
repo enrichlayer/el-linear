@@ -655,6 +655,69 @@ describe("GraphQLIssuesService", () => {
 		});
 	});
 
+	describe("createIssue caller-selected identity (DEV-11113)", () => {
+		const id = "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE";
+		const teamId = "11111111-1111-4111-8111-111111111111";
+
+		function setupIdentityCreate() {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValue({
+					issueCreate: {
+						success: true,
+						issue: makeIssueNode({ id }),
+						lastSyncId: 1,
+					},
+				});
+			const linearService = new LinearService({ apiKey: "token" });
+			return {
+				service: new GraphQLIssuesService(graphQLService, linearService),
+				rawRequest,
+			};
+		}
+
+		it("forwards the exact UUIDv4 to IssueCreateInput.id", async () => {
+			const { service, rawRequest } = setupIdentityCreate();
+			await service.createIssue({ id, title: "Test", teamId });
+			expect(rawRequest).toHaveBeenCalledExactlyOnceWith(
+				expect.stringContaining("issueCreate"),
+				{ input: { id, title: "Test", teamId } },
+			);
+		});
+
+		it("omits id when no caller-selected identity was supplied", async () => {
+			const { service, rawRequest } = setupIdentityCreate();
+			await service.createIssue({ title: "Test", teamId });
+			expect(rawRequest).toHaveBeenCalledExactlyOnceWith(
+				expect.stringContaining("issueCreate"),
+				{ input: { title: "Test", teamId } },
+			);
+		});
+
+		it.each([
+			"invalid",
+			"aaaaaaaa-bbbb-1ccc-8ddd-eeeeeeeeeeee",
+			"aaaaaaaa-bbbb-4ccc-7ddd-eeeeeeeeeeee",
+			"",
+		])("rejects invalid identity %j before any request", async (invalidId) => {
+			const { service, rawRequest } = setupIdentityCreate();
+			await expect(
+				service.createIssue({ id: invalidId, title: "Test", teamId }),
+			).rejects.toThrow("Invalid --issue-id: must be a UUIDv4");
+			expect(rawRequest).not.toHaveBeenCalled();
+		});
+
+		it("surfaces duplicate-ID rejection without replaying the mutation", async () => {
+			const { service, rawRequest } = setupIdentityCreate();
+			rawRequest.mockRejectedValue(new Error("duplicate issue ID"));
+			await expect(
+				service.createIssue({ id, title: "Test", teamId }),
+			).rejects.toThrow("duplicate issue ID");
+			expect(rawRequest).toHaveBeenCalledTimes(1);
+		});
+	});
+
 	describe("createIssue project/team resolution", () => {
 		const PROJECT_UUID = "11111111-1111-4111-8111-111111111111";
 		const issueNode = {
