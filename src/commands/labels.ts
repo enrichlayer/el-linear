@@ -1,5 +1,6 @@
 import type { Command, OptionValues } from "commander";
 import { loadConfig } from "../config/config.js";
+import { resolvedProfileLabel } from "../config/paths.js";
 import { resolveTeam } from "../config/resolver.js";
 import {
 	CREATE_LABEL_MUTATION,
@@ -141,7 +142,10 @@ export function setupLabelsCommands(program: Command): void {
 				warnIfTruncated(result.labels.length, limit);
 				outputSuccess({
 					data: result.labels,
-					meta: { count: result.labels.length },
+					meta: {
+						count: result.labels.length,
+						profile: resolvedProfileLabel(),
+					},
 				});
 			}),
 		);

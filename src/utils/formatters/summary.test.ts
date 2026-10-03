@@ -976,6 +976,23 @@ describe("dispatch", () => {
 		expect(out).toContain("DEV-1");
 	});
 
+	it("prepends a Profile header for workspace lists carrying meta.profile", () => {
+		const out = dispatch("team-list", {
+			data: [{ key: "DEV", name: "Dev" }],
+			meta: { count: 1, profile: "verticalint" },
+		});
+		expect(out.startsWith("Profile: verticalint\n")).toBe(true);
+		expect(out).toContain("DEV");
+	});
+
+	it("omits the Profile header when meta.profile is absent", () => {
+		const out = dispatch("team-list", {
+			data: [{ key: "DEV", name: "Dev" }],
+			meta: { count: 1 },
+		});
+		expect(out.startsWith("Profile:")).toBe(false);
+	});
+
 	it("routes 'issue-list' through a bare array payload", () => {
 		const out = dispatch("issue-list", [
 			{
