@@ -10,23 +10,16 @@ interface CommentUserRef {
 	url: string | null;
 }
 
-/**
- * Comment shape returned by the standalone comment queries:
- * `LIST_COMMENTS_QUERY`, `CREATE_COMMENT_MUTATION`, and (with `issue`
- * overlay) `UPDATE_COMMENT_MUTATION`. Distinct from
- * `issues-types.ts:IssueCommentNode`, which is the embedded-in-issue
- * shape — that one allows `user: null`, this one does not (a standalone
- * comment without an author isn't a valid Linear state). The two were
- * a single `CommentNode` interface pre-DEV-4068 T2, but with incompatible
- * `user` shapes — renamed to disambiguate the per-context contract.
- */
+/** Standalone comments can be authored by a human, integration, or external user. */
 export interface CommentResourceNode {
 	id: string;
 	body: string;
 	url?: string | null;
 	createdAt: string;
 	updatedAt: string;
-	user: CommentUserRef;
+	user: CommentUserRef | null;
+	botActor?: { name: string | null } | null;
+	externalUser?: { name: string | null } | null;
 }
 
 interface UpdatedCommentResourceNode extends CommentResourceNode {
