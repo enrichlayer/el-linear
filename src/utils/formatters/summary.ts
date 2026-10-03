@@ -694,7 +694,16 @@ export function formatProjectList(
 // ── comments ───────────────────────────────────────────────────
 
 export function formatCommentSummary(comment: Record<string, unknown>): string {
-	const author = getName(comment.user);
+	const botName = asObj(comment.botActor)?.name;
+	const externalName = asObj(comment.externalUser)?.name;
+	const author =
+		comment.user != null
+			? getName(comment.user)
+			: typeof botName === "string" && botName
+				? `${s(botName)} (integration)`
+				: typeof externalName === "string" && externalName
+					? `${s(externalName)} (external)`
+					: "—";
 	const createdAt = s(comment.createdAt);
 	const body =
 		comment._summaryFullBody === true

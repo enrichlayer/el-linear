@@ -2,7 +2,7 @@ import fs, {
 	closeSync,
 	mkdtempSync,
 	openSync,
-	readFileSync,
+	readSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
@@ -898,14 +898,15 @@ describe("projects commands", () => {
 			// readTextInputFile reads fd 0 for "-"; point fd 0 at the file.
 			const fd = openSync(path, "r");
 			const spy = vi
-				.spyOn(fs, "readFileSync")
-				.mockImplementation(((target: unknown, enc: unknown) =>
-					target === 0
-						? readFileSync(fd, enc as BufferEncoding)
-						: readFileSync(
-								target as string,
-								enc as BufferEncoding,
-							)) as typeof readFileSync);
+				.spyOn(fs, "readSync")
+				.mockImplementation(((target, buffer, offset, length, position) =>
+					readSync(
+						target === 0 ? fd : target,
+						buffer,
+						offset,
+						length,
+						position,
+					)) as typeof readSync);
 
 			mockGraphQLService.rawRequest.mockResolvedValue({
 				projectUpdate: {

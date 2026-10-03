@@ -18,6 +18,9 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Bug Fixes
 
+* **comments:** handle null human authors and retain integration/external author names in JSON and summaries.
+* **input:** preserve delayed nonblocking stdin and UTF-8 split across reads (DEV-11118).
+
 * **graphql:** publish typed pre-request quota refusals and known reset/probe deadlines in `errorDetail`, preserving configured headroom and avoiding immediate retries (DEV-9503).
 * **graphql:** classify SDK and raw GraphQL failures by HTTP status and extension code, preserving permanent failures separately from transient errors in the additive `errorDetail` output field (DEV-7987, #302); declare the request printer as a runtime dependency for production installs (DEV-7874).
 * **graphql:** stop immediate retries after server rate limits, refuse locally before configured shared/distributed headroom is consumed, preserve preflight refusals separately from possibly-committed mutations, report request/endpoint/complexity reset budgets, and expose the latest budget as `_rateLimit` output metadata (DEV-7874)

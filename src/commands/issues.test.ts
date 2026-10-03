@@ -2000,35 +2000,29 @@ describe("issues commands", () => {
 			expect(mockCreateIssue).toHaveBeenCalled();
 		});
 
-		// DEV-5920 cycle-2 regression guard: a piped `--description-file -` with a
-		// valid falsifiable "Done when" must still create with the gate in block
-		// mode. On create, resolveDescription runs for validation, the body build,
-		// and this gate; each does fs.readFileSync(fd 0), but a stdin pipe drains
-		// after the first read. If the description isn't resolved exactly ONCE,
-		// the gate sees "" and hard-blocks a legitimate create. This simulates the
-		// drain (first fd-0 read returns the piped body, later reads return "")
-		// and asserts the create succeeds AND stdin was read exactly once.
+		// A description resolves once: one data read followed by EOF. A second
+		// resolution would drain stdin again and lose the validated body.
 		it("block mode: piped --description-file - with a falsifiable Done when still creates (stdin drain guard)", async () => {
 			mockLoadConfig.mockReturnValue(blockConfig);
 			const fsModule = await import("node:fs");
-			const originalReadFileSync = fsModule.default.readFileSync;
+			const originalReadSync = fsModule.default.readSync;
 			let stdinReads = 0;
-			const piped =
-				"Context long enough for the length check.\n\n## Done when\n\n- [ ] `pnpm test` reports 0 failures";
-			const spy = vi
-				.spyOn(fsModule.default, "readFileSync")
-				.mockImplementation(((fd: unknown, ...rest: unknown[]) => {
-					// fd 0 is stdin — model a pipe that yields data only on the first
-					// read and drains to "" thereafter.
-					if (fd === 0) {
-						stdinReads += 1;
-						return stdinReads === 1 ? piped : "";
-					}
-					return (
-						originalReadFileSync as (f: unknown, ...r: unknown[]) => string
-					)(fd, ...rest);
-				}) as typeof fsModule.default.readFileSync);
-
+			const piped = Buffer.from(
+				"Context long enough for the length check.\n\n## Done when\n\n- [ ] `pnpm test` reports 0 failures",
+			);
+			const spy = vi.spyOn(fsModule.default, "readSync").mockImplementation(((
+				fd,
+				buffer,
+				offset,
+				length,
+				position,
+			) => {
+				if (fd !== 0)
+					return originalReadSync(fd, buffer, offset, length, position);
+				stdinReads += 1;
+				if (stdinReads > 1) return 0;
+				return piped.copy(buffer as Buffer, offset, 0, length);
+			}) as typeof fsModule.default.readSync);
 			try {
 				const program = createTestProgram();
 				setupIssuesCommands(program);
@@ -2044,8 +2038,8 @@ describe("issues commands", () => {
 				spy.mockRestore();
 			}
 
-			// Resolved exactly once — the pipe was not re-read into "".
-			expect(stdinReads).toBe(1);
+			// One complete consumption: data, then EOF; no second resolution.
+			expect(stdinReads).toBe(2);
 			// The falsifiable section was seen → no block, issue created.
 			expect(process.exit).not.toHaveBeenCalledWith(1);
 			expect(mockCreateIssue).toHaveBeenCalled();
