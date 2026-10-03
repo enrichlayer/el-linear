@@ -8,6 +8,8 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Features
 
+* **issues:** accept `issues create --issue-id <uuid-v4>` for caller-selected stable identity through the existing validation and creation flow; invalid IDs are rejected before provider mutations (DEV-11113).
+
 * **auth:** support optional OAuth app credentials and client-credentials renewal while preserving explicit/API-key precedence; coordinate shared local or distributed request headroom, and batch project/label/cycle catalog reads to reduce request and complexity pressure (DEV-7874)
 * **issues:** add an opt-in intake-decision gate that requires explicit need, value, ownership, placement, and a `PROCEED` decision before creation; `--skip-validation` cannot silently bypass it (DEV-6163)
 * **issues:** add an opt-in create-time goal-completion gate — checks the description for a falsifiable "Done when" / acceptance-criteria section, `warn`/`block` modes via `validation.goalCompletionGate`, bypass with `--allow-vague-goal` (DEV-5920)

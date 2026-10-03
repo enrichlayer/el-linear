@@ -3,6 +3,16 @@ import { invalidParameterError } from "./error-messages.js";
 
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const UUID_V4_RE =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Caller-selected issue identities must satisfy Linear's UUIDv4 input contract. */
+export function validateIssueId(value: string): string {
+	if (value.length !== 36 || !UUID_V4_RE.test(value)) {
+		throw invalidParameterError("--issue-id", "must be a UUIDv4");
+	}
+	return value;
+}
 
 export function parsePositiveInt(value: string, flagName: string): number {
 	const n = Number.parseInt(value, 10);

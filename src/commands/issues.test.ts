@@ -17,6 +17,9 @@ import {
 
 // -- Mock function declarations (before vi.mock) --
 
+const issueId = "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE";
+const identityOptions = [[], ["--issue-id", issueId]];
+
 const mockGetIssues = vi.fn();
 const mockGetIssueById = vi.fn();
 const mockCreateIssue = vi.fn();
@@ -662,6 +665,76 @@ describe("issues commands", () => {
 		// Required fields for all create commands (assignee + project enforced)
 		const requiredArgs = ["--assignee", "bob", "--project", "Infrastructure"];
 
+		it("forwards a caller-selected UUIDv4 unchanged", async () => {
+			mockCreateIssue.mockResolvedValue({ id: issueId, identifier: "DEV-999" });
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"My Title",
+				...requiredArgs,
+				"--issue-id",
+				issueId,
+			]);
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ id: issueId }),
+			);
+		});
+
+		it.each([
+			"not-a-uuid",
+			"aaaaaaaa-bbbb-1ccc-8ddd-eeeeeeeeeeee",
+			"aaaaaaaa-bbbb-4ccc-7ddd-eeeeeeeeeeee",
+			"00000000-0000-0000-0000-000000000000",
+			"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee ",
+			"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\n",
+			"",
+		])(
+			"rejects invalid --issue-id %j before provider work even with --skip-validation",
+			async (id) => {
+				const program = createTestProgram();
+				setupIssuesCommands(program);
+				await runCommand(program, [
+					"issues",
+					"create",
+					"My Title",
+					...requiredArgs,
+					"--issue-id",
+					id,
+					"--skip-validation",
+					"--attachment",
+					"/tmp/photo.jpg",
+				]);
+				expect(mockCreateIssue).not.toHaveBeenCalled();
+				expect(mockUploadFile).not.toHaveBeenCalled();
+				expect(mockCreateGraphQLService).not.toHaveBeenCalled();
+				expect(mockResolveTeam).not.toHaveBeenCalled();
+				expect(process.exit).toHaveBeenCalledWith(1);
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					expect.stringContaining("Invalid --issue-id: must be a UUIDv4"),
+				);
+			},
+		);
+
+		it("still enforces required fields with --issue-id", async () => {
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				validation: { enabled: true },
+			});
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"My Title",
+				"--issue-id",
+				issueId,
+			]);
+			expect(mockCreateIssue).not.toHaveBeenCalled();
+			expect(process.exit).toHaveBeenCalledWith(1);
+		});
+
 		it("creates issue with team resolved from option", async () => {
 			mockCreateIssue.mockResolvedValue({
 				id: "new-issue-id",
@@ -679,6 +752,7 @@ describe("issues commands", () => {
 				...requiredArgs,
 			]);
 
+			expect(mockCreateIssue.mock.calls[0][0]).not.toHaveProperty("id");
 			expect(mockResolveTeam).toHaveBeenCalledWith("DEV");
 			expect(mockEnforceTerms).toHaveBeenCalledWith(["My Title", undefined], {
 				strict: undefined,
@@ -1077,41 +1151,45 @@ describe("issues commands", () => {
 		const hardBlockTitle =
 			"Rewrite the onboarding email sequence for new customers";
 
-		it("hard-blocks creation when a near-verbatim issue exists (DEV-5590)", async () => {
-			mockLoadConfig.mockReturnValue(enabledConfig);
-			mockSearchIssues.mockResolvedValue([hardBlockCandidate]);
-			mockCreateIssue.mockResolvedValue({ id: "x" });
+		it.each(identityOptions.map((args) => [args]))(
+			"hard-blocks creation when a near-verbatim issue exists (DEV-5590) (identity flags: %j)",
+			async (identityArgs) => {
+				mockLoadConfig.mockReturnValue(enabledConfig);
+				mockSearchIssues.mockResolvedValue([hardBlockCandidate]);
+				mockCreateIssue.mockResolvedValue({ id: "x" });
 
-			const program = createTestProgram();
-			setupIssuesCommands(program);
-			await runCommand(program, [
-				"issues",
-				"create",
-				hardBlockTitle,
-				...validArgs,
-			]);
+				const program = createTestProgram();
+				setupIssuesCommands(program);
+				await runCommand(program, [
+					"issues",
+					"create",
+					hardBlockTitle,
+					...validArgs,
+					...identityArgs,
+				]);
 
-			// Searched the salient keywords, including closed issues.
-			expect(mockSearchIssues).toHaveBeenCalledWith(
-				expect.objectContaining({ excludeTerminalStates: false }),
-			);
-			// Blocked: the candidate prevented the POST.
-			expect(mockCreateIssue).not.toHaveBeenCalled();
-			expect(process.exit).toHaveBeenCalledWith(1);
-			expect(consoleErrorSpy).toHaveBeenCalledWith(
-				expect.stringContaining("DEV-9001"),
-			);
-			// DEV-4834: the blocked decision is recorded for override-rate telemetry.
-			expect(mockEmitGateEvent).toHaveBeenCalledWith(
-				"el-linear",
-				"issues create",
-				expect.objectContaining({
-					gate: "issues-create-dup",
-					outcome: "blocked",
-					candidateCount: 1,
-				}),
-			);
-		});
+				// Searched the salient keywords, including closed issues.
+				expect(mockSearchIssues).toHaveBeenCalledWith(
+					expect.objectContaining({ excludeTerminalStates: false }),
+				);
+				// Blocked: the candidate prevented the POST.
+				expect(mockCreateIssue).not.toHaveBeenCalled();
+				expect(process.exit).toHaveBeenCalledWith(1);
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					expect.stringContaining("DEV-9001"),
+				);
+				// DEV-4834: the blocked decision is recorded for override-rate telemetry.
+				expect(mockEmitGateEvent).toHaveBeenCalledWith(
+					"el-linear",
+					"issues create",
+					expect.objectContaining({
+						gate: "issues-create-dup",
+						outcome: "blocked",
+						candidateCount: 1,
+					}),
+				);
+			},
+		);
 
 		it("--allow-duplicate runs the gate, records an override, and creates", async () => {
 			mockLoadConfig.mockReturnValue(enabledConfig);
@@ -1407,34 +1485,38 @@ describe("issues commands", () => {
 			);
 		});
 
-		it("blocks when an SOP-labeled issue has no parent or related", async () => {
-			mockLoadConfig.mockReturnValue(gateConfig);
+		it.each(identityOptions.map((args) => [args]))(
+			"blocks when an SOP-labeled issue has no parent or related (identity flags: %j)",
+			async (identityArgs) => {
+				mockLoadConfig.mockReturnValue(gateConfig);
 
-			const program = createTestProgram();
-			setupIssuesCommands(program);
-			await runCommand(program, [
-				"issues",
-				"create",
-				"Add onboarding SOP",
-				...sopArgs,
-			]);
+				const program = createTestProgram();
+				setupIssuesCommands(program);
+				await runCommand(program, [
+					"issues",
+					"create",
+					"Add onboarding SOP",
+					...sopArgs,
+					...identityArgs,
+				]);
 
-			// Deterministic block — no fetch needed.
-			expect(mockGetIssueById).not.toHaveBeenCalled();
-			expect(mockCreateIssue).not.toHaveBeenCalled();
-			expect(process.exit).toHaveBeenCalledWith(1);
-			expect(consoleErrorSpy).toHaveBeenCalledWith(
-				expect.stringContaining("has no --parent or --related-to"),
-			);
-			expect(mockEmitGateEvent).toHaveBeenCalledWith(
-				"el-linear",
-				"issues create",
-				expect.objectContaining({
-					gate: "issues-create-sop-parent",
-					outcome: "blocked",
-				}),
-			);
-		});
+				// Deterministic block — no fetch needed.
+				expect(mockGetIssueById).not.toHaveBeenCalled();
+				expect(mockCreateIssue).not.toHaveBeenCalled();
+				expect(process.exit).toHaveBeenCalledWith(1);
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					expect.stringContaining("has no --parent or --related-to"),
+				);
+				expect(mockEmitGateEvent).toHaveBeenCalledWith(
+					"el-linear",
+					"issues create",
+					expect.objectContaining({
+						gate: "issues-create-sop-parent",
+						outcome: "blocked",
+					}),
+				);
+			},
+		);
 
 		it("leaves a non-SOP issue untouched (no parent fetch, creates)", async () => {
 			mockLoadConfig.mockReturnValue(gateConfig);
@@ -1620,30 +1702,34 @@ describe("issues commands", () => {
 			mockCreateIssue.mockResolvedValue({ id: "x", identifier: "DEV-999" });
 		});
 
-		it("blocks before the create POST when intake is absent", async () => {
-			mockLoadConfig.mockReturnValue(blockConfig);
-			const program = createTestProgram();
-			setupIssuesCommands(program);
-			await runCommand(program, [
-				"issues",
-				"create",
-				"Create another workflow",
-				...createArgs,
-				"--description",
-				"A sufficiently long description without an intake decision.",
-			]);
+		it.each(identityOptions.map((args) => [args]))(
+			"blocks before the create POST when intake is absent (identity flags: %j)",
+			async (identityArgs) => {
+				mockLoadConfig.mockReturnValue(blockConfig);
+				const program = createTestProgram();
+				setupIssuesCommands(program);
+				await runCommand(program, [
+					"issues",
+					"create",
+					"Create another workflow",
+					...createArgs,
+					...identityArgs,
+					"--description",
+					"A sufficiently long description without an intake decision.",
+				]);
 
-			expect(mockCreateIssue).not.toHaveBeenCalled();
-			expect(process.exit).toHaveBeenCalledWith(1);
-			expect(mockEmitGateEvent).toHaveBeenCalledWith(
-				"el-linear",
-				"issues create",
-				expect.objectContaining({
-					gate: "issues-create-intake-decision",
-					outcome: "blocked",
-				}),
-			);
-		});
+				expect(mockCreateIssue).not.toHaveBeenCalled();
+				expect(process.exit).toHaveBeenCalledWith(1);
+				expect(mockEmitGateEvent).toHaveBeenCalledWith(
+					"el-linear",
+					"issues create",
+					expect.objectContaining({
+						gate: "issues-create-intake-decision",
+						outcome: "blocked",
+					}),
+				);
+			},
+		);
 
 		it("is not silently bypassed by --skip-validation", async () => {
 			mockLoadConfig.mockReturnValue(blockConfig);
