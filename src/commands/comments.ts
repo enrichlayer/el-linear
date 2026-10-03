@@ -129,21 +129,27 @@ function reportMentions(mentions: MentionsOutput | undefined): void {
 }
 
 function readBody(options: OptionValues): string {
-	// --body and --body-file are two sources for the same field; accepting both
-	// would silently drop one. Reject up front (DEV-4450) — the same mutual-
-	// exclusivity contract resolveDescription() enforces for --template.
-	if (options.body && options.bodyFile) {
+	const bodyFile = options.bodyFile ?? options.file;
+	if (options.bodyFile && options.file) {
 		throw new Error(
-			"--body and --body-file are mutually exclusive — pass one or the other",
+			"--body-file and --file are aliases — pass only one of them",
 		);
 	}
-	if (options.bodyFile) {
-		return readFileSync(options.bodyFile, "utf-8");
+	// --body and the file-backed options are two sources for the same field; accepting both
+	// would silently drop one. Reject up front (DEV-4450) — the same mutual-
+	// exclusivity contract resolveDescription() enforces for --template.
+	if (options.body && bodyFile) {
+		throw new Error(
+			"--body and --body-file/--file are mutually exclusive — pass one or the other",
+		);
+	}
+	if (bodyFile) {
+		return readFileSync(bodyFile, "utf-8");
 	}
 	if (options.body) {
 		return normalizeInlineTextInput(options.body);
 	}
-	throw new Error("Either --body or --body-file is required");
+	throw new Error("Either --body, --body-file, or --file is required");
 }
 
 async function fetchSelfUserId(
@@ -623,6 +629,7 @@ export function setupCommentsCommands(program: Command): void {
 		)
 		.option("--body <body>", "comment body (inline)")
 		.option("--body-file <path>", "read comment body from file")
+		.option("--file <path>", "alias for --body-file")
 		.option(
 			"--no-auto-mention",
 			"do not auto-convert bare team-member names to @mentions",
@@ -647,6 +654,7 @@ export function setupCommentsCommands(program: Command): void {
 		.description("Update an existing comment.")
 		.option("--body <body>", "new comment body (inline)")
 		.option("--body-file <path>", "read new comment body from file")
+		.option("--file <path>", "alias for --body-file")
 		.option(
 			"--no-auto-mention",
 			"do not auto-convert bare team-member names to @mentions",
