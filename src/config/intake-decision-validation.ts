@@ -86,6 +86,10 @@ const NON_SPECIFIC = /^(?:yes|no)$/i;
 // including `.`, which reads most naturally when the reason is a full sentence.
 // A bare verdict still fails: the trailing group requires real reason text.
 const AFFIRMATIVE_WITH_REASON = /^yes\s*(?:[-–—.:;,]|because)\s*(\S.{2,})$/i;
+// The decision is a terminal verdict, so ordinary sentence punctuation does
+// not change its meaning. Keep this deliberately narrower than trimming all
+// non-word characters: conditional or expanded values must still fail closed.
+const PROCEED_DECISION = /^proceed[.!;]?$/i;
 
 /**
  * What is actually wrong with a field whose label parsed. Keeping these apart
@@ -301,7 +305,7 @@ export function evaluateIntakeDecision(
 	}
 
 	const decision = values.get("decision")?.value ?? "";
-	if (!/^proceed$/i.test(withoutEmphasis(decision))) {
+	if (!PROCEED_DECISION.test(withoutEmphasis(decision))) {
 		return { ok: false, reason: "not-proceeding", decision };
 	}
 	return { ok: true, header: matchedHeader };
