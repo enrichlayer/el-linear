@@ -172,6 +172,78 @@ describe("issues commands", () => {
 		mockLoadConfig.mockReturnValue(baseConfig);
 	});
 
+	describe("complete relation reads (DEV-14039)", () => {
+		const peer = {
+			id: "peer",
+			identifier: "DEV-2",
+			title: "Blocker",
+			state: { id: "s", name: "Todo" },
+			priority: null,
+			assignee: null,
+			team: null,
+		};
+		const page = (
+			nodes: unknown[],
+			hasNextPage = false,
+			endCursor: string | null = null,
+		) => ({ nodes, pageInfo: { hasNextPage, endCursor } });
+		const response = (incoming: unknown) => ({
+			issue: {
+				id: "root",
+				identifier: "DEV-1",
+				title: "Root",
+				relations: page([]),
+				inverseRelations: incoming,
+			},
+		});
+
+		it("walks both connections before declaring complete; incoming later-page blocker survives", async () => {
+			mockGraphQLService.rawRequest.mockReset();
+			mockLinearService.resolveIssueId.mockResolvedValue("root");
+			mockGraphQLService.rawRequest
+				.mockResolvedValueOnce(
+					response(
+						page([{ id: "r0", type: "similar", issue: peer }], true, "next"),
+					),
+				)
+				.mockResolvedValueOnce(
+					response(page([{ id: "r", type: "blocks", issue: peer }])),
+				);
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, ["issues", "related", "DEV-1"]);
+			expect(mockGraphQLService.rawRequest).toHaveBeenCalledTimes(2);
+			expect(mockOutputSuccess).toHaveBeenCalledWith(
+				expect.objectContaining({
+					data: [
+						expect.objectContaining({ type: "similar" }),
+						expect.objectContaining({
+							type: "blockedBy",
+							issue: expect.objectContaining({ identifier: "DEV-2" }),
+						}),
+					],
+					meta: { count: 2, relations_complete: true },
+				}),
+			);
+		});
+
+		it("missing peers cannot become a complete empty result in the registered command", async () => {
+			mockGraphQLService.rawRequest.mockReset();
+			mockLinearService.resolveIssueId.mockResolvedValue("root");
+			mockGraphQLService.rawRequest.mockResolvedValue(
+				response(page([{ id: "r", type: "blocks", issue: null }])),
+			);
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, ["issues", "related", "DEV-1"]);
+			expect(mockOutputSuccess).not.toHaveBeenCalled();
+			expect(process.exit).toHaveBeenCalledWith(1);
+			expect(
+				stdoutSpy.mock.calls.map((call: unknown[]) => String(call[0])).join(""),
+			).toContain('"relations_complete": false');
+		});
+	});
+
 	describe("issues list", () => {
 		it("defaults to excluding terminal states — routes through searchIssues with excludeTerminalStates:true (DEV-4478)", async () => {
 			mockSearchIssues.mockResolvedValue([]);

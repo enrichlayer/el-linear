@@ -1048,6 +1048,35 @@ el-linear read DEV-1 DEV-2 --with relations | jq '.data[].relations'
 and is mutually exclusive with `--field` (which prints raw section text,
 no envelope).
 
+`issues related` (alias `relations`) and `read --with relations` exhaust both
+outgoing and incoming connections before returning rows. Successful JSON adds
+`meta.relations_complete: true`; the standalone command also retains
+`meta.count`. For a batched read, completeness is recorded on each issue.
+The bounds per issue are 50 rows per connection page, 40 requests, 1,000 total
+rows, 1 MiB of accumulated response JSON / formatted relation output and a
+six-second relation-read deadline. The deadline aborts relation HTTP requests;
+base-issue resolution and other includes keep their existing behavior.
+
+A fetch failure, missing issue/peer, invalid row, missing pagination proof,
+non-progressing cursor or exceeded bound fails the command with exit code 1:
+
+```json
+{
+  "error": "Incomplete issue relations: missing connection or pagination metadata",
+  "activeProfile": "work",
+  "meta": { "relations_complete": false }
+}
+```
+
+No partial rows are returned on failure, including when an opt-in relation
+include fails. Existing formatted relation rows remain unchanged: incoming
+`blocks` is `blockedBy`; `related`, `duplicate` and `similar` keep their type.
+Enumeration completeness does not assert that a nullable peer state is known
+or closed. Admission consumers must validate blocker identifiers/state and
+require explicit completeness, rather than treating an older missing field,
+an error or an empty array as proof. Output projections (`--raw`, `--fields`,
+`--jq`) can remove metadata; use the unprojected JSON envelope when checking it.
+
 ## Wrapping Linear references in arbitrary text
 
 `el-linear refs wrap` takes plain text on stdin (or via `--file`) and rewrites

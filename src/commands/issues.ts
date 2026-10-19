@@ -47,14 +47,8 @@ import {
 } from "../config/sop-label-validation.js";
 import { resolveDefaultStatus } from "../config/status-defaults.js";
 import { enforceTerms } from "../config/term-enforcer.js";
-import {
-	GET_ISSUE_RELATIONS_QUERY,
-	GET_ISSUE_STATE_HISTORY_QUERY,
-} from "../queries/issues.js";
-import type {
-	GetIssueRelationsResponse,
-	GetIssueStateHistoryResponse,
-} from "../queries/issues-types.js";
+import { GET_ISSUE_STATE_HISTORY_QUERY } from "../queries/issues.js";
+import type { GetIssueStateHistoryResponse } from "../queries/issues-types.js";
 import type {
 	IssueStateSpan,
 	LinearAttachment,
@@ -126,12 +120,8 @@ import {
 	resolveDescription,
 } from "./issues/description.js";
 import { handleLinkReferencesIssue } from "./issues/link-references.js";
-import {
-	buildIncomingRelationEntries,
-	buildOutgoingRelationEntries,
-	createRelations,
-	type RelatedIssueEntry,
-} from "./issues/relations.js";
+import { readIssueRelations } from "./issues/relation-reader.js";
+import { createRelations } from "./issues/relations.js";
 import { setupTreeCommand } from "./issues/tree.js";
 import { readIssues } from "./read-shortcut.js";
 
@@ -1778,33 +1768,9 @@ async function handleRelatedIssues(
 	command: Command,
 ): Promise<void> {
 	const rootOpts = getRootOpts(command);
-	const graphQLService = await createGraphQLService(rootOpts);
 	const linearService = await createLinearService(rootOpts);
-
 	const resolvedId = await linearService.resolveIssueId(issueId);
-	const result = await graphQLService.rawRequest<GetIssueRelationsResponse>(
-		GET_ISSUE_RELATIONS_QUERY,
-		{ id: resolvedId },
-	);
-
-	if (!result.issue) {
-		throw new Error(`Issue "${issueId}" not found`);
-	}
-
-	const issue = result.issue;
-
-	const entries: RelatedIssueEntry[] = [
-		...buildOutgoingRelationEntries(issue.relations.nodes),
-		...buildIncomingRelationEntries(issue.inverseRelations.nodes),
-	];
-
-	outputSuccess({
-		id: issue.id,
-		identifier: issue.identifier,
-		title: issue.title,
-		data: entries,
-		meta: { count: entries.length },
-	});
+	outputSuccess(await readIssueRelations(resolvedId, rootOpts));
 }
 
 async function handleStartIssue(
@@ -2728,7 +2694,7 @@ export function setupIssuesCommands(program: Command): void {
 		.command("related <issueId>")
 		.alias("relations")
 		.description(
-			"List all relations for an issue (related, blocks, blockedBy, duplicate).",
+			"List all relations for an issue (related, blocks, blockedBy, duplicate, similar).",
 		)
 		.addHelpText(
 			"after",
