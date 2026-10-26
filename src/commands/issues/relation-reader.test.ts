@@ -179,6 +179,19 @@ describe("canonical bounded relation reader", () => {
 			/duplicate relation/,
 		);
 	});
+	it.each(["incoming", "outgoing"] as const)(
+		"rejects an empty %s page claiming more results on the first request",
+		async (direction) => {
+			const emptyMore = connection([], true, "next");
+			request.mockResolvedValue(
+				direction === "incoming"
+					? page(emptyMore)
+					: page(connection(), emptyMore),
+			);
+			await expect(readIssueRelations("root", {})).rejects.toThrow(/cursor/);
+			expect(request).toHaveBeenCalledTimes(1);
+		},
+	);
 	it("bounds total pages even with unique cursors", async () => {
 		request.mockImplementation(async () => {
 			const n = request.mock.calls.length;
