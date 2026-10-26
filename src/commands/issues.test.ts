@@ -25,6 +25,7 @@ const mockGetIssueById = vi.fn();
 const mockCreateIssue = vi.fn();
 const mockUpdateIssue = vi.fn();
 const mockSearchIssues = vi.fn();
+const mockSearchIssuesByTitle = vi.fn();
 const mockArchiveIssue = vi.fn();
 const mockDeleteIssue = vi.fn();
 const mockStartIssue = vi.fn();
@@ -36,6 +37,7 @@ class MockGraphQLIssuesService {
 	createIssue = mockCreateIssue;
 	updateIssue = mockUpdateIssue;
 	searchIssues = mockSearchIssues;
+	searchIssuesByTitle = mockSearchIssuesByTitle;
 	archiveIssue = mockArchiveIssue;
 	deleteIssue = mockDeleteIssue;
 	startIssue = mockStartIssue;
@@ -1286,6 +1288,65 @@ describe("issues commands", () => {
 			expect(mockCreateIssue).toHaveBeenCalled();
 		});
 
+		const rerankerFailure = new Error(
+			"EXTERNAL_SERVICE_ERROR: Failed to rerank search results with Google reranker",
+		);
+
+		it("degrades to an unranked title check when Linear's reranker fails (DEV-14678)", async () => {
+			mockLoadConfig.mockReturnValue(enabledConfig);
+			mockSearchIssues.mockRejectedValue(rerankerFailure);
+			// The unranked path sees the same near-verbatim title the ranked
+			// search would have returned.
+			mockSearchIssuesByTitle.mockResolvedValue([hardBlockCandidate]);
+			mockCreateIssue.mockResolvedValue({ id: "x", identifier: "DEV-999" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				hardBlockTitle,
+				...validArgs,
+			]);
+
+			// Fell back to the structured title filter with the raw title.
+			expect(mockSearchIssuesByTitle).toHaveBeenCalledWith(hardBlockTitle, {
+				limit: 50,
+			});
+			// A reranker outage no longer silently disables the gate: the
+			// near-verbatim duplicate still prevents the POST.
+			expect(mockCreateIssue).not.toHaveBeenCalled();
+			expect(process.exit).toHaveBeenCalledWith(1);
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("DEV-9001"),
+			);
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringContaining("unranked"),
+			);
+		});
+
+		it("creates through a reranker outage when no title matches, and reports the unranked check (DEV-14678)", async () => {
+			mockLoadConfig.mockReturnValue(enabledConfig);
+			mockSearchIssues.mockRejectedValue(rerankerFailure);
+			mockSearchIssuesByTitle.mockResolvedValue([]);
+			mockCreateIssue.mockResolvedValue({ id: "x", identifier: "DEV-999" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Rewrite the onboarding email sequence for new customers",
+				...validArgs,
+			]);
+
+			// No --allow-duplicate needed to file during an outage.
+			expect(mockCreateIssue).toHaveBeenCalled();
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringContaining("compared 0 unranked title match"),
+			);
+		});
+
 		it("validation.duplicateDetection:false disables only the gate", async () => {
 			mockLoadConfig.mockReturnValue({
 				...baseConfig,
@@ -1354,9 +1415,10 @@ describe("issues commands", () => {
 			expect(mockCreateIssue).toHaveBeenCalled();
 		});
 
-		it("proceeds (best-effort) when the dup search itself fails", async () => {
+		it("proceeds (best-effort) when both the ranked search and its fallback fail", async () => {
 			mockLoadConfig.mockReturnValue(enabledConfig);
 			mockSearchIssues.mockRejectedValue(new Error("network down"));
+			mockSearchIssuesByTitle.mockRejectedValue(new Error("network down"));
 			mockCreateIssue.mockResolvedValue({ id: "x", identifier: "DEV-999" });
 
 			const program = createTestProgram();
