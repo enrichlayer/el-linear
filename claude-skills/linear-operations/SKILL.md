@@ -364,6 +364,14 @@ or the operator adds a permission rule / runs non-auto-mode so post-hoc
 If `--include-closed` search returns no matches, no `relation_candidates:`
 warning is emitted and the flow proceeds normally.
 
+### Enrich Layer: widen the search, record the verdict, decide bot suitability
+
+Enrich Layer's Tools repository adds three steps to the duplicate check (formerly the `linear-issue-creator` agent, folded here by DEV-14605). Skip this section elsewhere.
+
+1. **Widen the search when the first pass is thin.** `node scripts/linear-search-window.ts "<key terms>" --limit 20 --widen-limit 100 --format summary` runs the closed-inclusive search and widens it when the first window returns too few candidates to judge, so a duplicate with different wording is not missed because the first page was short.
+2. **Record each same-defect verdict.** Run `el-session same-defect --title "<title>" --body-file <draft> --candidates <ids> --format summary` on the candidates the search surfaced, then record the decision with `--record DEV-1=same,DEV-2=distinct`. The record is what stops the next filer from judging the same pair again ([DEV-10506](https://linear.app/verticalint/issue/DEV-10506/), [DEV-10631](https://linear.app/verticalint/issue/DEV-10631/)); `same` means comment on the existing issue instead of creating one.
+3. **Decide bot suitability before creating.** The label advisor below applies `bot` when `el-bot linear-rubric --advise` marks the issue BOT (`el-bot linear-rubric --json` prints the rubric). An issue qualifies only when all four hold: (a) it is placed in tools or el-lander; (b) it is unstarted and bounded with an explicit "Done when"; (c) it needs no human decision, sign-off, outreach, purchasing, credential rotation or privileged production access; (d) it changes no bot, review, approval, merge-gate, hook or workflow authority. The one exception to (d) is control-plane self-repair under [DEV-10400](https://linear.app/verticalint/issue/DEV-10400/) (`docs/tools-governance.md#control-plane-self-repair-dev-10400`). When the issue fails a criterion, pass `--no-label-advisor`; when you intend to work it yourself, do the same and pass `--status "In Progress"`. After creating, check `labelAdvisor.consent.applied` in the output; a `bot` the advisor could not apply is granted later with `el-bot linear-consent <ID> --automatic-implementation --reason "<reason>"`. Never put `bot` in `--labels`.
+
 ### Viewing existing relations
 
 ```bash
