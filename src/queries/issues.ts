@@ -666,6 +666,40 @@ export const GET_ISSUE_RELATIONS_QUERY = `
   }
 `;
 
+/**
+ * Bounded relation enumeration. SDK 88 exposes peers and their state through
+ * lazy IssueRelation/Issue getters; selecting both directions here avoids
+ * per-edge/peer/state requests while retaining explicit connection cursors.
+ * The older query remains for existing mutation preflights only.
+ */
+export const GET_ISSUE_RELATIONS_PAGE_QUERY = `
+  query GetIssueRelationsPage($id: String!, $first: Int!, $outAfter: String, $inAfter: String, $outgoing: Boolean!, $incoming: Boolean!) {
+    issue(id: $id) {
+      id identifier title
+      relations(first: $first, after: $outAfter) @include(if: $outgoing) {
+        nodes {
+          id type
+          relatedIssue {
+            id identifier title state { id name } priority
+            assignee { id name } team { id key name }
+          }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+      inverseRelations(first: $first, after: $inAfter) @include(if: $incoming) {
+        nodes {
+          id type
+          issue {
+            id identifier title state { id name } priority
+            assignee { id name } team { id key name }
+          }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+`;
+
 export const SCAN_ISSUES_QUERY = `
   query ScanIssues($filter: IssueFilter, $first: Int) {
     issues(filter: $filter, first: $first, orderBy: updatedAt) {

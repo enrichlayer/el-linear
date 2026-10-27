@@ -9,6 +9,7 @@ import {
 } from "./formatters/summary.js";
 import { readGraphQLErrorDetail } from "./linear-graphql-error.js";
 import { logger } from "./logger.js";
+import { RelationReadError } from "./relation-read-error.js";
 import { sanitizeForLog } from "./sanitize-for-log.js";
 
 const warningBuffer: string[] = [];
@@ -769,12 +770,17 @@ function outputError(error: Error): void {
 	// every other error, so nothing about the existing two-key envelope
 	// changes for callers that never looked at it. See the "Error
 	// envelope" section of the README for the published contract.
-	const errorDetail = readGraphQLErrorDetail(error);
+	const errorDetail = readGraphQLErrorDetail(
+		error instanceof RelationReadError ? error.cause : error,
+	);
 	const rateLimit = drainRateLimitInfo();
 	const payload = JSON.stringify(
 		{
 			error: sanitizeForLog(error.message),
 			activeProfile,
+			...(error instanceof RelationReadError
+				? { meta: { relations_complete: false } }
+				: {}),
 			...(errorDetail ? { errorDetail } : {}),
 			...(rateLimit ? { _rateLimit: rateLimit } : {}),
 		},
