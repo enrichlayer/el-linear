@@ -753,6 +753,79 @@ describe("handleAsyncCommand", () => {
 		expect("errorDetail" in parsed).toBe(false);
 	});
 
+	// DEV-14754: the envelope described only the outermost error, so any
+	// wrapper that added context took the reason — and the retry verdict —
+	// with it.
+	it("publishes the cause chain below a wrapped failure", async () => {
+		const fn = vi.fn().mockRejectedValue(
+			new Error("creating issue failed", {
+				cause: new Error("team not found"),
+			}),
+		);
+		await handleAsyncCommand(fn)();
+		const parsed = JSON.parse(stdoutSpy.mock.calls[0]?.[0] as string);
+		expect(parsed.error).toBe("creating issue failed");
+		expect(parsed.cause).toBe("team not found");
+	});
+
+	it("renders a multi-level chain as one line", async () => {
+		const fn = vi.fn().mockRejectedValue(
+			new Error("command failed", {
+				cause: new Error("request failed", {
+					cause: new Error("socket hang up"),
+				}),
+			}),
+		);
+		await handleAsyncCommand(fn)();
+		const parsed = JSON.parse(stdoutSpy.mock.calls[0]?.[0] as string);
+		expect(parsed.cause).toBe("request failed: socket hang up");
+	});
+
+	it("omits cause entirely for an error that has none", async () => {
+		// Every existing consumer reads this envelope; an error without a cause
+		// must produce byte-identical output to before.
+		const fn = vi.fn().mockRejectedValue(new Error("plain failure"));
+		await handleAsyncCommand(fn)();
+		const parsed = JSON.parse(stdoutSpy.mock.calls[0]?.[0] as string);
+		expect("cause" in parsed).toBe(false);
+	});
+
+	it("publishes errorDetail for a wrapped Linear GraphQL failure", async () => {
+		const fn = vi.fn().mockRejectedValue(
+			new Error("claiming issue failed", {
+				cause: new LinearGraphQLError("Ratelimit exceeded", {
+					httpStatus: 429,
+					code: "RATELIMITED",
+					retryable: true,
+				}),
+			}),
+		);
+		await handleAsyncCommand(fn)();
+		const parsed = JSON.parse(stdoutSpy.mock.calls[0]?.[0] as string);
+		expect(parsed.error).toBe("claiming issue failed");
+		expect(parsed.cause).toBe("Ratelimit exceeded");
+		expect(parsed.errorDetail).toEqual({
+			httpStatus: 429,
+			code: "RATELIMITED",
+			retryable: true,
+		});
+	});
+
+	it("redacts a Linear token embedded in a cause", async () => {
+		// The cause is printed to the same streams as the message, so it needs
+		// the same treatment: a wrapper that quotes a provider body can carry a
+		// token one link down.
+		const fn = vi.fn().mockRejectedValue(
+			new Error("request failed", {
+				cause: new Error("Bearer lin_api_abcdefghijklmnop1234567890 rejected"),
+			}),
+		);
+		await handleAsyncCommand(fn)();
+		const parsed = JSON.parse(stdoutSpy.mock.calls[0]?.[0] as string);
+		expect(parsed.cause).not.toContain("lin_api_abcdefghijklmnop1234567890");
+		expect(parsed.cause).toContain("lin_api_***REDACTED***");
+	});
+
 	it("wraps non-Error throws in Error", async () => {
 		const fn = vi.fn().mockRejectedValue("string error");
 		const wrapped = handleAsyncCommand(fn);

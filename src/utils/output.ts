@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { resolveActiveProfile } from "../config/paths.js";
+import { errorChainMessage } from "./error-chain.js";
 import {
 	dispatch as dispatchSummary,
 	drainSummaryFieldWarnings,
@@ -7,7 +8,7 @@ import {
 	inferKindFromPayload,
 	type ResourceKind,
 } from "./formatters/summary.js";
-import { readGraphQLErrorDetail } from "./linear-graphql-error.js";
+import { readGraphQLErrorDetailFromChain } from "./linear-graphql-error.js";
 import { logger } from "./logger.js";
 import { RelationReadError } from "./relation-read-error.js";
 import { sanitizeForLog } from "./sanitize-for-log.js";
@@ -770,9 +771,22 @@ function outputError(error: Error): void {
 	// every other error, so nothing about the existing two-key envelope
 	// changes for callers that never looked at it. See the "Error
 	// envelope" section of the README for the published contract.
-	const errorDetail = readGraphQLErrorDetail(
-		error instanceof RelationReadError ? error.cause : error,
-	);
+	//
+	// Read through the cause chain (DEV-14754): a command that catches a
+	// Linear failure and rethrows it with more context has not stopped being
+	// a Linear failure, and the classification is what tells the caller
+	// whether to retry. This also covers the wrapped read RelationReadError
+	// adds, without a special case per wrapper.
+	const errorDetail = readGraphQLErrorDetailFromChain(error);
+
+	// `cause` (DEV-14754) is the chain below `error`, outermost first. Without
+	// it a wrapper's sentence is all a caller ever sees, and the reason lives
+	// one layer down — tokens are stripped here for the same reason they are
+	// stripped from the message: the envelope is written to stdout, shell
+	// history and CI logs.
+	const cause = sanitizeForLog(
+		errorChainMessage(error.cause, error.message),
+	).trim();
 	const rateLimit = drainRateLimitInfo();
 	const payload = JSON.stringify(
 		{
@@ -781,6 +795,7 @@ function outputError(error: Error): void {
 			...(error instanceof RelationReadError
 				? { meta: { relations_complete: false } }
 				: {}),
+			...(cause ? { cause } : {}),
 			...(errorDetail ? { errorDetail } : {}),
 			...(rateLimit ? { _rateLimit: rateLimit } : {}),
 		},
