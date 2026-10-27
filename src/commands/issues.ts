@@ -121,7 +121,11 @@ import {
 } from "./issues/description.js";
 import { handleLinkReferencesIssue } from "./issues/link-references.js";
 import { readIssueRelations } from "./issues/relation-reader.js";
-import { createRelations } from "./issues/relations.js";
+import {
+	createRelations,
+	deleteRelations,
+	selectRelationsToRemove,
+} from "./issues/relations.js";
 import { setupTreeCommand } from "./issues/tree.js";
 import { readIssues } from "./read-shortcut.js";
 
@@ -1762,6 +1766,52 @@ async function handleRelateIssue(
 	});
 }
 
+/**
+ * DEV-14607 — retract a relation. `issues relate` could create one but
+ * nothing could remove it, so a relation recorded from an analysis that
+ * production later refuted had to stay on the issue with only a comment
+ * saying it was wrong.
+ */
+async function handleUnrelateIssue(
+	issueId: string,
+	options: OptionValues,
+	command: Command,
+): Promise<void> {
+	const rootOpts = getRootOpts(command);
+	const graphQLService = await createGraphQLService(rootOpts);
+	const linearService = await createLinearService(rootOpts);
+
+	if (
+		!options.relatedTo &&
+		!options.blocks &&
+		!options.blockedBy &&
+		!options.duplicateOf
+	) {
+		throw new Error(
+			"Specify at least one of: --related-to, --blocks, --blocked-by, --duplicate-of",
+		);
+	}
+
+	const sourceId = await linearService.resolveIssueId(issueId);
+	// The bounded COMPLETE reader, never a single page: deciding a removal from
+	// a partial relation list could report "no such relation" for one that is
+	// really there, and it fails rather than returning a short array.
+	const current = await readIssueRelations(sourceId, rootOpts);
+	if (current.meta.relations_complete !== true) {
+		throw new Error(
+			"Refusing to remove a relation from an incomplete relation read",
+		);
+	}
+
+	const targets = selectRelationsToRemove(current.data, options);
+	const removed = await deleteRelations(targets, graphQLService);
+
+	outputSuccess({
+		data: removed,
+		meta: { count: removed.length, source: issueId, removed: true },
+	});
+}
+
 async function handleRelatedIssues(
 	issueId: string,
 	_options: OptionValues,
@@ -2689,6 +2739,22 @@ export function setupIssuesCommands(program: Command): void {
 			"print one confirmation line (SOURCE  type targets  (count)) instead of the full JSON",
 		)
 		.action(handleAsyncCommand(handleRelateIssue));
+
+	issues
+		.command("unrelate <issueId>")
+		.description("Remove issue relations created by `issues relate`.")
+		.option("--related-to <issues>", "related issues (comma-separated)")
+		.option("--blocks <issues>", "issues this blocks (comma-separated)")
+		.option("--blocked-by <issues>", "issues blocking this (comma-separated)")
+		.addHelpText(
+			"after",
+			"\nBoth UUID and identifiers like ABC-123 are supported." +
+				"\nThe flag must match the one that created the relation: `--blocks` and" +
+				"\n`--blocked-by` name opposite directions and cannot retract each other." +
+				"\nRun `issues related <issueId>` first to see what is there.",
+		)
+		.option("--duplicate-of <issue>", "remove a duplicate-of relation")
+		.action(handleAsyncCommand(handleUnrelateIssue));
 
 	issues
 		.command("related <issueId>")

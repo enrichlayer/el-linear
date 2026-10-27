@@ -625,6 +625,19 @@ export const ISSUE_RELATION_CREATE_MUTATION = `
   }
 `;
 
+/**
+ * DEV-14607 — remove one relation by id. `issues relate` could create a
+ * relation but nothing could retract one, so a relation recorded from an
+ * analysis that later turned out to be wrong had to stay on the issue.
+ */
+export const ISSUE_RELATION_DELETE_MUTATION = `
+  mutation IssueRelationDelete($id: String!) {
+    issueRelationDelete(id: $id) {
+      success
+    }
+  }
+`;
+
 export const GET_ISSUE_RELATIONS_QUERY = `
   query GetIssueRelations($id: String!) {
     issue(id: $id) {

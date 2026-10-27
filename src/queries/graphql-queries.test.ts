@@ -46,6 +46,7 @@ import {
 	GET_ISSUE_UPDATE_CONTEXT_QUERY,
 	GET_ISSUES_QUERY,
 	ISSUE_RELATION_CREATE_MUTATION,
+	ISSUE_RELATION_DELETE_MUTATION,
 	SCAN_ISSUES_QUERY,
 	SEARCH_ISSUES_QUERY,
 	TEAM_SCOPED_FILTERED_ISSUES_QUERY,
@@ -176,6 +177,7 @@ const ALL_QUERIES: [string, string][] = [
 	["GET_ISSUE_CLAIM_CONTEXT_QUERY", GET_ISSUE_CLAIM_CONTEXT_QUERY],
 	["TEAM_STARTED_STATUSES_QUERY", TEAM_STARTED_STATUSES_QUERY],
 	["ISSUE_RELATION_CREATE_MUTATION", ISSUE_RELATION_CREATE_MUTATION],
+	["ISSUE_RELATION_DELETE_MUTATION", ISSUE_RELATION_DELETE_MUTATION],
 	[
 		"buildResolveLabelsByNameQuery",
 		buildResolveLabelsByNameQuery(["bug"]).query,
@@ -723,5 +725,13 @@ describe("search.ts — semantic search", () => {
 		expect(containsField(SEMANTIC_SEARCH_QUERY, "project")).toBe(true);
 		expect(containsField(SEMANTIC_SEARCH_QUERY, "initiative")).toBe(true);
 		expect(containsField(SEMANTIC_SEARCH_QUERY, "document")).toBe(true);
+	});
+});
+
+describe("issue relation removal (DEV-14607)", () => {
+	it("ISSUE_RELATION_DELETE_MUTATION addresses one relation by id and reports success", () => {
+		expect(ISSUE_RELATION_DELETE_MUTATION).toContain("issueRelationDelete");
+		expect(ISSUE_RELATION_DELETE_MUTATION).toContain("$id: String!");
+		expect(containsField(ISSUE_RELATION_DELETE_MUTATION, "success")).toBe(true);
 	});
 });
