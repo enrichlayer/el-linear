@@ -789,12 +789,36 @@ capturing one stream always gets exactly one parseable object).
 
 | Field           | Always present | Meaning                                                              |
 | --------------- | -------------- | -------------------------------------------------------------------- |
-| `error`         | yes            | The failure message, token-sanitized.                                |
+| `error`         | yes            | The failure message, token-sanitized. This is the outermost message — the one the failing command composed. |
 | `activeProfile` | yes            | Which profile the command ran under — distinguishes "not found" from "wrong workspace". |
-| `errorDetail`   | no             | Classification of a **Linear GraphQL** failure or quota admission refusal. See below. |
+| `cause`         | no             | The wrapped reasons below `error`, outermost first, token-sanitized. See below. |
+| `errorDetail`   | no             | Classification of a **Linear GraphQL** failure or quota admission refusal, whether thrown directly or wrapped. See below. |
+
+`cause` is emitted when the thrown error wraps another one — the standard
+`new Error(message, { cause })` chain that every layer adding context
+("creating issue failed", "refreshing the token failed") builds. It renders the
+chain below `error` as one line, joined with `: `, with a segment that already
+appears in `error` or in an earlier segment omitted (a wrapper usually composes
+its message from the inner one) and a `cause` cycle terminating rather than
+hanging:
+
+```json
+{
+  "error": "claiming issue failed",
+  "activeProfile": "work",
+  "cause": "Ratelimit exceeded",
+  "errorDetail": { "httpStatus": 429, "code": "RATELIMITED", "retryable": true }
+}
+```
+
+Read it when `error` alone doesn't explain the failure: the outer sentence is
+the command's context, and the reason lives below it. It is absent when the
+error carries no cause, so an unwrapped failure's envelope is unchanged.
 
 `errorDetail` is emitted when the failure came from a request to the
-Linear GraphQL API or the quota admission that precedes it. Its fields:
+Linear GraphQL API or the quota admission that precedes it — including when a
+command caught such a failure and rethrew it with more context, since wrapping
+a failure does not make it stop being a Linear failure. Its fields:
 
 | Field        | Type             | Meaning                                                                 |
 | ------------ | ---------------- | ----------------------------------------------------------------------- |
