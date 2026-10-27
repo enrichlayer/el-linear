@@ -50,6 +50,34 @@ describe("selectRelationsToRemove (DEV-14607)", () => {
 		).toEqual(["in"]);
 	});
 
+	it("keeps --duplicate-of to the outgoing row so it cannot retract the reverse", () => {
+		// Review finding 99a002ee8d on PR #354: normalizeInverseType renames only
+		// `blocks`, so an incoming duplicate ("DEV-2 is a duplicate of DEV-1")
+		// reaches the matcher as type `duplicate` exactly like an outgoing one.
+		// Matching on type alone therefore retracted the opposite direction, and
+		// because every match is taken it deleted both rows at once.
+		const rows = [
+			entry({ id: "out", type: "duplicate", direction: "outgoing" }),
+			entry({ id: "in", type: "duplicate", direction: "incoming" }),
+		];
+		expect(
+			selectRelationsToRemove(rows, { duplicateOf: "DEV-2" }).map(
+				(t) => t.entry.id,
+			),
+		).toEqual(["out"]);
+	});
+
+	it("refuses --duplicate-of when only the reverse duplicate exists", () => {
+		// The refusal has to be intelligible: the peer the user named really is
+		// on the issue, just on the side this flag does not own.
+		const rows = [
+			entry({ id: "in", type: "duplicate", direction: "incoming" }),
+		];
+		expect(() =>
+			selectRelationsToRemove(rows, { duplicateOf: "DEV-2" }),
+		).toThrow(/incoming duplicate DEV-2/);
+	});
+
 	it("matches a peer by identifier case-insensitively or by UUID", () => {
 		const rows = [entry({ id: "a", type: "related" })];
 		for (const named of ["DEV-2", "dev-2", "uuid-2"]) {
@@ -105,7 +133,7 @@ describe("selectRelationsToRemove (DEV-14607)", () => {
 	it("names what is actually there when the relation does not exist", () => {
 		const rows = [entry({ id: "a", type: "related" })];
 		expect(() => selectRelationsToRemove(rows, { blocks: "DEV-2" })).toThrow(
-			/No blocks relation to DEV-2 to remove.*has: related DEV-2/s,
+			/No blocks relation to DEV-2 to remove.*has: outgoing related DEV-2/s,
 		);
 	});
 

@@ -104,6 +104,15 @@ const RELATION_SPECS: {
 	type: string;
 	/** The type as the relation reader reports it from the source's view. */
 	removalType: string;
+	/**
+	 * Which side of the relation this flag owns, where the reported type alone
+	 * does not say. `normalizeInverseType` renames only `blocks`, so `blocks`
+	 * and `blockedBy` are already distinct types and need no direction, and
+	 * `related` is symmetric so narrowing it would refuse a legitimate
+	 * removal. A duplicate is reported as `duplicate` from both sides, so
+	 * without this the flag would retract the opposite direction.
+	 */
+	removalDirection?: RelatedIssueEntry["direction"];
 	reverse?: boolean;
 }[] = [
 	{ option: "relatedTo", type: "related", removalType: "related" },
@@ -114,7 +123,12 @@ const RELATION_SPECS: {
 		removalType: "blockedBy",
 		reverse: true,
 	},
-	{ option: "duplicateOf", type: "duplicate", removalType: "duplicate" },
+	{
+		option: "duplicateOf",
+		type: "duplicate",
+		removalType: "duplicate",
+		removalDirection: "outgoing",
+	},
 ];
 
 export interface RelatedIssueEntry {
@@ -255,6 +269,8 @@ export function selectRelationsToRemove(
 			const matches = entries.filter(
 				(entry) =>
 					entry.type === spec.removalType &&
+					(spec.removalDirection === undefined ||
+						entry.direction === spec.removalDirection) &&
 					(entry.issue.identifier.toLowerCase() === wanted ||
 						entry.issue.id.toLowerCase() === wanted),
 			);
@@ -263,8 +279,14 @@ export function selectRelationsToRemove(
 					`No ${spec.removalType} relation to ${requested} to remove. ` +
 						(entries.length === 0
 							? "This issue has no relations."
-							: `This issue has: ${entries
-									.map((entry) => `${entry.type} ${entry.issue.identifier}`)
+							: // The direction is part of the listing because a flag that
+								// owns one side refuses the other, and naming only the type
+								// would list the peer the user just asked for as if absent.
+								`This issue has: ${entries
+									.map(
+										(entry) =>
+											`${entry.direction} ${entry.type} ${entry.issue.identifier}`,
+									)
 									.join(", ")}.`),
 				);
 			}
