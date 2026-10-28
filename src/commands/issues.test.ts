@@ -944,6 +944,94 @@ describe("issues commands", () => {
 			);
 		});
 
+		// DEV-14849: commander keeps only the last occurrence of a repeated
+		// option, so `--label bug --label feature` used to resolve `feature`
+		// alone and the caller never saw `bug` go missing.
+		it("accumulates a repeated --label instead of keeping only the last", async () => {
+			mockResolveLabels.mockReturnValue(["label-uuid-1", "label-uuid-2"]);
+			mockCreateIssue.mockResolvedValue({ id: "new-issue-id" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Task",
+				"--team",
+				"DEV",
+				"--label",
+				"bug",
+				"--label",
+				"feature",
+				...requiredArgs,
+			]);
+
+			expect(mockResolveLabels).toHaveBeenCalledWith(["bug", "feature"]);
+		});
+
+		// DEV-14849: a validation refusal must stay non-zero. The envelope
+		// carries the reason in `error`, and an exit of 0 beside it would make
+		// every shell-out caller read a blocked creation as a successful one.
+		// This pins the status so it cannot regress to 0; it already holds.
+		//
+		// The rest of this file runs with `validation: { enabled: false }` to
+		// isolate command wiring, so the refusal has to be turned on for this
+		// one case — otherwise the command never reaches `enforceValidation`
+		// and the test would pass on an unrelated exit.
+		it("exits non-zero when validation blocks the creation", async () => {
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				validation: { enabled: true },
+			});
+			try {
+				const program = createTestProgram();
+				setupIssuesCommands(program);
+				await runCommand(program, [
+					"issues",
+					"create",
+					"Task",
+					"--team",
+					"DEV",
+					// No --labels/--description/--project: the validator blocks.
+				]);
+
+				// Assert the refusal is the VALIDATION one. A bare exit-code check
+				// passes on any other early exit, which is how the first draft of
+				// this test passed while never reaching the validator at all.
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					expect.stringContaining("Issue creation blocked by validation"),
+				);
+				expect(process.exit).toHaveBeenCalledWith(1);
+				expect(mockCreateIssue).not.toHaveBeenCalled();
+			} finally {
+				mockLoadConfig.mockReturnValue(baseConfig);
+			}
+		});
+
+		// The alias fold used `if (options.label && !options.labels)`, which
+		// dropped `--label` outright when both spellings were given.
+		it("merges --labels and --label instead of dropping the alias", async () => {
+			mockResolveLabels.mockReturnValue(["label-uuid-1", "label-uuid-2"]);
+			mockCreateIssue.mockResolvedValue({ id: "new-issue-id" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Task",
+				"--team",
+				"DEV",
+				"--labels",
+				"bug",
+				"--label",
+				"feature",
+				...requiredArgs,
+			]);
+
+			expect(mockResolveLabels).toHaveBeenCalledWith(["bug", "feature"]);
+		});
+
 		it("normalizes literal newline escapes in inline descriptions", async () => {
 			mockCreateIssue.mockResolvedValue({
 				id: "new-issue-id",
