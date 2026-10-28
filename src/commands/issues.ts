@@ -228,6 +228,33 @@ function validateUpdateOptions(options: OptionValues): void {
 	}
 }
 
+/**
+ * Commander keeps only the LAST occurrence of a repeated `--label`/`--labels`,
+ * so `--label bug --label chore` silently became `chore` alone (DEV-14849).
+ * Accumulating into the comma-separated form these options already document
+ * means a repeated flag reaches the validator intact, which then reports the
+ * real problem ("Multiple type labels found: bug, chore") instead of creating
+ * an issue with a label the caller never saw dropped.
+ */
+export function collectList(value: string, previous?: string): string {
+	return previous ? `${previous},${value}` : value;
+}
+
+/**
+ * Fold the `--label` alias into `--labels`. The four call sites each used
+ * `if (options.label && !options.labels)`, which dropped `--label` outright
+ * when both spellings were given; merging keeps every name the caller passed
+ * and leaves de-duplication and type-label arity to the validator.
+ */
+export function mergeLabelAliases(options: OptionValues): void {
+	const merged = [options.labels, options.label]
+		.filter(
+			(value): value is string => typeof value === "string" && value.length > 0,
+		)
+		.join(",");
+	if (merged) options.labels = merged;
+}
+
 function buildUpdateArgs(
 	issueId: string,
 	options: OptionValues,
@@ -357,9 +384,7 @@ async function handleListIssues(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	if (options.label && !options.labels) {
-		options.labels = options.label;
-	}
+	mergeLabelAliases(options);
 	const rootOpts = getRootOpts(command);
 	const { issuesService } = await createIssuesService(rootOpts);
 
@@ -446,9 +471,7 @@ async function handleSearchIssues(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	if (options.label && !options.labels) {
-		options.labels = options.label;
-	}
+	mergeLabelAliases(options);
 	const rootOpts = getRootOpts(command);
 	const { issuesService } = await createIssuesService(rootOpts);
 
@@ -1891,9 +1914,7 @@ async function handleUpdateIssue(
 	if (options.state && !options.status) {
 		options.status = options.state;
 	}
-	if (options.label && !options.labels) {
-		options.labels = options.label;
-	}
+	mergeLabelAliases(options);
 	if (options.parent && !options.parentTicket) {
 		options.parentTicket = options.parent;
 	}
@@ -2331,8 +2352,12 @@ export function setupIssuesCommands(program: Command): void {
 		)
 		.option("--project <project>", "filter by project name or ID")
 		.option("--no-project", "filter issues with no project assigned")
-		.option("--labels <labels>", "filter by labels (comma-separated names)")
-		.option("--label <labels>", "alias for --labels")
+		.option(
+			"--labels <labels>",
+			"filter by labels (comma-separated names; repeatable)",
+			collectList,
+		)
+		.option("--label <labels>", "alias for --labels", collectList)
 		.option(
 			"--status <status>",
 			"filter by status (comma-separated, e.g. Todo,Backlog)",
@@ -2376,8 +2401,12 @@ export function setupIssuesCommands(program: Command): void {
 			"--include-closed",
 			"include issues in terminal states (Done / Canceled). Default is to exclude them; pass this flag to see everything. Ignored when --status is set (explicit choice wins).",
 		)
-		.option("--labels <labels>", "filter by labels (comma-separated names)")
-		.option("--label <labels>", "alias for --labels")
+		.option(
+			"--labels <labels>",
+			"filter by labels (comma-separated names; repeatable)",
+			collectList,
+		)
+		.option("--label <labels>", "alias for --labels", collectList)
 		.option(
 			"--priority <priority>",
 			"filter by priority (comma-separated: urgent,high,medium,low,none or 0-4)",
@@ -2449,9 +2478,10 @@ export function setupIssuesCommands(program: Command): void {
 		.option("--team <team>", "team key or name (default: from config)")
 		.option(
 			"--labels <labels>",
-			"labels (comma-separated names, auto-resolved per team)",
+			"labels (comma-separated names, auto-resolved per team; repeatable)",
+			collectList,
 		)
-		.option("--label <labels>", "alias for --labels")
+		.option("--label <labels>", "alias for --labels", collectList)
 		.option("--claude", "add the workspace-level 'claude' label")
 		.option("--project-milestone <milestone>", "project milestone name or ID")
 		.option("--cycle <cycle>", "cycle name or ID")
@@ -2539,9 +2569,7 @@ export function setupIssuesCommands(program: Command): void {
 					command: Command,
 				) => {
 					// Normalize --label alias to --labels
-					if (options.label && !options.labels) {
-						options.labels = options.label;
-					}
+					mergeLabelAliases(options);
 					// Normalize --parent alias to --parent-ticket
 					if (options.parent && !options.parentTicket) {
 						options.parentTicket = options.parent;
@@ -2635,8 +2663,12 @@ export function setupIssuesCommands(program: Command): void {
 		)
 		.option("--clear-delegate", "remove the issue delegate")
 		.option("--project <project>", "new project (name or ID)")
-		.option("--labels <labels>", "labels (comma-separated names or IDs)")
-		.option("--label <labels>", "alias for --labels")
+		.option(
+			"--labels <labels>",
+			"labels (comma-separated names or IDs; repeatable)",
+			collectList,
+		)
+		.option("--label <labels>", "alias for --labels", collectList)
 		.option(
 			"--label-by <mode>",
 			"how to apply labels: 'adding' (default) or 'overwriting'",

@@ -944,6 +944,55 @@ describe("issues commands", () => {
 			);
 		});
 
+		// DEV-14849: commander keeps only the last occurrence of a repeated
+		// option, so `--label bug --label feature` used to resolve `feature`
+		// alone and the caller never saw `bug` go missing.
+		it("accumulates a repeated --label instead of keeping only the last", async () => {
+			mockResolveLabels.mockReturnValue(["label-uuid-1", "label-uuid-2"]);
+			mockCreateIssue.mockResolvedValue({ id: "new-issue-id" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Task",
+				"--team",
+				"DEV",
+				"--label",
+				"bug",
+				"--label",
+				"feature",
+				...requiredArgs,
+			]);
+
+			expect(mockResolveLabels).toHaveBeenCalledWith(["bug", "feature"]);
+		});
+
+		// The alias fold used `if (options.label && !options.labels)`, which
+		// dropped `--label` outright when both spellings were given.
+		it("merges --labels and --label instead of dropping the alias", async () => {
+			mockResolveLabels.mockReturnValue(["label-uuid-1", "label-uuid-2"]);
+			mockCreateIssue.mockResolvedValue({ id: "new-issue-id" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Task",
+				"--team",
+				"DEV",
+				"--labels",
+				"bug",
+				"--label",
+				"feature",
+				...requiredArgs,
+			]);
+
+			expect(mockResolveLabels).toHaveBeenCalledWith(["bug", "feature"]);
+		});
+
 		it("normalizes literal newline escapes in inline descriptions", async () => {
 			mockCreateIssue.mockResolvedValue({
 				id: "new-issue-id",
