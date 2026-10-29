@@ -836,18 +836,36 @@ async function enforceNoDuplicateIssue(
 			limit: 50,
 		});
 	} catch (err) {
-		// The "pass --allow-duplicate" hint only makes sense when the caller
-		// hasn't already passed it (under --allow-duplicate we ran the search
-		// only to detect a would-fire for telemetry, and we proceed regardless).
-		const silenceHint = options.allowDuplicate
-			? ""
-			: " Pass --allow-duplicate to silence.";
-		outputWarning(
-			`Duplicate-detection search failed (${
-				err instanceof Error ? err.message : String(err)
-			}); proceeding without the dup check.${silenceHint}`,
-		);
-		return;
+		// DEV-14678: the ranked search runs candidates through Linear's
+		// reranker, and a reranker outage fails the whole query. Losing the gate
+		// to a third-party hiccup is the wrong trade — an unranked check is
+		// still a check — so fall back to the structured title filter and say
+		// so. Only when both paths fail do we proceed blind, as before.
+		const reason = err instanceof Error ? err.message : String(err);
+		try {
+			candidates = await issuesService.searchIssuesByTitle(title, {
+				limit: 50,
+			});
+			outputWarning(
+				`Duplicate-detection search failed (${reason}); compared ${candidates.length} unranked title match(es) instead of ranking them.`,
+			);
+		} catch (fallbackErr) {
+			// The "pass --allow-duplicate" hint only makes sense when the caller
+			// hasn't already passed it (under --allow-duplicate we ran the search
+			// only to detect a would-fire for telemetry, and we proceed
+			// regardless).
+			const silenceHint = options.allowDuplicate
+				? ""
+				: " Pass --allow-duplicate to silence.";
+			outputWarning(
+				`Duplicate-detection search failed (${reason}); the unranked fallback failed too (${
+					fallbackErr instanceof Error
+						? fallbackErr.message
+						: String(fallbackErr)
+				}); proceeding without the dup check.${silenceHint}`,
+			);
+			return;
+		}
 	}
 
 	if (!Array.isArray(candidates) || candidates.length === 0) {
