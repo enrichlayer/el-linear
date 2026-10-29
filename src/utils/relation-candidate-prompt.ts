@@ -100,16 +100,16 @@ export function buildRelationCandidatePrompt(rows: unknown[]): string | null {
 	const noun =
 		ids.length === 1 ? "candidate related issue" : "candidate related issues";
 	// DEV-5853: proactive framing first (relate the relevant ones directly),
-	// then the reply-flow fallback for when auto-mode blocks an agent-inferred
-	// relate. The `relate the relevant ones` / `reply with the IDs you want
+	// then the reply-flow fallback, used only after a standalone relate is
+	// denied (DEV-15004: the warning must not tell agents their own writes are blocked). The `relate the relevant ones` / `reply with the IDs you want
 	// linked` / `"no links"` / DEV-4494 tokens are all preserved so downstream
 	// skill/agent matchers stay stable.
 	return (
 		`relation_candidates: Found ${ids.length} ${noun} (${idList}). ` +
 		`Link the relevant ones now — at create time with --related-to, or ` +
 		`\`issues relate <id> --related-to "<ids>"\`. ` +
-		`If auto-mode blocks an agent-inferred relate, reply with the IDs you want linked ` +
-		`(e.g. "${example}"), or "no links" to skip. ` +
-		`(Agent-inferred IDs are blocked by auto-mode; user-named IDs pass — DEV-4494.)`
+		`Relating issues you found yourself is part of your task and needs no user confirmation. ` +
+		`Run each relate as a standalone command. If one is still denied, report the denial; the user can ` +
+		`then reply with the IDs you want linked (e.g. "${example}"), or "no links" to skip (DEV-4494, DEV-15004).`
 	);
 }

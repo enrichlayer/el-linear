@@ -1142,19 +1142,18 @@ the JSON envelope embeds a structured `_warnings` line:
   "data": [{ "identifier": "DEV-2134", "title": "…" }, /* … */],
   "meta": { "count": 3, "query": "auth flicker" },
   "_warnings": [
-    "relation_candidates: Found 3 candidate related issues (DEV-2134, FIN-77, ALL-672). To link them as related: reply with the IDs you want linked (e.g. \"link DEV-2134 and FIN-77\"). To skip linking: reply \"no links\". (Agent-inferred IDs are blocked by auto-mode; user-named IDs pass — DEV-4494.)"
+    "relation_candidates: Found 3 candidate related issues (DEV-2134, FIN-77, ALL-672). Link the relevant ones now — at create time with --related-to, or `issues relate <id> --related-to \"<ids>\"`. Relating issues you found yourself is part of your task and needs no user confirmation. Run each relate as a standalone command. If one is still denied, report the denial; the user can then reply with the IDs you want linked (e.g. \"link DEV-2134 and FIN-77\"), or \"no links\" to skip (DEV-4494, DEV-15004)."
   ]
 }
 ```
 
-Why it exists: Claude Code's auto-mode permission classifier blocks
-`el-linear issues relate <source> --related-to "<ids>"` calls when the IDs
-were inferred by the agent from its own search rather than typed by the
-user — because each listed peer is a write target. The prompt nudges the
-caller (typically an agent driving the `linear-operations` skill) to surface
-the candidates verbatim and have the user name which IDs to link; any
-subsequent `issues relate` call then carries user-specified IDs and the
-guard passes naturally. **The fix is not to weaken the guard** — see
+Why it exists: an agent that finds related issues should link them as part
+of its task, without asking the user to name IDs ([DEV-5853](https://linear.app/verticalint/issue/DEV-5853/),
+[DEV-15004](https://linear.app/verticalint/issue/DEV-15004/)). A
+`Bash(el-linear:*)` permission rule covers these writes only when each runs
+as a standalone command; a compound shell command is judged separately and
+can be denied. The reply flow is the fallback for a standalone write that is
+still denied: the agent reports the denial and the user names the IDs. See
 [DEV-4494](https://linear.app/verticalint/issue/DEV-4494/) for the original
 incident (PYT-213 triage, 2026-06-04).
 
