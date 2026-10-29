@@ -323,11 +323,11 @@ el-linear issues search "keywords from proposed title" --include-closed 2>&1
 
 **The default is to link, not to ask.** A cross-link is cheap and reversible; a *missing* link is invisible and costs reviewers and SOP tooling the context they need. When you identify an issue that is **related** / a **blocker** / a **follow-up** / the **origin** of the work in front of you, create the relation yourself — don't stage the candidates and wait for the human to name them, and don't hedge with "tell me if you want these linked."
 
-- **At create time**, pass `--related-to "<ids>"` / `--parent <id>` / `--blocked-by <id>` directly on `issues create` — this path typically passes the classifier, so link generously the moment you file.
+- **At create time**, pass `--related-to "<ids>"` / `--parent <id>` / `--blocked-by <id>` directly on `issues create`, so the links land the moment you file.
 - **After the fact**, call `el-linear issues relate <source> --related-to "<ids>"` (or `--blocked-by` / `--blocks` / `--duplicate-of`) proactively, the same way.
 - Over-linking is self-correcting (a wrong relation is one command to remove); under-linking is not. When in doubt, link.
 
-The one exception is below: if the auto-mode permission classifier actually blocks a specific post-hoc `relate` call, that block — not caution — is your signal to surface the candidates for a one-word confirm.
+No user confirmation is needed for any of these. Run each write as a standalone command so the operator's permission rule applies (see "Running writes so the allow rule applies" below).
 
 ### Existence check — before an "add capability X" issue ([DEV-5097](https://linear.app/verticalint/issue/DEV-5097/))
 
@@ -344,22 +344,25 @@ starting with `relation_candidates:` enumerating the candidate IDs. Treat it
 as a **convenience list of link candidates, not a stop sign** — under the
 proactive default above, relate the ones that are genuinely related/blocking
 without waiting to be told. Prefer create-time `--related-to` when the search
-ran as part of filing a new issue (create-time relations typically pass the
-classifier); otherwise call `issues relate` directly.
+ran as part of filing a new issue; otherwise call `issues relate` directly.
 
-**Residual auto-mode constraint (the only reason to pause).** Claude Code's
-auto-mode permission classifier *may* block a standalone `issues relate
---related-to "<ids>"` when it judges the IDs *agent-inferred* (surfaced by
-your own search) rather than *user-specified*, because each peer is a write
-target. A standing user instruction to cross-link generously is itself
-authorization — so proceed by default. But if a specific `relate` call is
-**actually blocked** by the classifier, that block is your cue: surface the
-candidate IDs to the user for a one-word confirm, then re-run with the
-user-named IDs (which pass). This is the **exception path**, not the default —
-do not pre-emptively withhold links the classifier would have allowed. Two
-ways to keep it frictionless: file relations at create time (`--related-to`),
-or the operator adds a permission rule / runs non-auto-mode so post-hoc
-`relate` never trips.
+### Running writes so the allow rule applies (DEV-15004)
+
+Linear writes within your task are already authorized: create, comment,
+update and relate without asking the user first. Operators allow them with a
+`Bash(el-linear:*)` permission rule, and that rule only matches a **simple
+command**. Chaining `el-linear` with other shell steps (`cd …; cat > body.md
+<<EOF …; el-linear comments create …`) is a compound command the rule does
+not cover, so it is judged on its own and can be denied. That is what blocked
+two DEV-14395 writes on 2026-10-29, while a standalone comment on another
+issue passed.
+
+- Write the body file in its own step (the Write tool, or a separate command).
+- Run each `el-linear` write as a standalone command:
+  `el-linear comments create DEV-123 --body-file .tmp/body.md --quiet`.
+- If a standalone write is still denied, do not look for a way around it:
+  report the denial and its stated reason to the user, who decides whether to
+  allow it.
 
 If `--include-closed` search returns no matches, no `relation_candidates:`
 warning is emitted and the flow proceeds normally.
