@@ -1435,6 +1435,12 @@ const FIELDS_PROJECTED: ReadonlySet<ResourceKind> = new Set([
  * then the warning gives consumers a deterministic signal instead of
  * silently ignoring their flag.
  */
+
+/** Prepend a resolved-profile header to workspace-list summary output (DEV-8991). */
+function withProfileHeader(body: string, profile: string | null): string {
+	return profile ? `Profile: ${profile}\n${body}` : body;
+}
+
 export function dispatch(
 	kind: ResourceKind,
 	payload: unknown,
@@ -1446,6 +1452,15 @@ export function dispatch(
 		if (obj && Array.isArray(obj.data)) return obj.data;
 		return null;
 	})();
+
+	// Resolved Linear profile, surfaced by workspace-scoped list commands in
+	// their `meta` (DEV-8991). Only rendered for the four workspace-list
+	// kinds below; other kinds ignore it.
+	const profileValue = asObj(obj?.meta)?.profile;
+	const profile =
+		typeof profileValue === "string" && profileValue.length > 0
+			? profileValue
+			: null;
 
 	const hasFields = Boolean(fields && fields.length > 0);
 	if (hasFields && !FIELDS_PROJECTED.has(kind)) {
@@ -1466,7 +1481,7 @@ export function dispatch(
 				fields,
 			);
 		case "project-list":
-			return formatProjectList(list ?? [], fields);
+			return withProfileHeader(formatProjectList(list ?? [], fields), profile);
 		case "comment":
 			return formatCommentSummary((obj ?? {}) as Record<string, unknown>);
 		case "comment-list":
@@ -1484,13 +1499,13 @@ export function dispatch(
 		case "project-update-list":
 			return formatProjectUpdateList(list ?? []);
 		case "team-list":
-			return formatTeamList(list ?? []);
+			return withProfileHeader(formatTeamList(list ?? []), profile);
 		case "label-list":
-			return formatLabelList(list ?? []);
+			return withProfileHeader(formatLabelList(list ?? []), profile);
 		case "user":
 			return formatUserSummary((obj ?? {}) as Record<string, unknown>);
 		case "user-list":
-			return formatUserList(list ?? []);
+			return withProfileHeader(formatUserList(list ?? []), profile);
 		case "document":
 			return formatDocumentSummary((obj ?? {}) as Record<string, unknown>);
 		case "document-list":
