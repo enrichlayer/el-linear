@@ -1607,118 +1607,135 @@ async function handleCreateIssue(
 		{ team: options.team ?? loadConfig().defaultTeam, title },
 		{ graphQLService, linearService },
 	);
-	// DEV-10455: advisor-proposed consent label + receipt, applied now that
-	// the issue (and its identifier) exists.
-	let issue = result;
-	let labelAdvisorOutput: LabelAdvisorOutput | undefined;
-	if (labelAdvice) {
-		labelAdvisorOutput = {
-			added: [...labelAdvice.added],
-			reason: labelAdvice.reason,
-		};
-		if (labelAdvice.consent) {
-			const outcome = await applyAdvisorConsent(result, labelAdvice.consent, {
-				graphQLService,
-				issuesService,
-			});
-			if (outcome.issue) issue = { ...result, ...outcome.issue };
-			if (outcome.applied) {
-				labelAdvisorOutput.added.push(...labelAdvice.consent.labels);
-			}
-			labelAdvisorOutput.consent = {
-				labels: labelAdvice.consent.labels,
-				applied: outcome.applied,
-				repo: labelAdvice.consent.receipt.repo,
-				...(outcome.problem ? { problem: outcome.problem } : {}),
+	// DEV-15327: from here the write has succeeded, so every remaining step is
+	// post-create enrichment. A failure in any of them used to surface as an
+	// ordinary non-zero exit, indistinguishable from a rejected create — and a
+	// caller retrying on that filed a duplicate (DEV-15257/DEV-15258). Name the
+	// created issue unmistakably instead, so the caller never has to guess
+	// whether a ghost exists.
+	try {
+		// DEV-10455: advisor-proposed consent label + receipt, applied now that
+		// the issue (and its identifier) exists.
+		let issue = result;
+		let labelAdvisorOutput: LabelAdvisorOutput | undefined;
+		if (labelAdvice) {
+			labelAdvisorOutput = {
+				added: [...labelAdvice.added],
+				reason: labelAdvice.reason,
 			};
-		}
-	}
-	const relations = await createRelations(
-		result.id,
-		options,
-		graphQLService,
-		linearService,
-	);
-	// Pass the ORIGINAL description (pre-wrap) so the extractor's prose-keyword inference
-	// ("blocked by", "duplicates", etc.) sees `keyword DEV-100` instead of `keyword [DEV-100](url)`.
-	// After wrapping, the keyword regex's trailing-whitespace anchor fails to match the inserted `[`.
-	const autoLinked = await maybeAutoLink({
-		issueId: result.id,
-		identifier: result.identifier,
-		description: description || undefined,
-		options,
-		preResolved: prepared.preResolved,
-		graphQLService,
-		linearService,
-	});
-
-	// Images are already embedded inline as markdown in the description,
-	// so only create separate attachment records for non-image files.
-	const attachments: LinearAttachment[] = [];
-	if (uploadResults.length > 0) {
-		const attachmentsService = await createGraphQLAttachmentsService(rootOpts);
-		for (const uploadResult of uploadResults) {
-			if (!isImageFile(uploadResult.filename)) {
-				const attachment = await attachmentsService.createAttachment({
-					issueId: result.id,
-					url: uploadResult.assetUrl,
-					title: uploadResult.filename,
+			if (labelAdvice.consent) {
+				const outcome = await applyAdvisorConsent(result, labelAdvice.consent, {
+					graphQLService,
+					issuesService,
 				});
-				attachments.push(attachment);
+				if (outcome.issue) issue = { ...result, ...outcome.issue };
+				if (outcome.applied) {
+					labelAdvisorOutput.added.push(...labelAdvice.consent.labels);
+				}
+				labelAdvisorOutput.consent = {
+					labels: labelAdvice.consent.labels,
+					applied: outcome.applied,
+					repo: labelAdvice.consent.receipt.repo,
+					...(outcome.problem ? { problem: outcome.problem } : {}),
+				};
 			}
 		}
-	}
+		const relations = await createRelations(
+			result.id,
+			options,
+			graphQLService,
+			linearService,
+		);
+		// Pass the ORIGINAL description (pre-wrap) so the extractor's prose-keyword inference
+		// ("blocked by", "duplicates", etc.) sees `keyword DEV-100` instead of `keyword [DEV-100](url)`.
+		// After wrapping, the keyword regex's trailing-whitespace anchor fails to match the inserted `[`.
+		const autoLinked = await maybeAutoLink({
+			issueId: result.id,
+			identifier: result.identifier,
+			description: description || undefined,
+			options,
+			preResolved: prepared.preResolved,
+			graphQLService,
+			linearService,
+		});
 
-	let branch: string | undefined;
-	let claim: ClaimIssueResult | undefined;
-	if (options.checkout && result.branchName) {
-		const branchName = toBranchName(result.branchName);
-		// Only treat the branch as created (and surface it in the output) when
-		// the checkout actually happened — outside a git repo gitCheckoutBranch
-		// warns and skips, and claiming a branch / a missing marker afterward
-		// would be a contradictory second warning (DEV-4293 cycle-1).
-		if (gitCheckoutBranch(branchName)) {
-			branch = branchName;
-			// Record the issue→branch link as git metadata (DEV-4293) so the
-			// DEV-4241 hook can confirm a workflow was established without parsing
-			// the branch name. Best-effort: never let a marker-write failure abort
-			// a successful issue creation.
-			try {
-				setBranchLinearIssue(branch, result.identifier);
-			} catch {
-				outputWarning(
-					`Created branch ${branch} but could not record its Linear issue marker. ` +
-						`Run 'el-linear issues mark-branch ${result.identifier}' from the branch to set it.`,
-				);
+		// Images are already embedded inline as markdown in the description,
+		// so only create separate attachment records for non-image files.
+		const attachments: LinearAttachment[] = [];
+		if (uploadResults.length > 0) {
+			const attachmentsService =
+				await createGraphQLAttachmentsService(rootOpts);
+			for (const uploadResult of uploadResults) {
+				if (!isImageFile(uploadResult.filename)) {
+					const attachment = await attachmentsService.createAttachment({
+						issueId: result.id,
+						url: uploadResult.assetUrl,
+						title: uploadResult.filename,
+					});
+					attachments.push(attachment);
+				}
 			}
 		}
-	}
-	// DEV-10654: `--claim` claims WITHOUT cutting a branch. Remote-workspace
-	// authoring (Factory) needs the claim -- an unclaimed issue sitting in an
-	// unstarted state is eligible for the bot-layer sweep -- but a local branch
-	// there is wrong, and `--checkout` welds the two together.
-	if (shouldClaimCreatedIssue(options, branch !== undefined)) {
-		claim = await maybeClaimIssue(
-			result.identifier,
-			issuesService,
-			branch ? "Branch operation succeeded" : "Issue was created",
+
+		let branch: string | undefined;
+		let claim: ClaimIssueResult | undefined;
+		if (options.checkout && result.branchName) {
+			const branchName = toBranchName(result.branchName);
+			// Only treat the branch as created (and surface it in the output) when
+			// the checkout actually happened — outside a git repo gitCheckoutBranch
+			// warns and skips, and claiming a branch / a missing marker afterward
+			// would be a contradictory second warning (DEV-4293 cycle-1).
+			if (gitCheckoutBranch(branchName)) {
+				branch = branchName;
+				// Record the issue→branch link as git metadata (DEV-4293) so the
+				// DEV-4241 hook can confirm a workflow was established without parsing
+				// the branch name. Best-effort: never let a marker-write failure abort
+				// a successful issue creation.
+				try {
+					setBranchLinearIssue(branch, result.identifier);
+				} catch {
+					outputWarning(
+						`Created branch ${branch} but could not record its Linear issue marker. ` +
+							`Run 'el-linear issues mark-branch ${result.identifier}' from the branch to set it.`,
+					);
+				}
+			}
+		}
+		// DEV-10654: `--claim` claims WITHOUT cutting a branch. Remote-workspace
+		// authoring (Factory) needs the claim -- an unclaimed issue sitting in an
+		// unstarted state is eligible for the bot-layer sweep -- but a local branch
+		// there is wrong, and `--checkout` welds the two together.
+		if (shouldClaimCreatedIssue(options, branch !== undefined)) {
+			claim = await maybeClaimIssue(
+				result.identifier,
+				issuesService,
+				branch ? "Branch operation succeeded" : "Issue was created",
+			);
+		}
+
+		const output = {
+			...issue,
+			...(labelAdvisorOutput ? { labelAdvisor: labelAdvisorOutput } : {}),
+			...(branch ? { branch } : {}),
+			...(claim ? { claim } : {}),
+			...(relations.length > 0 ? { relations } : {}),
+			...(autoLinked ? { autoLinked } : {}),
+			...(attachments.length === 1
+				? { attachment: attachments[0] }
+				: attachments.length > 1
+					? { attachments }
+					: {}),
+		};
+		outputSuccess(output);
+	} catch (error) {
+		const detail = error instanceof Error ? error.message : String(error);
+		throw new Error(
+			`Issue ${result.identifier} was created (id ${result.id}) — a post-create step then failed, so this failure is NOT a rejected create. ` +
+				`Do not re-run 'issues create': a retry files a duplicate. ` +
+				`Fix forward with 'el-linear issues update ${result.identifier}' or delete the issue. ` +
+				`Post-create failure: ${detail}`,
 		);
 	}
-
-	const output = {
-		...issue,
-		...(labelAdvisorOutput ? { labelAdvisor: labelAdvisorOutput } : {}),
-		...(branch ? { branch } : {}),
-		...(claim ? { claim } : {}),
-		...(relations.length > 0 ? { relations } : {}),
-		...(autoLinked ? { autoLinked } : {}),
-		...(attachments.length === 1
-			? { attachment: attachments[0] }
-			: attachments.length > 1
-				? { attachments }
-				: {}),
-	};
-	outputSuccess(output);
 }
 
 async function handleHistoryIssue(
