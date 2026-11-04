@@ -9,18 +9,25 @@
  *   <!-- el-intake-decision:v1 {"policyVersion":"intake-policy/v1", …} -->
  *
  * An issue that carries the label without a valid receipt is silently skipped
- * by that automation, which is the failure this gate removes: el-linear refuses
- * to apply a consent label unless the resulting description carries a receipt
- * for that issue, and names what is missing.
+ * by that automation, which is the failure this gate removes: el-linear never
+ * applies a consent label unless the issue description carries a receipt for
+ * that issue, and names what is missing when it cannot.
  *
- * Why el-linear refuses rather than writes the receipt: the receipt names the
- * target repository, and whether a (team, project) maps to an admissible
- * repository — and whether that repository is review-only — is policy owned
- * by the automation, not by a generic Linear CLI. Writing a receipt with a
- * guessed repository would manufacture consent the policy never granted. The
- * receipt must also name the issue identifier, which does not exist before
- * `issues create`, so a create can never carry a valid receipt: the consent
- * label is applied with `issues update` once the receipt is written.
+ * Who approves (DEV-15587): the actor applying the label. The receipt stays as
+ * the record of who consented, but nobody writes it by hand — el-linear writes
+ * it itself, naming the authenticated Linear viewer as `provenance.actor`, and
+ * puts it and the label in one update. `applyAdvisorConsent` does that right
+ * after `issues create` (a create cannot carry a valid receipt because the
+ * receipt names the issue identifier), and the update gate does it inline.
+ *
+ * What el-linear still refuses to invent is the policy: the receipt names the
+ * repository the organization's intake policy maps the issue to, and whether a
+ * (team, project) maps to an admissible repository — and whether that
+ * repository is review-only — is owned by the automation, not by a generic
+ * Linear CLI. Those fields come from the label advisor hook
+ * (`label-advisor.ts`), which is the same policy source the intake sweep
+ * evaluates against. Without them the write is refused: a guessed repository
+ * would manufacture consent the policy never granted.
  *
  * The receipt shape mirrors the canonical `intake-policy/v1` wire format
  * (`validateIntakeDecisionReceipt` in the automation's shared contracts). This
@@ -232,10 +239,18 @@ function receiptTemplate(identifier: string): string {
 	return `<!-- el-intake-decision:v1 {"policyVersion":"${INTAKE_POLICY_VERSION}","decision":"automatic-implementation","capabilities":["manual-review","automatic-implementation"],"reason":"<why unattended work is consented>","provenance":{"source":"issue-triage","actor":"<your name>","issue":"${identifier}","repo":"<namespace/repo>"}} -->`;
 }
 
-/** Refusal for `issues create` carrying a consent label. */
+/**
+ * Refusal for `issues create` carrying a consent label it cannot deliver.
+ *
+ * DEV-15587: the create itself never applies a consent label, but when the label
+ * advisor supplies the intake policy fields el-linear writes the receipt and
+ * applies the label right after create. This refusal is the case where no policy
+ * fields came back — so there is no repository mapping to name, and inventing
+ * one would manufacture consent the policy never granted.
+ */
 export function formatCreateConsentRefusal(labels: readonly string[]): string {
 	const names = labels.map((label) => `"${label}"`).join(", ");
-	return `Label ${names} is consent for unattended work and requires an el-intake-decision:v1 receipt naming the issue, which cannot exist before the issue does. Create the issue without ${names}, then apply it with the receipt in one update:\n\n  el-linear issues update <ID> --labels ${labels.join(",")} --description-file <body-with-receipt>\n\nwhere the body ends with:\n\n${receiptTemplate("<ID>")}`;
+	return `Label ${names} is consent for unattended work and requires an el-intake-decision:v1 receipt naming the issue, which cannot exist before the issue does. el-linear writes that receipt and applies the label itself, after create, when the label advisor answers with the intake policy fields (receipt.repo and receipt.reason); this create got none, so there is no repository mapping to name. Create the issue without ${names}, then apply it with the receipt in one update:\n\n  el-linear issues update <ID> --labels ${labels.join(",")} --description-file <body-with-receipt>\n\nwhere the body ends with:\n\n${receiptTemplate("<ID>")}`;
 }
 
 /** Refusal for `issues update` applying a consent label without a receipt. */
@@ -245,7 +260,7 @@ export function formatUpdateConsentRefusal(
 	problem: string,
 ): string {
 	const names = labels.map((label) => `"${label}"`).join(", ");
-	return `Label ${names} is consent for unattended work and requires an el-intake-decision:v1 receipt for ${identifier}, but ${problem}. Include the receipt in the same update (--description / --description-file / --append-description), e.g.:\n\n${receiptTemplate(identifier)}`;
+	return `Label ${names} is consent for unattended work and requires an el-intake-decision:v1 receipt for ${identifier}, but ${problem}. el-linear appends that receipt itself, naming the authenticated viewer as provenance.actor, when the label advisor answers with the intake policy fields (receipt.repo and receipt.reason). Include the receipt in the same update (--description / --description-file / --append-description), e.g.:\n\n${receiptTemplate(identifier)}`;
 }
 
 export interface ConsentReceiptFields {
