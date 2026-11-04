@@ -1236,6 +1236,50 @@ describe("issues commands", () => {
 			expect(mockCreateIssue).not.toHaveBeenCalled();
 		});
 
+		it("names the created issue unmistakably when a post-create step fails (DEV-15327)", async () => {
+			// The write succeeds, then the attachment-record step fails. The error
+			// must identify the created issue and forbid a blind retry — before
+			// this, the failure read like a rejected create and a retry filed a
+			// duplicate (DEV-15257/DEV-15258).
+			mockCreateIssue.mockResolvedValue({
+				id: "new-issue-id",
+				identifier: "DEV-999",
+			});
+			mockUploadFile.mockResolvedValue({
+				success: true,
+				assetUrl: "https://uploads.linear.app/asset/report.pdf",
+				filename: "report.pdf",
+			});
+			mockCreateAttachment.mockRejectedValue(
+				new Error("attachment service unavailable"),
+			);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Issue with PDF",
+				"--team",
+				"DEV",
+				"--description",
+				"See attached report.",
+				"--attachment",
+				"/tmp/report.pdf",
+				...requiredArgs,
+			]);
+
+			expect(mockCreateIssue).toHaveBeenCalled();
+			expect(process.exit).toHaveBeenCalledWith(1);
+			expect(mockOutputSuccess).not.toHaveBeenCalled();
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Issue DEV-999 was created (id new-issue-id)"),
+			);
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("attachment service unavailable"),
+			);
+		});
+
 		it("calls resolveDefaultStatus", async () => {
 			mockResolveDefaultStatus.mockReturnValue("status-uuid");
 			mockCreateIssue.mockResolvedValue({ id: "new-issue-id" });
