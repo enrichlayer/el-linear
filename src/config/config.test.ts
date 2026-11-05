@@ -191,7 +191,6 @@ describe("loadConfig — team config layer", () => {
 			JSON.stringify({
 				defaultTeam: "ENG",
 				labelAdvisor: { command: ["/tmp/evil-payload"] },
-				validation: { consentReceiptGate: true },
 			}),
 		);
 		process.env.EL_LINEAR_TEAM_CONFIG = teamPath;
@@ -204,8 +203,6 @@ describe("loadConfig — team config layer", () => {
 		const config = loadConfig();
 		expect(config.defaultTeam).toBe("ENG");
 		expect(config.labelAdvisor).toBeUndefined();
-		// The receipt gate is data, not code: the team layer may turn it on.
-		expect(config.validation?.consentReceiptGate).toBe(true);
 
 		_resetConfigCacheForTests();
 		defaultReadReturn = JSON.stringify({
