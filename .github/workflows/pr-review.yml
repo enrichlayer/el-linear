@@ -8,8 +8,9 @@ name: pr-review
 # This GitHub-native action fills that gap so every PR gets a review pass.
 #
 # SETUP PREREQUISITE (one-time, repo admin):
-#   Add an `ANTHROPIC_API_KEY` repository secret
-#   (Settings -> Secrets and variables -> Actions -> New repository secret).
+#   Add a `CLAUDE_CODE_OAUTH_TOKEN` repository secret
+#   (Settings -> Secrets and variables -> Actions -> New repository secret),
+#   valued from Vault `secret/claude-tools-token/token`.
 #   Without it the review step fails; see CONTRIBUTING.md.
 #
 # The review is ADVISORY: it posts comments, never approves or blocks a merge.
@@ -22,20 +23,27 @@ name: pr-review
 # surfaced as a `::warning::` annotation plus the SDK result payload in the job
 # log; it is never a merge signal.
 #
-# DIAGNOSED FAILURE MODE (DEV-9670, as of 2026-09-13): from run 87 (2026-08-25)
-# on, every same-repo run ended in the action's `is_error:true` with
-# `num_turns: 1`, `total_cost_usd: 0`, `modelUsage: {}` after ~172-183 s — no
-# model response was ever received, and the elapsed time matches the SDK's
-# ten-attempt retry backoff, which only runs for retryable API errors
-# (429/5xx/529/network), never for a bad key (401), bad request (400) or bad
-# model id (404). The `ANTHROPIC_API_KEY` secret was unchanged since 2026-07-15
-# and run 86 (2026-08-24) succeeded on the same secret, model id and `@v1`
-# action. Cause: an account-side refusal (spend/rate limit family) on the
-# Anthropic organization/workspace that owns the secret — NOT the key's
-# presence, the model id, an action pin, permissions or diff size. The owner
-# action is to check that organization/workspace in the Anthropic Console; the
-# failure-surfacing step below now prints the retried error's status so the
-# next failure carries its own evidence. Full log table on DEV-9670.
+# RESOLVED FAILURE MODE (DEV-10708, 2026-09-28; corrects DEV-9670): from run 87
+# (2026-08-25) on, every same-repo run ended in the action's `is_error:true`
+# after ~3 minutes with no model response. DEV-9670 read that elapsed time as
+# the SDK's ten-attempt retry backoff and inferred an account-side spend/rate
+# limit, on the reasoning that the backoff "only runs for retryable API errors
+# (429/5xx/529/network), never for a bad key (401)". That inference was WRONG,
+# and the failure-surfacing step below is what disproved it: the retry records
+# it printed are ten consecutive
+# `{"subtype":"api_retry","error":"authentication_failed","error_status":401}`
+# lines, closing with `"Failed to authenticate. API Error: 401 API key is
+# invalid."` (run 36459680885). The SDK does retry 401s, so retry-shaped timing
+# says nothing about which error is underneath — always read the records.
+#
+# The key was dead on purpose. DEV-8913 retired the shared `ANTHROPIC_API_KEY`
+# *because* it had begun returning 401, and moved every caller onto the
+# subscription CLI; DEV-5390 makes raw Messages-API auth a policy violation.
+# That migration scoped only the five call sites in the `tools` repo, so this
+# repo's own Actions secret (set 2026-07-15, never rotated) kept pointing at a
+# retired credential. `cli/.vault-env` carries no `ANTHROPIC_API_KEY` mapping
+# at all, which is why it could not simply be rotated: there was nothing to
+# rotate it from. Fixed by authenticating with the subscription OAuth token.
 
 on:
   pull_request:
@@ -59,11 +67,11 @@ jobs:
   review:
     # SECURITY (public repo): this runs on `pull_request`, NOT
     # `pull_request_target`, so a PR from a fork runs with NO repository secrets
-    # (`secrets.ANTHROPIC_API_KEY` is empty for forks). Gate on same-repo so
+    # (`secrets.CLAUDE_CODE_OAUTH_TOKEN` is empty for forks). Gate on same-repo so
     # fork PRs skip cleanly instead of failing on a missing key; a maintainer
     # reviews those manually or re-runs after pushing the branch to this repo.
     # Do NOT switch to `pull_request_target` — that would run untrusted fork
-    # code with the API key in scope (secret-exfiltration risk).
+    # code with the token in scope (secret-exfiltration risk).
     if: >-
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.draft == false
@@ -86,7 +94,7 @@ jobs:
         continue-on-error: true
         uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           track_progress: true
           prompt: |
             REPO: ${{ github.repository }}
