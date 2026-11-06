@@ -1196,6 +1196,42 @@ export class GraphQLIssuesService {
 		return nodes.map((issue) => this.transformIssueData(issue));
 	}
 
+	/**
+	 * DEV-14678: unranked title fallback for the create-time duplicate gate.
+	 *
+	 * `searchIssues` above is Linear's relevance-ranked search, which runs
+	 * candidates through a third-party reranker. When that service fails the
+	 * whole query fails (`EXTERNAL_SERVICE_ERROR: Failed to rerank search
+	 * results with Google reranker`, HTTP 200, not retryable), so the gate lost
+	 * duplicate detection entirely at the moment it was least able to tell the
+	 * caller why. This path is a plain `IssueFilter` on the title and never
+	 * touches the reranker, so an outage degrades the check to "unranked but
+	 * running" instead of "skipped".
+	 *
+	 * Recall is deliberately narrower than the ranked search: it matches the
+	 * title substring across the workspace rather than spreading over
+	 * descriptions and comments. It is a fallback for the exact/near-verbatim
+	 * titles the hard-block tier cares about, not a replacement for the ranked
+	 * search.
+	 */
+	async searchIssuesByTitle(
+		title: string,
+		args: { limit?: number } = {},
+	): Promise<LinearIssue[]> {
+		const first = Math.min(Math.max(args.limit ?? 50, 1), SAFE_ISSUE_PAGE_SIZE);
+		const result = await this.graphQLService.rawRequest<GetIssuesResponse>(
+			FILTERED_SEARCH_ISSUES_QUERY,
+			{
+				first,
+				after: null,
+				filter: { title: { containsIgnoreCase: title } },
+				orderBy: "updatedAt",
+			},
+		);
+		const nodes = result.issues?.nodes ?? [];
+		return nodes.map((issue) => this.transformIssueData(issue));
+	}
+
 	// --- Private helper methods for field resolution ---
 
 	private async resolveTeamId(
