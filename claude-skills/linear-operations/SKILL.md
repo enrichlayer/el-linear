@@ -716,3 +716,15 @@ When working on an issue with a checklist, check off items as you complete them.
 2. Update the description with checked items: `el-linear issues update ENG-123 --description "..."`.
 3. Preserve the rest of the description — only change `- [ ]` to `- [x]`.
 4. If all items are done, update the status accordingly.
+
+---
+
+## Done-when enforcement at issue close (DEV-8753)
+
+For **self-merge repositories** (`vertical-int/tools` and `customer-support`), unmet Done-when checklist items no longer block merge. The merge gate returns a non-blocking advisory result when a linked issue still has unchecked, unwaived pre-merge items.
+
+- After the MR merges and Linear auto-closes the issue, the lifecycle owner re-opens it to Todo so those unmet items stay visible at issue close.
+- A `done_when: enforce` token on a non-fenced line of the issue body restores the hard merge-time gate for that issue.
+- `el-lander` keeps its strict merge-time Done-when gate (unchanged).
+
+Keep checking off items as you complete them (see Checklist Progress Tracking above); DEV-8753 only moves *enforcement* from merge time to issue close.
