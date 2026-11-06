@@ -71,6 +71,8 @@ el-linear issues update DEV-123 --status Done --quiet 2>&1
 
 The summary formatter exists exactly because every consumer (humans and LLMs) was reinventing the same `python -c` / `jq` extraction in shell. Pick the canonical path; the per-resource format is a stable contract.
 
+**How these shapes are checked.** No hook flags them: el-hook's deterministic `cli-pipe-transform` guard was retired by DEV-9625 under the guard ceiling. In the Tools repo the permission hook (`claude/utils/permission-hook.sh`, when `EL_PERMISSION_JEV=1`) instead asks a shadow Jev Noul — surface `cli-output-antipattern` — whenever a Bash command pipes an `el-linear` / `el-git` invocation into another stage, and appends the answer to the Jev ledger (`EL_JEV_LEDGER`, default `~/.cache/enrichlayer/jev-ledger.jsonl`; rows carry `surface: "cli-output-antipattern"`, the two stage heads as `ref`, and the Noul as `confidence`). It never blocks or annotates a command — the ledger is the evidence for whether a check is worth adding back (DEV-10126). `EL_JEV_CLI_OUTPUT_ANTIPATTERN_MODE=off` removes the question.
+
 ### Extracting one description section: `--field`
 
 When you need a single named section out of an issue's markdown description (e.g. "Done when", "Out of scope", "Why we need this"), use `issues read --field`. It matches `##`/`###` headers and bold pseudo-headers (`**Done when**`) case-insensitively, prints just that section's text, and exits non-zero when the section is missing — the canonical replacement for piping into `python3 -c "...desc.find(...)"`.
