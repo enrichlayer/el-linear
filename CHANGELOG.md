@@ -34,6 +34,21 @@ project adheres to [Semantic Versioning](https://semver.org/).
 * **quality:** restore a clean full-repository lint baseline (DEV-6142)
 * **labels:** resolve `labels create --team` keys and names before creating the label (DEV-5749)
 
+## [1.49.0](https://github.com/enrichlayer/el-linear/compare/v1.48.0...v1.49.0) (2026-11-06)
+
+
+### Features
+
+* **issues:** add an unrelate verb to remove issue relations (DEV-14607) ([#354](https://github.com/enrichlayer/el-linear/issues/354)) ([9dcd9aa](https://github.com/enrichlayer/el-linear/commit/9dcd9aa4a19999c9ba8cb0718427b2be01787727))
+* **skill:** record Done-when enforcement at issue close for self-merge repos (DEV-8753) ([#360](https://github.com/enrichlayer/el-linear/issues/360)) ([e94bc78](https://github.com/enrichlayer/el-linear/commit/e94bc782eef809f037055ae2233dfb74c1bd53f7))
+
+
+### Bug Fixes
+
+* **issues:** accumulate repeated --label and merge the alias (DEV-14849) ([#356](https://github.com/enrichlayer/el-linear/issues/356)) ([4c8373c](https://github.com/enrichlayer/el-linear/commit/4c8373c368c950370152fc34a562c07b1aa4e2b8))
+* **issues:** name the created issue when a post-create step fails (DEV-15327) ([#358](https://github.com/enrichlayer/el-linear/issues/358)) ([2060752](https://github.com/enrichlayer/el-linear/commit/2060752d88fa7695e3d8dee9a54f0784e4397020))
+* **skills:** stop telling agents their own Linear writes need the user (DEV-15004) ([#357](https://github.com/enrichlayer/el-linear/issues/357)) ([41d5aef](https://github.com/enrichlayer/el-linear/commit/41d5aefa7ef36a3afdad10b731c857935573ddd2))
+
 ## [1.48.0](https://github.com/enrichlayer/el-linear/compare/v1.47.1...v1.48.0) (2026-10-27)
 
 
