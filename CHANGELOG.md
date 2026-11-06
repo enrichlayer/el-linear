@@ -6,6 +6,10 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Removed
+
+* **issues:** remove the dormant consent-label receipt gate and the label advisor's post-create consent/receipt path. The optional `labelAdvisor.consent` JSON field is no longer emitted; ordinary advisor labels and `labelAdvisor.added` / `reason` are unchanged. Automation-side receipt preconditions are unchanged (DEV-15663).
+
 ### Features
 
 * **issues:** accept `issues create --issue-id <uuid-v4>` for caller-selected stable identity through the existing validation and creation flow; invalid IDs are rejected before provider mutations (DEV-11113).
