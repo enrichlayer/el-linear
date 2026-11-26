@@ -34,6 +34,11 @@ import {
 	isUnresolvableReferenceError,
 } from "../config/sop-label-validation.js";
 import { resolveDefaultStatus } from "../config/status-defaults.js";
+import {
+	formatSummaryWarning,
+	hasSummarySection,
+	isSummaryGateEnabled,
+} from "../config/summary-validation.js";
 import { enforceTerms } from "../config/term-enforcer.js";
 import { GET_ISSUE_STATE_HISTORY_QUERY } from "../queries/issues.js";
 import type { GetIssueStateHistoryResponse } from "../queries/issues-types.js";
@@ -1087,6 +1092,28 @@ async function enforceGoalCompletion(
 }
 
 /**
+ * DEV-16785: advise when the description has no `Summary` section. Opt-in and
+ * warn-only, so it has no override flag; `--skip-validation` silences it.
+ */
+async function adviseMissingSummary(
+	description: string,
+	options: OptionValues,
+): Promise<void> {
+	if (
+		options.skipValidation ||
+		!isSummaryGateEnabled() ||
+		hasSummarySection(description)
+	) {
+		return;
+	}
+	await emitGateEvent("el-linear", "issues create", {
+		gate: "issues-create-summary",
+		outcome: "advisory",
+	});
+	outputWarning(formatSummaryWarning());
+}
+
+/**
  * DEV-6163: require the intake judgment before any create-time resolution or
  * mutation. Unlike general field validation, this gate is not silently
  * bypassed by `--skip-validation`; only its narrow, recorded override applies.
@@ -1288,6 +1315,7 @@ async function handleCreateIssue(
 			typeof options.fromTemplate === "string" && options.fromTemplate;
 		if (!hasFromTemplate || rawDescription) {
 			await enforceGoalCompletion(rawDescription ?? "", options);
+			await adviseMissingSummary(rawDescription ?? "", options);
 		}
 	}
 

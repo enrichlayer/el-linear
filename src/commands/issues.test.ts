@@ -1962,6 +1962,69 @@ describe("issues commands", () => {
 		});
 	});
 
+	describe("issues create — summary check (DEV-16785)", () => {
+		const run = async (
+			validation: Record<string, unknown>,
+			description: string,
+			extra: string[] = [],
+		) => {
+			mockSearchIssues.mockResolvedValue([]);
+			mockCreateIssue.mockResolvedValue({ id: "x", identifier: "DEV-999" });
+			mockLoadConfig.mockReturnValue({ ...baseConfig, validation });
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Improve the widget pipeline",
+				"--team",
+				"DEV",
+				"--labels",
+				"feature",
+				"--assignee",
+				"bob",
+				"--project",
+				"Infrastructure",
+				"--description",
+				description,
+				...extra,
+			]);
+			expect(mockCreateIssue).toHaveBeenCalled();
+			expect(process.exit).not.toHaveBeenCalledWith(1);
+		};
+		const warning = expect.stringContaining('no "## Summary" section');
+		const without =
+			"A sufficiently long description that passes the length check.";
+		const withSummary = `## Summary\n\n${without}`;
+
+		it("warns, records advisory, and still creates", async () => {
+			await run({ enabled: true, summaryGate: "warn" }, without);
+			expect(mockOutputWarning).toHaveBeenCalledWith(warning);
+			expect(mockEmitGateEvent).toHaveBeenCalledWith(
+				"el-linear",
+				"issues create",
+				{ gate: "issues-create-summary", outcome: "advisory" },
+			);
+		});
+
+		it("is silent when the description has a summary", async () => {
+			await run({ enabled: true, summaryGate: "warn" }, withSummary);
+			expect(mockOutputWarning).not.toHaveBeenCalledWith(warning);
+		});
+
+		it("is off unless opted in", async () => {
+			await run({ enabled: true }, without);
+			expect(mockOutputWarning).not.toHaveBeenCalledWith(warning);
+		});
+
+		it("is silenced by --skip-validation", async () => {
+			await run({ enabled: true, summaryGate: "warn" }, without, [
+				"--skip-validation",
+			]);
+			expect(mockOutputWarning).not.toHaveBeenCalledWith(warning);
+		});
+	});
+
 	// DEV-6163: the intake gate must compose with the create command, not merely
 	// validate text in isolation. In block mode it runs before resolver/network
 	// work and is bypassed only by its narrow, recorded override.
