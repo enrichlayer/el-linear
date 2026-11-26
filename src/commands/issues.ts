@@ -47,14 +47,8 @@ import {
 } from "../config/sop-label-validation.js";
 import { resolveDefaultStatus } from "../config/status-defaults.js";
 import { enforceTerms } from "../config/term-enforcer.js";
-import {
-	GET_ISSUE_RELATIONS_QUERY,
-	GET_ISSUE_STATE_HISTORY_QUERY,
-} from "../queries/issues.js";
-import type {
-	GetIssueRelationsResponse,
-	GetIssueStateHistoryResponse,
-} from "../queries/issues-types.js";
+import { GET_ISSUE_STATE_HISTORY_QUERY } from "../queries/issues.js";
+import type { GetIssueStateHistoryResponse } from "../queries/issues-types.js";
 import type {
 	IssueStateSpan,
 	LinearAttachment,
@@ -126,11 +120,11 @@ import {
 	resolveDescription,
 } from "./issues/description.js";
 import { handleLinkReferencesIssue } from "./issues/link-references.js";
+import { readIssueRelations } from "./issues/relation-reader.js";
 import {
-	buildIncomingRelationEntries,
-	buildOutgoingRelationEntries,
 	createRelations,
-	type RelatedIssueEntry,
+	deleteRelations,
+	selectRelationsToRemove,
 } from "./issues/relations.js";
 import { setupTreeCommand } from "./issues/tree.js";
 import { readIssues } from "./read-shortcut.js";
@@ -232,6 +226,33 @@ function validateUpdateOptions(options: OptionValues): void {
 			"Cannot use --description and --append-description together",
 		);
 	}
+}
+
+/**
+ * Commander keeps only the LAST occurrence of a repeated `--label`/`--labels`,
+ * so `--label bug --label chore` silently became `chore` alone (DEV-14849).
+ * Accumulating into the comma-separated form these options already document
+ * means a repeated flag reaches the validator intact, which then reports the
+ * real problem ("Multiple type labels found: bug, chore") instead of creating
+ * an issue with a label the caller never saw dropped.
+ */
+export function collectList(value: string, previous?: string): string {
+	return previous ? `${previous},${value}` : value;
+}
+
+/**
+ * Fold the `--label` alias into `--labels`. The four call sites each used
+ * `if (options.label && !options.labels)`, which dropped `--label` outright
+ * when both spellings were given; merging keeps every name the caller passed
+ * and leaves de-duplication and type-label arity to the validator.
+ */
+export function mergeLabelAliases(options: OptionValues): void {
+	const merged = [options.labels, options.label]
+		.filter(
+			(value): value is string => typeof value === "string" && value.length > 0,
+		)
+		.join(",");
+	if (merged) options.labels = merged;
 }
 
 function buildUpdateArgs(
@@ -363,9 +384,7 @@ async function handleListIssues(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	if (options.label && !options.labels) {
-		options.labels = options.label;
-	}
+	mergeLabelAliases(options);
 	const rootOpts = getRootOpts(command);
 	const { issuesService } = await createIssuesService(rootOpts);
 
@@ -452,9 +471,7 @@ async function handleSearchIssues(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	if (options.label && !options.labels) {
-		options.labels = options.label;
-	}
+	mergeLabelAliases(options);
 	const rootOpts = getRootOpts(command);
 	const { issuesService } = await createIssuesService(rootOpts);
 
@@ -1608,118 +1625,135 @@ async function handleCreateIssue(
 		{ team: options.team ?? loadConfig().defaultTeam, title },
 		{ graphQLService, linearService },
 	);
-	// DEV-10455: advisor-proposed consent label + receipt, applied now that
-	// the issue (and its identifier) exists.
-	let issue = result;
-	let labelAdvisorOutput: LabelAdvisorOutput | undefined;
-	if (labelAdvice) {
-		labelAdvisorOutput = {
-			added: [...labelAdvice.added],
-			reason: labelAdvice.reason,
-		};
-		if (labelAdvice.consent) {
-			const outcome = await applyAdvisorConsent(result, labelAdvice.consent, {
-				graphQLService,
-				issuesService,
-			});
-			if (outcome.issue) issue = { ...result, ...outcome.issue };
-			if (outcome.applied) {
-				labelAdvisorOutput.added.push(...labelAdvice.consent.labels);
-			}
-			labelAdvisorOutput.consent = {
-				labels: labelAdvice.consent.labels,
-				applied: outcome.applied,
-				repo: labelAdvice.consent.receipt.repo,
-				...(outcome.problem ? { problem: outcome.problem } : {}),
+	// DEV-15327: from here the write has succeeded, so every remaining step is
+	// post-create enrichment. A failure in any of them used to surface as an
+	// ordinary non-zero exit, indistinguishable from a rejected create — and a
+	// caller retrying on that filed a duplicate (DEV-15257/DEV-15258). Name the
+	// created issue unmistakably instead, so the caller never has to guess
+	// whether a ghost exists.
+	try {
+		// DEV-10455: advisor-proposed consent label + receipt, applied now that
+		// the issue (and its identifier) exists.
+		let issue = result;
+		let labelAdvisorOutput: LabelAdvisorOutput | undefined;
+		if (labelAdvice) {
+			labelAdvisorOutput = {
+				added: [...labelAdvice.added],
+				reason: labelAdvice.reason,
 			};
-		}
-	}
-	const relations = await createRelations(
-		result.id,
-		options,
-		graphQLService,
-		linearService,
-	);
-	// Pass the ORIGINAL description (pre-wrap) so the extractor's prose-keyword inference
-	// ("blocked by", "duplicates", etc.) sees `keyword DEV-100` instead of `keyword [DEV-100](url)`.
-	// After wrapping, the keyword regex's trailing-whitespace anchor fails to match the inserted `[`.
-	const autoLinked = await maybeAutoLink({
-		issueId: result.id,
-		identifier: result.identifier,
-		description: description || undefined,
-		options,
-		preResolved: prepared.preResolved,
-		graphQLService,
-		linearService,
-	});
-
-	// Images are already embedded inline as markdown in the description,
-	// so only create separate attachment records for non-image files.
-	const attachments: LinearAttachment[] = [];
-	if (uploadResults.length > 0) {
-		const attachmentsService = await createGraphQLAttachmentsService(rootOpts);
-		for (const uploadResult of uploadResults) {
-			if (!isImageFile(uploadResult.filename)) {
-				const attachment = await attachmentsService.createAttachment({
-					issueId: result.id,
-					url: uploadResult.assetUrl,
-					title: uploadResult.filename,
+			if (labelAdvice.consent) {
+				const outcome = await applyAdvisorConsent(result, labelAdvice.consent, {
+					graphQLService,
+					issuesService,
 				});
-				attachments.push(attachment);
+				if (outcome.issue) issue = { ...result, ...outcome.issue };
+				if (outcome.applied) {
+					labelAdvisorOutput.added.push(...labelAdvice.consent.labels);
+				}
+				labelAdvisorOutput.consent = {
+					labels: labelAdvice.consent.labels,
+					applied: outcome.applied,
+					repo: labelAdvice.consent.receipt.repo,
+					...(outcome.problem ? { problem: outcome.problem } : {}),
+				};
 			}
 		}
-	}
+		const relations = await createRelations(
+			result.id,
+			options,
+			graphQLService,
+			linearService,
+		);
+		// Pass the ORIGINAL description (pre-wrap) so the extractor's prose-keyword inference
+		// ("blocked by", "duplicates", etc.) sees `keyword DEV-100` instead of `keyword [DEV-100](url)`.
+		// After wrapping, the keyword regex's trailing-whitespace anchor fails to match the inserted `[`.
+		const autoLinked = await maybeAutoLink({
+			issueId: result.id,
+			identifier: result.identifier,
+			description: description || undefined,
+			options,
+			preResolved: prepared.preResolved,
+			graphQLService,
+			linearService,
+		});
 
-	let branch: string | undefined;
-	let claim: ClaimIssueResult | undefined;
-	if (options.checkout && result.branchName) {
-		const branchName = toBranchName(result.branchName);
-		// Only treat the branch as created (and surface it in the output) when
-		// the checkout actually happened — outside a git repo gitCheckoutBranch
-		// warns and skips, and claiming a branch / a missing marker afterward
-		// would be a contradictory second warning (DEV-4293 cycle-1).
-		if (gitCheckoutBranch(branchName)) {
-			branch = branchName;
-			// Record the issue→branch link as git metadata (DEV-4293) so the
-			// DEV-4241 hook can confirm a workflow was established without parsing
-			// the branch name. Best-effort: never let a marker-write failure abort
-			// a successful issue creation.
-			try {
-				setBranchLinearIssue(branch, result.identifier);
-			} catch {
-				outputWarning(
-					`Created branch ${branch} but could not record its Linear issue marker. ` +
-						`Run 'el-linear issues mark-branch ${result.identifier}' from the branch to set it.`,
-				);
+		// Images are already embedded inline as markdown in the description,
+		// so only create separate attachment records for non-image files.
+		const attachments: LinearAttachment[] = [];
+		if (uploadResults.length > 0) {
+			const attachmentsService =
+				await createGraphQLAttachmentsService(rootOpts);
+			for (const uploadResult of uploadResults) {
+				if (!isImageFile(uploadResult.filename)) {
+					const attachment = await attachmentsService.createAttachment({
+						issueId: result.id,
+						url: uploadResult.assetUrl,
+						title: uploadResult.filename,
+					});
+					attachments.push(attachment);
+				}
 			}
 		}
-	}
-	// DEV-10654: `--claim` claims WITHOUT cutting a branch. Remote-workspace
-	// authoring (Factory) needs the claim -- an unclaimed issue sitting in an
-	// unstarted state is eligible for the bot-layer sweep -- but a local branch
-	// there is wrong, and `--checkout` welds the two together.
-	if (shouldClaimCreatedIssue(options, branch !== undefined)) {
-		claim = await maybeClaimIssue(
-			result.identifier,
-			issuesService,
-			branch ? "Branch operation succeeded" : "Issue was created",
+
+		let branch: string | undefined;
+		let claim: ClaimIssueResult | undefined;
+		if (options.checkout && result.branchName) {
+			const branchName = toBranchName(result.branchName);
+			// Only treat the branch as created (and surface it in the output) when
+			// the checkout actually happened — outside a git repo gitCheckoutBranch
+			// warns and skips, and claiming a branch / a missing marker afterward
+			// would be a contradictory second warning (DEV-4293 cycle-1).
+			if (gitCheckoutBranch(branchName)) {
+				branch = branchName;
+				// Record the issue→branch link as git metadata (DEV-4293) so the
+				// DEV-4241 hook can confirm a workflow was established without parsing
+				// the branch name. Best-effort: never let a marker-write failure abort
+				// a successful issue creation.
+				try {
+					setBranchLinearIssue(branch, result.identifier);
+				} catch {
+					outputWarning(
+						`Created branch ${branch} but could not record its Linear issue marker. ` +
+							`Run 'el-linear issues mark-branch ${result.identifier}' from the branch to set it.`,
+					);
+				}
+			}
+		}
+		// DEV-10654: `--claim` claims WITHOUT cutting a branch. Remote-workspace
+		// authoring (Factory) needs the claim -- an unclaimed issue sitting in an
+		// unstarted state is eligible for the bot-layer sweep -- but a local branch
+		// there is wrong, and `--checkout` welds the two together.
+		if (shouldClaimCreatedIssue(options, branch !== undefined)) {
+			claim = await maybeClaimIssue(
+				result.identifier,
+				issuesService,
+				branch ? "Branch operation succeeded" : "Issue was created",
+			);
+		}
+
+		const output = {
+			...issue,
+			...(labelAdvisorOutput ? { labelAdvisor: labelAdvisorOutput } : {}),
+			...(branch ? { branch } : {}),
+			...(claim ? { claim } : {}),
+			...(relations.length > 0 ? { relations } : {}),
+			...(autoLinked ? { autoLinked } : {}),
+			...(attachments.length === 1
+				? { attachment: attachments[0] }
+				: attachments.length > 1
+					? { attachments }
+					: {}),
+		};
+		outputSuccess(output);
+	} catch (error) {
+		const detail = error instanceof Error ? error.message : String(error);
+		throw new Error(
+			`Issue ${result.identifier} was created (id ${result.id}) — a post-create step then failed, so this failure is NOT a rejected create. ` +
+				`Do not re-run 'issues create': a retry files a duplicate. ` +
+				`Fix forward with 'el-linear issues update ${result.identifier}' or delete the issue. ` +
+				`Post-create failure: ${detail}`,
 		);
 	}
-
-	const output = {
-		...issue,
-		...(labelAdvisorOutput ? { labelAdvisor: labelAdvisorOutput } : {}),
-		...(branch ? { branch } : {}),
-		...(claim ? { claim } : {}),
-		...(relations.length > 0 ? { relations } : {}),
-		...(autoLinked ? { autoLinked } : {}),
-		...(attachments.length === 1
-			? { attachment: attachments[0] }
-			: attachments.length > 1
-				? { attachments }
-				: {}),
-	};
-	outputSuccess(output);
 }
 
 async function handleHistoryIssue(
@@ -1790,39 +1824,61 @@ async function handleRelateIssue(
 	});
 }
 
-async function handleRelatedIssues(
+/**
+ * DEV-14607 — retract a relation. `issues relate` could create one but
+ * nothing could remove it, so a relation recorded from an analysis that
+ * production later refuted had to stay on the issue with only a comment
+ * saying it was wrong.
+ */
+async function handleUnrelateIssue(
 	issueId: string,
-	_options: OptionValues,
+	options: OptionValues,
 	command: Command,
 ): Promise<void> {
 	const rootOpts = getRootOpts(command);
 	const graphQLService = await createGraphQLService(rootOpts);
 	const linearService = await createLinearService(rootOpts);
 
-	const resolvedId = await linearService.resolveIssueId(issueId);
-	const result = await graphQLService.rawRequest<GetIssueRelationsResponse>(
-		GET_ISSUE_RELATIONS_QUERY,
-		{ id: resolvedId },
-	);
-
-	if (!result.issue) {
-		throw new Error(`Issue "${issueId}" not found`);
+	if (
+		!options.relatedTo &&
+		!options.blocks &&
+		!options.blockedBy &&
+		!options.duplicateOf
+	) {
+		throw new Error(
+			"Specify at least one of: --related-to, --blocks, --blocked-by, --duplicate-of",
+		);
 	}
 
-	const issue = result.issue;
+	const sourceId = await linearService.resolveIssueId(issueId);
+	// The bounded COMPLETE reader, never a single page: deciding a removal from
+	// a partial relation list could report "no such relation" for one that is
+	// really there, and it fails rather than returning a short array.
+	const current = await readIssueRelations(sourceId, rootOpts);
+	if (current.meta.relations_complete !== true) {
+		throw new Error(
+			"Refusing to remove a relation from an incomplete relation read",
+		);
+	}
 
-	const entries: RelatedIssueEntry[] = [
-		...buildOutgoingRelationEntries(issue.relations.nodes),
-		...buildIncomingRelationEntries(issue.inverseRelations.nodes),
-	];
+	const targets = selectRelationsToRemove(current.data, options);
+	const removed = await deleteRelations(targets, graphQLService);
 
 	outputSuccess({
-		id: issue.id,
-		identifier: issue.identifier,
-		title: issue.title,
-		data: entries,
-		meta: { count: entries.length },
+		data: removed,
+		meta: { count: removed.length, source: issueId, removed: true },
 	});
+}
+
+async function handleRelatedIssues(
+	issueId: string,
+	_options: OptionValues,
+	command: Command,
+): Promise<void> {
+	const rootOpts = getRootOpts(command);
+	const linearService = await createLinearService(rootOpts);
+	const resolvedId = await linearService.resolveIssueId(issueId);
+	outputSuccess(await readIssueRelations(resolvedId, rootOpts));
 }
 
 async function handleStartIssue(
@@ -1893,9 +1949,7 @@ async function handleUpdateIssue(
 	if (options.state && !options.status) {
 		options.status = options.state;
 	}
-	if (options.label && !options.labels) {
-		options.labels = options.label;
-	}
+	mergeLabelAliases(options);
 	if (options.parent && !options.parentTicket) {
 		options.parentTicket = options.parent;
 	}
@@ -2333,8 +2387,12 @@ export function setupIssuesCommands(program: Command): void {
 		)
 		.option("--project <project>", "filter by project name or ID")
 		.option("--no-project", "filter issues with no project assigned")
-		.option("--labels <labels>", "filter by labels (comma-separated names)")
-		.option("--label <labels>", "alias for --labels")
+		.option(
+			"--labels <labels>",
+			"filter by labels (comma-separated names; repeatable)",
+			collectList,
+		)
+		.option("--label <labels>", "alias for --labels", collectList)
 		.option(
 			"--status <status>",
 			"filter by status (comma-separated, e.g. Todo,Backlog)",
@@ -2378,8 +2436,12 @@ export function setupIssuesCommands(program: Command): void {
 			"--include-closed",
 			"include issues in terminal states (Done / Canceled). Default is to exclude them; pass this flag to see everything. Ignored when --status is set (explicit choice wins).",
 		)
-		.option("--labels <labels>", "filter by labels (comma-separated names)")
-		.option("--label <labels>", "alias for --labels")
+		.option(
+			"--labels <labels>",
+			"filter by labels (comma-separated names; repeatable)",
+			collectList,
+		)
+		.option("--label <labels>", "alias for --labels", collectList)
 		.option(
 			"--priority <priority>",
 			"filter by priority (comma-separated: urgent,high,medium,low,none or 0-4)",
@@ -2451,9 +2513,10 @@ export function setupIssuesCommands(program: Command): void {
 		.option("--team <team>", "team key or name (default: from config)")
 		.option(
 			"--labels <labels>",
-			"labels (comma-separated names, auto-resolved per team)",
+			"labels (comma-separated names, auto-resolved per team; repeatable)",
+			collectList,
 		)
-		.option("--label <labels>", "alias for --labels")
+		.option("--label <labels>", "alias for --labels", collectList)
 		.option("--claude", "add the workspace-level 'claude' label")
 		.option("--project-milestone <milestone>", "project milestone name or ID")
 		.option("--cycle <cycle>", "cycle name or ID")
@@ -2541,9 +2604,7 @@ export function setupIssuesCommands(program: Command): void {
 					command: Command,
 				) => {
 					// Normalize --label alias to --labels
-					if (options.label && !options.labels) {
-						options.labels = options.label;
-					}
+					mergeLabelAliases(options);
 					// Normalize --parent alias to --parent-ticket
 					if (options.parent && !options.parentTicket) {
 						options.parentTicket = options.parent;
@@ -2637,8 +2698,12 @@ export function setupIssuesCommands(program: Command): void {
 		)
 		.option("--clear-delegate", "remove the issue delegate")
 		.option("--project <project>", "new project (name or ID)")
-		.option("--labels <labels>", "labels (comma-separated names or IDs)")
-		.option("--label <labels>", "alias for --labels")
+		.option(
+			"--labels <labels>",
+			"labels (comma-separated names or IDs; repeatable)",
+			collectList,
+		)
+		.option("--label <labels>", "alias for --labels", collectList)
 		.option(
 			"--label-by <mode>",
 			"how to apply labels: 'adding' (default) or 'overwriting'",
@@ -2743,10 +2808,26 @@ export function setupIssuesCommands(program: Command): void {
 		.action(handleAsyncCommand(handleRelateIssue));
 
 	issues
+		.command("unrelate <issueId>")
+		.description("Remove issue relations created by `issues relate`.")
+		.option("--related-to <issues>", "related issues (comma-separated)")
+		.option("--blocks <issues>", "issues this blocks (comma-separated)")
+		.option("--blocked-by <issues>", "issues blocking this (comma-separated)")
+		.addHelpText(
+			"after",
+			"\nBoth UUID and identifiers like ABC-123 are supported." +
+				"\nThe flag must match the one that created the relation: `--blocks` and" +
+				"\n`--blocked-by` name opposite directions and cannot retract each other." +
+				"\nRun `issues related <issueId>` first to see what is there.",
+		)
+		.option("--duplicate-of <issue>", "remove a duplicate-of relation")
+		.action(handleAsyncCommand(handleUnrelateIssue));
+
+	issues
 		.command("related <issueId>")
 		.alias("relations")
 		.description(
-			"List all relations for an issue (related, blocks, blockedBy, duplicate).",
+			"List all relations for an issue (related, blocks, blockedBy, duplicate, similar).",
 		)
 		.addHelpText(
 			"after",

@@ -432,6 +432,13 @@ export interface IssueRelationCreateResponse {
 	};
 }
 
+/** Response shape for `ISSUE_RELATION_DELETE_MUTATION` (DEV-14607). */
+export interface IssueRelationDeleteResponse {
+	issueRelationDelete: {
+		success: boolean;
+	};
+}
+
 /** Response shape for `SCAN_ISSUES_QUERY`. */
 export interface ScanIssuesResponse {
 	issues: {

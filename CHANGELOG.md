@@ -18,6 +18,8 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Bug Fixes
 
+* **issues:** exhaust both relation connections within fixed page, row, byte and time bounds for `issues related` / `relations` and `read --with relations`. Successful JSON adds `meta.relations_complete: true` (per issue for batched reads); incomplete enumeration, invalid rows or missing peers fail nonzero with `meta.relations_complete: false`, instead of silently truncating/dropping links or treating a missing include as empty. Existing formatted rows and mutation preflights are unchanged (DEV-14039).
+
 * **comments:** handle null human authors and retain integration/external author names in JSON and summaries.
 * **input:** preserve delayed nonblocking stdin and UTF-8 split across reads (DEV-11118).
 
@@ -31,6 +33,19 @@ project adheres to [Semantic Versioning](https://semver.org/).
 * **issues:** honor read options such as `--body` on the nested `issues read` and `issue read` routes (DEV-6141)
 * **quality:** restore a clean full-repository lint baseline (DEV-6142)
 * **labels:** resolve `labels create --team` keys and names before creating the label (DEV-5749)
+
+## [1.48.0](https://github.com/enrichlayer/el-linear/compare/v1.47.1...v1.48.0) (2026-10-27)
+
+
+### Features
+
+* **issues:** claim an issue at creation without cutting a branch (DEV-10654) ([#336](https://github.com/enrichlayer/el-linear/issues/336)) ([d95ef9c](https://github.com/enrichlayer/el-linear/commit/d95ef9c9b86b7712103f604c19f4b6d4172f556c))
+
+
+### Bug Fixes
+
+* **issues:** return complete bounded relation reads (DEV-14039) ([#349](https://github.com/enrichlayer/el-linear/issues/349)) ([a203f1e](https://github.com/enrichlayer/el-linear/commit/a203f1ed9fd09935f22c04297dad4f8fc8093492))
+* **output:** publish the cause chain and classify through it (DEV-14754) ([#353](https://github.com/enrichlayer/el-linear/issues/353)) ([9e76a9f](https://github.com/enrichlayer/el-linear/commit/9e76a9f08536a11418808d9bd2be9338b2d2c247))
 
 ## [1.47.1](https://github.com/enrichlayer/el-linear/compare/v1.47.0...v1.47.1) (2026-10-03)
 

@@ -174,6 +174,78 @@ describe("issues commands", () => {
 		mockLoadConfig.mockReturnValue(baseConfig);
 	});
 
+	describe("complete relation reads (DEV-14039)", () => {
+		const peer = {
+			id: "peer",
+			identifier: "DEV-2",
+			title: "Blocker",
+			state: { id: "s", name: "Todo" },
+			priority: null,
+			assignee: null,
+			team: null,
+		};
+		const page = (
+			nodes: unknown[],
+			hasNextPage = false,
+			endCursor: string | null = null,
+		) => ({ nodes, pageInfo: { hasNextPage, endCursor } });
+		const response = (incoming: unknown) => ({
+			issue: {
+				id: "root",
+				identifier: "DEV-1",
+				title: "Root",
+				relations: page([]),
+				inverseRelations: incoming,
+			},
+		});
+
+		it("walks both connections before declaring complete; incoming later-page blocker survives", async () => {
+			mockGraphQLService.rawRequest.mockReset();
+			mockLinearService.resolveIssueId.mockResolvedValue("root");
+			mockGraphQLService.rawRequest
+				.mockResolvedValueOnce(
+					response(
+						page([{ id: "r0", type: "similar", issue: peer }], true, "next"),
+					),
+				)
+				.mockResolvedValueOnce(
+					response(page([{ id: "r", type: "blocks", issue: peer }])),
+				);
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, ["issues", "related", "DEV-1"]);
+			expect(mockGraphQLService.rawRequest).toHaveBeenCalledTimes(2);
+			expect(mockOutputSuccess).toHaveBeenCalledWith(
+				expect.objectContaining({
+					data: [
+						expect.objectContaining({ type: "similar" }),
+						expect.objectContaining({
+							type: "blockedBy",
+							issue: expect.objectContaining({ identifier: "DEV-2" }),
+						}),
+					],
+					meta: { count: 2, relations_complete: true },
+				}),
+			);
+		});
+
+		it("missing peers cannot become a complete empty result in the registered command", async () => {
+			mockGraphQLService.rawRequest.mockReset();
+			mockLinearService.resolveIssueId.mockResolvedValue("root");
+			mockGraphQLService.rawRequest.mockResolvedValue(
+				response(page([{ id: "r", type: "blocks", issue: null }])),
+			);
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, ["issues", "related", "DEV-1"]);
+			expect(mockOutputSuccess).not.toHaveBeenCalled();
+			expect(process.exit).toHaveBeenCalledWith(1);
+			expect(
+				stdoutSpy.mock.calls.map((call: unknown[]) => String(call[0])).join(""),
+			).toContain('"relations_complete": false');
+		});
+	});
+
 	describe("issues list", () => {
 		it("defaults to excluding terminal states — routes through searchIssues with excludeTerminalStates:true (DEV-4478)", async () => {
 			mockSearchIssues.mockResolvedValue([]);
@@ -874,6 +946,94 @@ describe("issues commands", () => {
 			);
 		});
 
+		// DEV-14849: commander keeps only the last occurrence of a repeated
+		// option, so `--label bug --label feature` used to resolve `feature`
+		// alone and the caller never saw `bug` go missing.
+		it("accumulates a repeated --label instead of keeping only the last", async () => {
+			mockResolveLabels.mockReturnValue(["label-uuid-1", "label-uuid-2"]);
+			mockCreateIssue.mockResolvedValue({ id: "new-issue-id" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Task",
+				"--team",
+				"DEV",
+				"--label",
+				"bug",
+				"--label",
+				"feature",
+				...requiredArgs,
+			]);
+
+			expect(mockResolveLabels).toHaveBeenCalledWith(["bug", "feature"]);
+		});
+
+		// DEV-14849: a validation refusal must stay non-zero. The envelope
+		// carries the reason in `error`, and an exit of 0 beside it would make
+		// every shell-out caller read a blocked creation as a successful one.
+		// This pins the status so it cannot regress to 0; it already holds.
+		//
+		// The rest of this file runs with `validation: { enabled: false }` to
+		// isolate command wiring, so the refusal has to be turned on for this
+		// one case — otherwise the command never reaches `enforceValidation`
+		// and the test would pass on an unrelated exit.
+		it("exits non-zero when validation blocks the creation", async () => {
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				validation: { enabled: true },
+			});
+			try {
+				const program = createTestProgram();
+				setupIssuesCommands(program);
+				await runCommand(program, [
+					"issues",
+					"create",
+					"Task",
+					"--team",
+					"DEV",
+					// No --labels/--description/--project: the validator blocks.
+				]);
+
+				// Assert the refusal is the VALIDATION one. A bare exit-code check
+				// passes on any other early exit, which is how the first draft of
+				// this test passed while never reaching the validator at all.
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					expect.stringContaining("Issue creation blocked by validation"),
+				);
+				expect(process.exit).toHaveBeenCalledWith(1);
+				expect(mockCreateIssue).not.toHaveBeenCalled();
+			} finally {
+				mockLoadConfig.mockReturnValue(baseConfig);
+			}
+		});
+
+		// The alias fold used `if (options.label && !options.labels)`, which
+		// dropped `--label` outright when both spellings were given.
+		it("merges --labels and --label instead of dropping the alias", async () => {
+			mockResolveLabels.mockReturnValue(["label-uuid-1", "label-uuid-2"]);
+			mockCreateIssue.mockResolvedValue({ id: "new-issue-id" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Task",
+				"--team",
+				"DEV",
+				"--labels",
+				"bug",
+				"--label",
+				"feature",
+				...requiredArgs,
+			]);
+
+			expect(mockResolveLabels).toHaveBeenCalledWith(["bug", "feature"]);
+		});
+
 		it("normalizes literal newline escapes in inline descriptions", async () => {
 			mockCreateIssue.mockResolvedValue({
 				id: "new-issue-id",
@@ -1076,6 +1236,50 @@ describe("issues commands", () => {
 			);
 			expect(process.exit).toHaveBeenCalledWith(1);
 			expect(mockCreateIssue).not.toHaveBeenCalled();
+		});
+
+		it("names the created issue unmistakably when a post-create step fails (DEV-15327)", async () => {
+			// The write succeeds, then the attachment-record step fails. The error
+			// must identify the created issue and forbid a blind retry — before
+			// this, the failure read like a rejected create and a retry filed a
+			// duplicate (DEV-15257/DEV-15258).
+			mockCreateIssue.mockResolvedValue({
+				id: "new-issue-id",
+				identifier: "DEV-999",
+			});
+			mockUploadFile.mockResolvedValue({
+				success: true,
+				assetUrl: "https://uploads.linear.app/asset/report.pdf",
+				filename: "report.pdf",
+			});
+			mockCreateAttachment.mockRejectedValue(
+				new Error("attachment service unavailable"),
+			);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Issue with PDF",
+				"--team",
+				"DEV",
+				"--description",
+				"See attached report.",
+				"--attachment",
+				"/tmp/report.pdf",
+				...requiredArgs,
+			]);
+
+			expect(mockCreateIssue).toHaveBeenCalled();
+			expect(process.exit).toHaveBeenCalledWith(1);
+			expect(mockOutputSuccess).not.toHaveBeenCalled();
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Issue DEV-999 was created (id new-issue-id)"),
+			);
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("attachment service unavailable"),
+			);
 		});
 
 		it("calls resolveDefaultStatus", async () => {
