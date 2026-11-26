@@ -15,6 +15,8 @@ export const LIST_COMMENTS_QUERY = `
             displayName
             url
           }
+          botActor { name }
+          externalUser { name }
         }
       }
     }
@@ -35,6 +37,8 @@ export const GET_COMMENT_QUERY = `
         displayName
         url
       }
+      botActor { name }
+      externalUser { name }
       issue {
         id
         identifier
@@ -58,6 +62,8 @@ export const CREATE_COMMENT_MUTATION = `
           displayName
           url
         }
+        botActor { name }
+        externalUser { name }
       }
     }
   }
@@ -78,6 +84,8 @@ export const UPDATE_COMMENT_MUTATION = `
           displayName
           url
         }
+        botActor { name }
+        externalUser { name }
         issue {
           id
           identifier

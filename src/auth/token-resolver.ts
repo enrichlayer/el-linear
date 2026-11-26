@@ -27,6 +27,7 @@ import {
 } from "./oauth-storage.js";
 import {
 	type ExchangeResult,
+	exchangeClientCredentials,
 	type FetchLike,
 	refreshTokens,
 } from "./oauth-token.js";
@@ -52,6 +53,8 @@ export interface GetActiveAuthOptions {
 	fetchImpl?: FetchLike;
 	/** Test seam: override the wall-clock for refresh expiry checks. */
 	now?: () => number;
+	/** Internal 401-recovery seam for client-credentials tokens. */
+	forceOAuthRenewal?: boolean;
 }
 
 /**
@@ -109,7 +112,10 @@ export async function ensureFreshAccessToken(
 ): Promise<OAuthState> {
 	const now = options.now ?? Date.now;
 	// Fast path: token is fresh; no lock, no refresh.
-	if (now() + 60_000 < state.expiresAt) {
+	const forceClientCredentialsRenewal =
+		options.forceOAuthRenewal === true &&
+		state.grantType === "client_credentials";
+	if (!forceClientCredentialsRenewal && now() + 60_000 < state.expiresAt) {
 		return state;
 	}
 	// Snapshot the target path ONCE so a profile switch between the
@@ -121,10 +127,13 @@ export async function ensureFreshAccessToken(
 		// Re-read inside the lock — another process may have refreshed
 		// while we were waiting. If so, use their result.
 		const current = (await readOAuthState(targetPath)) ?? state;
-		if (now() + 60_000 < current.expiresAt) {
+		if (
+			now() + 60_000 < current.expiresAt &&
+			(!forceClientCredentialsRenewal || current.obtainedAt > state.obtainedAt)
+		) {
 			return current;
 		}
-		if (!current.refreshToken) {
+		if (current.grantType !== "client_credentials" && !current.refreshToken) {
 			throw new Error(
 				"OAuth access token expired and no refresh token is stored. Re-run `el-linear init oauth`.",
 			);
@@ -132,15 +141,32 @@ export async function ensureFreshAccessToken(
 
 		let refreshed: ExchangeResult;
 		try {
-			refreshed = await refreshTokens(
-				{
-					clientId: current.clientId,
-					clientSecret: current.clientSecret,
-					refreshToken: current.refreshToken,
-				},
-				options.fetchImpl,
-				now,
-			);
+			if (current.grantType === "client_credentials") {
+				if (!current.clientSecret) {
+					throw new Error(
+						"stored client credentials are missing client_secret",
+					);
+				}
+				refreshed = await exchangeClientCredentials(
+					{
+						clientId: current.clientId,
+						clientSecret: current.clientSecret,
+						scopes: current.scopes,
+					},
+					options.fetchImpl,
+					now,
+				);
+			} else {
+				refreshed = await refreshTokens(
+					{
+						clientId: current.clientId,
+						clientSecret: current.clientSecret,
+						refreshToken: current.refreshToken as string,
+					},
+					options.fetchImpl,
+					now,
+				);
+			}
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			// Sanitize again here even though refreshTokens already does
@@ -148,7 +174,7 @@ export async function ensureFreshAccessToken(
 			// (or a wrapper that catches+rethrows) inserts an unsanitized
 			// stage into the error chain (DEV-4065).
 			throw new Error(
-				`OAuth refresh failed: ${sanitizeForLog(message)}. Re-run \`el-linear init oauth\` to re-authorize.`,
+				`OAuth token renewal failed: ${sanitizeForLog(message)}. Re-run \`el-linear init oauth\` to re-authorize.`,
 			);
 		}
 
