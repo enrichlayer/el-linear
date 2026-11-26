@@ -222,19 +222,6 @@ export interface ElLinearConfig {
 		intakeDecisionGate?: false | "warn" | "block";
 		/** Headers accepted for the intake section. Defaults to `["Intake decision"]`. */
 		intakeSectionHeaders?: string[];
-		/**
-		 * OPT-IN consent-label receipt gate (DEV-10372). When `true`, applying a
-		 * consent label (see `consentLabels`) is refused unless the issue
-		 * description carries exactly one valid `el-intake-decision:v1`
-		 * automatic-implementation receipt for that issue. `issues create`
-		 * always refuses an explicit consent label (the receipt must name an
-		 * issue that does not exist yet) and drops an advisor-proposed one with
-		 * a warning. Independent of `enabled` and `--skip-validation`. See
-		 * `consent-receipt.ts`.
-		 */
-		consentReceiptGate?: boolean;
-		/** Labels treated as consent for the receipt gate. Defaults to `["bot"]`. */
-		consentLabels?: string[];
 	};
 	/**
 	 * Optional override for the Linear workspace URL key (the part after
