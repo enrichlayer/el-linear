@@ -15,6 +15,8 @@
  * read the classification without importing the GraphQL client.
  */
 
+import { errorChain } from "./error-chain.js";
+
 /**
  * GraphQL `extensions.code` values Linear returns for conditions that clear
  * on their own. A caller may retry these regardless of the HTTP status —
@@ -188,8 +190,12 @@ export class LinearGraphQLError extends Error {
 	readonly retryable: boolean;
 	readonly resetAt?: string;
 
-	constructor(message: string, detail: LinearGraphQLErrorDetail) {
-		super(message);
+	constructor(
+		message: string,
+		detail: LinearGraphQLErrorDetail,
+		options?: { cause?: unknown },
+	) {
+		super(message, options);
 		this.name = "LinearGraphQLError";
 		this.httpStatus = detail.httpStatus;
 		this.code = detail.code;
@@ -223,11 +229,21 @@ export function toLinearGraphQLError(
 ): LinearGraphQLError {
 	const httpStatus = graphQLErrorHttpStatus(error);
 	const code = graphQLErrorCode(error);
-	return new LinearGraphQLError(message, {
-		httpStatus,
-		code,
-		retryable: classifyGraphQLFailure(httpStatus, code),
-	});
+	return new LinearGraphQLError(
+		message,
+		{
+			httpStatus,
+			code,
+			retryable: classifyGraphQLFailure(httpStatus, code),
+		},
+		// Keep the rejection as the cause (DEV-14754). The message composes
+		// the rejection's message, so this costs nothing visually — the chain
+		// renderer drops text already on the line — while a rejection that
+		// wrapped something of its own (undici's `fetch failed` carrying
+		// `connect ECONNREFUSED …`) keeps the detail that says WHICH network
+		// failure it was.
+		{ cause: error },
+	);
 }
 
 /**
@@ -259,4 +275,29 @@ export function readGraphQLErrorDetail(
 		retryable: candidate.retryable,
 		...(resetAt ? { resetAt } : {}),
 	};
+}
+
+/**
+ * Read the classification off a thrown value or anything it wraps (DEV-14754).
+ *
+ * A `LinearGraphQLError` that a command catches and rethrows with more context
+ * ("creating issue failed: ...", a retry helper's aggregate) is still a Linear
+ * GraphQL failure, but the classification sits one or more `cause` links down.
+ * Reading only the outermost link is precisely the blindness DEV-7987 exists
+ * to remove, reintroduced by the first wrapper in between.
+ *
+ * Safe by construction: only `toLinearGraphQLError` and the quota admission
+ * path attach a `retryable` boolean, so a link carrying one IS a classified
+ * Linear failure rather than an arbitrary error being upgraded into a verdict.
+ */
+export function readGraphQLErrorDetailFromChain(
+	error: unknown,
+): LinearGraphQLErrorDetail | null {
+	for (const link of errorChain(error)) {
+		const detail = readGraphQLErrorDetail(link);
+		if (detail) {
+			return detail;
+		}
+	}
+	return null;
 }

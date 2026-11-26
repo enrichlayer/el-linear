@@ -81,6 +81,60 @@ describe("comments commands", () => {
 		}
 	});
 
+	describe("nullable integration authors", () => {
+		it.each(["create", "update", "list", "read"])(
+			"preserves alternate authors for %s",
+			async (verb) => {
+				const comment = {
+					id: "c1",
+					body: "hello",
+					user: null,
+					botActor: { name: "Robot" },
+					externalUser: { name: "Visitor" },
+					createdAt: "today",
+					updatedAt: "today",
+					issue: null,
+				};
+				mockRawRequest.mockResolvedValue({
+					commentCreate: { success: true, comment },
+					commentUpdate: { success: true, comment },
+					comment,
+					issue: {
+						id: "resolved-uuid",
+						identifier: "DEV-1",
+						comments: { nodes: [comment] },
+					},
+				});
+				const program = createTestProgram();
+				setupCommentsCommands(program);
+				const args = [
+					"comments",
+					verb,
+					verb === "read"
+						? "comment-c5d15b28"
+						: verb === "update"
+							? "comment-uuid"
+							: "DEV-1",
+				];
+				if (verb === "create" || verb === "update")
+					args.push("--body", "hello", "--no-auto-mention", "--no-auto-link");
+				await runCommand(program, args);
+				expect(mockOutputSuccess).toHaveBeenCalled();
+				const result = mockOutputSuccess.mock.calls.at(-1)?.[0];
+				const data = verb === "list" ? result.data[0] : result;
+				expect(data).toMatchObject({
+					id: "c1",
+					botActor: { name: "Robot" },
+					externalUser: { name: "Visitor" },
+				});
+				expect(data.user).toBeUndefined();
+				const query = mockRawRequest.mock.calls.at(-1)?.[0] as string;
+				expect(query).toMatch(/botActor\s*\{\s*name/);
+				expect(query).toMatch(/externalUser\s*\{\s*name/);
+			},
+		);
+	});
+
 	describe("comments create", () => {
 		it("resolves issue ID and creates comment with body", async () => {
 			const program = createTestProgram();

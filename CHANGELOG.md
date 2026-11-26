@@ -8,6 +8,8 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Features
 
+* **issues:** accept `issues create --issue-id <uuid-v4>` for caller-selected stable identity through the existing validation and creation flow; invalid IDs are rejected before provider mutations (DEV-11113).
+
 * **auth:** support optional OAuth app credentials and client-credentials renewal while preserving explicit/API-key precedence; coordinate shared local or distributed request headroom, and batch project/label/cycle catalog reads to reduce request and complexity pressure (DEV-7874)
 * **issues:** add an opt-in intake-decision gate that requires explicit need, value, ownership, placement, and a `PROCEED` decision before creation; `--skip-validation` cannot silently bypass it (DEV-6163)
 * **issues:** add an opt-in create-time goal-completion gate — checks the description for a falsifiable "Done when" / acceptance-criteria section, `warn`/`block` modes via `validation.goalCompletionGate`, bypass with `--allow-vague-goal` (DEV-5920)
@@ -15,6 +17,11 @@ project adheres to [Semantic Versioning](https://semver.org/).
 * **projects:** add `projects update --status <name>` to set a project's status via the proper `projectUpdate` mutation instead of a hand-written GraphQL call; resolves the workspace's configured statuses by name (case-insensitive), lists the valid names on a miss, supports `--quiet`, and adds `status`, `progress`, and `url` to the JSON result (DEV-7021)
 
 ### Bug Fixes
+
+* **issues:** exhaust both relation connections within fixed page, row, byte and time bounds for `issues related` / `relations` and `read --with relations`. Successful JSON adds `meta.relations_complete: true` (per issue for batched reads); incomplete enumeration, invalid rows or missing peers fail nonzero with `meta.relations_complete: false`, instead of silently truncating/dropping links or treating a missing include as empty. Existing formatted rows and mutation preflights are unchanged (DEV-14039).
+
+* **comments:** handle null human authors and retain integration/external author names in JSON and summaries.
+* **input:** preserve delayed nonblocking stdin and UTF-8 split across reads (DEV-11118).
 
 * **graphql:** publish typed pre-request quota refusals and known reset/probe deadlines in `errorDetail`, preserving configured headroom and avoiding immediate retries (DEV-9503).
 * **graphql:** classify SDK and raw GraphQL failures by HTTP status and extension code, preserving permanent failures separately from transient errors in the additive `errorDetail` output field (DEV-7987, #302); declare the request printer as a runtime dependency for production installs (DEV-7874).
@@ -26,6 +33,33 @@ project adheres to [Semantic Versioning](https://semver.org/).
 * **issues:** honor read options such as `--body` on the nested `issues read` and `issue read` routes (DEV-6141)
 * **quality:** restore a clean full-repository lint baseline (DEV-6142)
 * **labels:** resolve `labels create --team` keys and names before creating the label (DEV-5749)
+
+## [1.48.0](https://github.com/enrichlayer/el-linear/compare/v1.47.1...v1.48.0) (2026-10-27)
+
+
+### Features
+
+* **issues:** claim an issue at creation without cutting a branch (DEV-10654) ([#336](https://github.com/enrichlayer/el-linear/issues/336)) ([d95ef9c](https://github.com/enrichlayer/el-linear/commit/d95ef9c9b86b7712103f604c19f4b6d4172f556c))
+
+
+### Bug Fixes
+
+* **issues:** return complete bounded relation reads (DEV-14039) ([#349](https://github.com/enrichlayer/el-linear/issues/349)) ([a203f1e](https://github.com/enrichlayer/el-linear/commit/a203f1ed9fd09935f22c04297dad4f8fc8093492))
+* **output:** publish the cause chain and classify through it (DEV-14754) ([#353](https://github.com/enrichlayer/el-linear/issues/353)) ([9e76a9f](https://github.com/enrichlayer/el-linear/commit/9e76a9f08536a11418808d9bd2be9338b2d2c247))
+
+## [1.47.1](https://github.com/enrichlayer/el-linear/compare/v1.47.0...v1.47.1) (2026-10-03)
+
+
+### Bug Fixes
+
+* **cli:** preserve comment and stdin safeguards (DEV-11118) ([#342](https://github.com/enrichlayer/el-linear/issues/342)) ([bbf4545](https://github.com/enrichlayer/el-linear/commit/bbf45456faed7814282d832191463c5060a5faf0))
+
+## [1.47.0](https://github.com/enrichlayer/el-linear/compare/v1.46.1...v1.47.0) (2026-10-03)
+
+
+### Features
+
+* **issues:** accept caller-selected issue UUIDs (DEV-11113) ([#340](https://github.com/enrichlayer/el-linear/issues/340)) ([5ca5017](https://github.com/enrichlayer/el-linear/commit/5ca5017679f683d9b279410fac0b1e295698cc18))
 
 ## [1.46.1](https://github.com/enrichlayer/el-linear/compare/v1.46.0...v1.46.1) (2026-09-28)
 
