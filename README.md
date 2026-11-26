@@ -321,6 +321,18 @@ A full reference with every key documented lives in [config.example.json](./conf
 UUIDs come from the Linear UI (URL bars, settings pages) or via el-linear
 itself: `el-linear teams list --raw | jq '.[] | {key, id}'`, etc.
 
+### Caller-selected issue identity
+
+`issues create --issue-id <uuid-v4>` supplies a stable ID through the normal
+create flow, including its intake, duplicate, field, SOP, and checkout guards.
+The value must be a UUIDv4 and is forwarded unchanged. Omit the option to let
+Linear assign the issue ID as usual.
+
+Persist the ID before creation. If the response is lost or a later create reports
+a duplicate ID, use `el-linear issues get <uuid-v4>` to reconcile against Linear's
+authoritative issue record. Supplying an ID does not guarantee that replaying a
+create succeeds and does not enable automatic mutation retries.
+
 ### Gate telemetry (optional)
 
 `issues create` has a duplicate-detection gate (on by default), an opt-in
@@ -777,12 +789,36 @@ capturing one stream always gets exactly one parseable object).
 
 | Field           | Always present | Meaning                                                              |
 | --------------- | -------------- | -------------------------------------------------------------------- |
-| `error`         | yes            | The failure message, token-sanitized.                                |
+| `error`         | yes            | The failure message, token-sanitized. This is the outermost message — the one the failing command composed. |
 | `activeProfile` | yes            | Which profile the command ran under — distinguishes "not found" from "wrong workspace". |
-| `errorDetail`   | no             | Classification of a **Linear GraphQL** failure or quota admission refusal. See below. |
+| `cause`         | no             | The wrapped reasons below `error`, outermost first, token-sanitized. See below. |
+| `errorDetail`   | no             | Classification of a **Linear GraphQL** failure or quota admission refusal, whether thrown directly or wrapped. See below. |
+
+`cause` is emitted when the thrown error wraps another one — the standard
+`new Error(message, { cause })` chain that every layer adding context
+("creating issue failed", "refreshing the token failed") builds. It renders the
+chain below `error` as one line, joined with `: `, with a segment that already
+appears in `error` or in an earlier segment omitted (a wrapper usually composes
+its message from the inner one) and a `cause` cycle terminating rather than
+hanging:
+
+```json
+{
+  "error": "claiming issue failed",
+  "activeProfile": "work",
+  "cause": "Ratelimit exceeded",
+  "errorDetail": { "httpStatus": 429, "code": "RATELIMITED", "retryable": true }
+}
+```
+
+Read it when `error` alone doesn't explain the failure: the outer sentence is
+the command's context, and the reason lives below it. It is absent when the
+error carries no cause, so an unwrapped failure's envelope is unchanged.
 
 `errorDetail` is emitted when the failure came from a request to the
-Linear GraphQL API or the quota admission that precedes it. Its fields:
+Linear GraphQL API or the quota admission that precedes it — including when a
+command caught such a failure and rethrew it with more context, since wrapping
+a failure does not make it stop being a Linear failure. Its fields:
 
 | Field        | Type             | Meaning                                                                 |
 | ------------ | ---------------- | ----------------------------------------------------------------------- |
@@ -1069,6 +1105,35 @@ el-linear read DEV-1 DEV-2 --with relations | jq '.data[].relations'
 and is mutually exclusive with `--field` (which prints raw section text,
 no envelope).
 
+`issues related` (alias `relations`) and `read --with relations` exhaust both
+outgoing and incoming connections before returning rows. Successful JSON adds
+`meta.relations_complete: true`; the standalone command also retains
+`meta.count`. For a batched read, completeness is recorded on each issue.
+The bounds per issue are 50 rows per connection page, 40 requests, 1,000 total
+rows, 1 MiB of accumulated response JSON / formatted relation output and a
+six-second relation-read deadline. The deadline aborts relation HTTP requests;
+base-issue resolution and other includes keep their existing behavior.
+
+A fetch failure, missing issue/peer, invalid row, missing pagination proof,
+non-progressing cursor or exceeded bound fails the command with exit code 1:
+
+```json
+{
+  "error": "Incomplete issue relations: missing connection or pagination metadata",
+  "activeProfile": "work",
+  "meta": { "relations_complete": false }
+}
+```
+
+No partial rows are returned on failure, including when an opt-in relation
+include fails. Existing formatted relation rows remain unchanged: incoming
+`blocks` is `blockedBy`; `related`, `duplicate` and `similar` keep their type.
+Enumeration completeness does not assert that a nullable peer state is known
+or closed. Admission consumers must validate blocker identifiers/state and
+require explicit completeness, rather than treating an older missing field,
+an error or an empty array as proof. Output projections (`--raw`, `--fields`,
+`--jq`) can remove metadata; use the unprojected JSON envelope when checking it.
+
 ## Wrapping Linear references in arbitrary text
 
 `el-linear refs wrap` takes plain text on stdin (or via `--file`) and rewrites
@@ -1110,19 +1175,18 @@ the JSON envelope embeds a structured `_warnings` line:
   "data": [{ "identifier": "DEV-2134", "title": "…" }, /* … */],
   "meta": { "count": 3, "query": "auth flicker" },
   "_warnings": [
-    "relation_candidates: Found 3 candidate related issues (DEV-2134, FIN-77, ALL-672). To link them as related: reply with the IDs you want linked (e.g. \"link DEV-2134 and FIN-77\"). To skip linking: reply \"no links\". (Agent-inferred IDs are blocked by auto-mode; user-named IDs pass — DEV-4494.)"
+    "relation_candidates: Found 3 candidate related issues (DEV-2134, FIN-77, ALL-672). Link the relevant ones now — at create time with --related-to, or `issues relate <id> --related-to \"<ids>\"`. Relating issues you found yourself is part of your task and needs no user confirmation. Run each relate as a standalone command. If one is still denied, report the denial; the user can then reply with the IDs you want linked (e.g. \"link DEV-2134 and FIN-77\"), or \"no links\" to skip (DEV-4494, DEV-15004)."
   ]
 }
 ```
 
-Why it exists: Claude Code's auto-mode permission classifier blocks
-`el-linear issues relate <source> --related-to "<ids>"` calls when the IDs
-were inferred by the agent from its own search rather than typed by the
-user — because each listed peer is a write target. The prompt nudges the
-caller (typically an agent driving the `linear-operations` skill) to surface
-the candidates verbatim and have the user name which IDs to link; any
-subsequent `issues relate` call then carries user-specified IDs and the
-guard passes naturally. **The fix is not to weaken the guard** — see
+Why it exists: an agent that finds related issues should link them as part
+of its task, without asking the user to name IDs ([DEV-5853](https://linear.app/verticalint/issue/DEV-5853/),
+[DEV-15004](https://linear.app/verticalint/issue/DEV-15004/)). A
+`Bash(el-linear:*)` permission rule covers these writes only when each runs
+as a standalone command; a compound shell command is judged separately and
+can be denied. The reply flow is the fallback for a standalone write that is
+still denied: the agent reports the denial and the user names the IDs. See
 [DEV-4494](https://linear.app/verticalint/issue/DEV-4494/) for the original
 incident (PYT-213 triage, 2026-06-04).
 

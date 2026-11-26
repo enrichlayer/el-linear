@@ -109,6 +109,17 @@ merge; a green CI and a human review still gate landing.
   under *Settings → Secrets and variables → Actions*. Without it the review step
   fails on same-repo PRs. Change the reviewer model in the workflow's
   `claude_args` if you want a different tier.
+- **Non-blocking by construction.** The review step runs with
+  `continue-on-error: true`, so the `pr-review` job stays green when the review
+  itself fails (API refusal, quota, outage). A green `pr-review` check therefore
+  does not mean a review was posted — look for the `claude[bot]` comment. When
+  the step fails, the job log carries a `::warning::` annotation and the SDK
+  `result` payload (error text included) under "Surface advisory review
+  failure", which is where to start diagnosing.
+- A PR that edits `pr-review.yml` cannot exercise its own change: the action's
+  OIDC exchange refuses to run unless the workflow file is identical to the one
+  on `main`, and the step exits 0 with a "workflow validation" notice. Verify
+  workflow changes on the next PR after they merge.
 
 ## Code style
 

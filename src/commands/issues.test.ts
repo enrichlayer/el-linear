@@ -1,5 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,6 +16,9 @@ import {
 } from "../__tests__/test-helpers.js";
 
 // -- Mock function declarations (before vi.mock) --
+
+const issueId = "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE";
+const identityOptions = [[], ["--issue-id", issueId]];
 
 const mockGetIssues = vi.fn();
 const mockGetIssueById = vi.fn();
@@ -173,6 +182,78 @@ describe("issues commands", () => {
 		// mockReturnValue — re-pin the default loadConfig to the bare baseline
 		// so individual tests start with a clean slate.
 		mockLoadConfig.mockReturnValue(baseConfig);
+	});
+
+	describe("complete relation reads (DEV-14039)", () => {
+		const peer = {
+			id: "peer",
+			identifier: "DEV-2",
+			title: "Blocker",
+			state: { id: "s", name: "Todo" },
+			priority: null,
+			assignee: null,
+			team: null,
+		};
+		const page = (
+			nodes: unknown[],
+			hasNextPage = false,
+			endCursor: string | null = null,
+		) => ({ nodes, pageInfo: { hasNextPage, endCursor } });
+		const response = (incoming: unknown) => ({
+			issue: {
+				id: "root",
+				identifier: "DEV-1",
+				title: "Root",
+				relations: page([]),
+				inverseRelations: incoming,
+			},
+		});
+
+		it("walks both connections before declaring complete; incoming later-page blocker survives", async () => {
+			mockGraphQLService.rawRequest.mockReset();
+			mockLinearService.resolveIssueId.mockResolvedValue("root");
+			mockGraphQLService.rawRequest
+				.mockResolvedValueOnce(
+					response(
+						page([{ id: "r0", type: "similar", issue: peer }], true, "next"),
+					),
+				)
+				.mockResolvedValueOnce(
+					response(page([{ id: "r", type: "blocks", issue: peer }])),
+				);
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, ["issues", "related", "DEV-1"]);
+			expect(mockGraphQLService.rawRequest).toHaveBeenCalledTimes(2);
+			expect(mockOutputSuccess).toHaveBeenCalledWith(
+				expect.objectContaining({
+					data: [
+						expect.objectContaining({ type: "similar" }),
+						expect.objectContaining({
+							type: "blockedBy",
+							issue: expect.objectContaining({ identifier: "DEV-2" }),
+						}),
+					],
+					meta: { count: 2, relations_complete: true },
+				}),
+			);
+		});
+
+		it("missing peers cannot become a complete empty result in the registered command", async () => {
+			mockGraphQLService.rawRequest.mockReset();
+			mockLinearService.resolveIssueId.mockResolvedValue("root");
+			mockGraphQLService.rawRequest.mockResolvedValue(
+				response(page([{ id: "r", type: "blocks", issue: null }])),
+			);
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, ["issues", "related", "DEV-1"]);
+			expect(mockOutputSuccess).not.toHaveBeenCalled();
+			expect(process.exit).toHaveBeenCalledWith(1);
+			expect(
+				stdoutSpy.mock.calls.map((call: unknown[]) => String(call[0])).join(""),
+			).toContain('"relations_complete": false');
+		});
 	});
 
 	describe("issues list", () => {
@@ -738,6 +819,76 @@ describe("issues commands", () => {
 		// Required fields for all create commands (assignee + project enforced)
 		const requiredArgs = ["--assignee", "bob", "--project", "Infrastructure"];
 
+		it("forwards a caller-selected UUIDv4 unchanged", async () => {
+			mockCreateIssue.mockResolvedValue({ id: issueId, identifier: "DEV-999" });
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"My Title",
+				...requiredArgs,
+				"--issue-id",
+				issueId,
+			]);
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ id: issueId }),
+			);
+		});
+
+		it.each([
+			"not-a-uuid",
+			"aaaaaaaa-bbbb-1ccc-8ddd-eeeeeeeeeeee",
+			"aaaaaaaa-bbbb-4ccc-7ddd-eeeeeeeeeeee",
+			"00000000-0000-0000-0000-000000000000",
+			"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee ",
+			"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\n",
+			"",
+		])(
+			"rejects invalid --issue-id %j before provider work even with --skip-validation",
+			async (id) => {
+				const program = createTestProgram();
+				setupIssuesCommands(program);
+				await runCommand(program, [
+					"issues",
+					"create",
+					"My Title",
+					...requiredArgs,
+					"--issue-id",
+					id,
+					"--skip-validation",
+					"--attachment",
+					"/tmp/photo.jpg",
+				]);
+				expect(mockCreateIssue).not.toHaveBeenCalled();
+				expect(mockUploadFile).not.toHaveBeenCalled();
+				expect(mockCreateGraphQLService).not.toHaveBeenCalled();
+				expect(mockResolveTeam).not.toHaveBeenCalled();
+				expect(process.exit).toHaveBeenCalledWith(1);
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					expect.stringContaining("Invalid --issue-id: must be a UUIDv4"),
+				);
+			},
+		);
+
+		it("still enforces required fields with --issue-id", async () => {
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				validation: { enabled: true },
+			});
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"My Title",
+				"--issue-id",
+				issueId,
+			]);
+			expect(mockCreateIssue).not.toHaveBeenCalled();
+			expect(process.exit).toHaveBeenCalledWith(1);
+		});
+
 		it("creates issue with team resolved from option", async () => {
 			mockCreateIssue.mockResolvedValue({
 				id: "new-issue-id",
@@ -755,6 +906,7 @@ describe("issues commands", () => {
 				...requiredArgs,
 			]);
 
+			expect(mockCreateIssue.mock.calls[0][0]).not.toHaveProperty("id");
 			expect(mockResolveTeam).toHaveBeenCalledWith("DEV");
 			expect(mockEnforceTerms).toHaveBeenCalledWith(["My Title", undefined], {
 				strict: undefined,
@@ -872,6 +1024,94 @@ describe("issues commands", () => {
 					labelIds: ["label-uuid-1", "label-uuid-2"],
 				}),
 			);
+		});
+
+		// DEV-14849: commander keeps only the last occurrence of a repeated
+		// option, so `--label bug --label feature` used to resolve `feature`
+		// alone and the caller never saw `bug` go missing.
+		it("accumulates a repeated --label instead of keeping only the last", async () => {
+			mockResolveLabels.mockReturnValue(["label-uuid-1", "label-uuid-2"]);
+			mockCreateIssue.mockResolvedValue({ id: "new-issue-id" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Task",
+				"--team",
+				"DEV",
+				"--label",
+				"bug",
+				"--label",
+				"feature",
+				...requiredArgs,
+			]);
+
+			expect(mockResolveLabels).toHaveBeenCalledWith(["bug", "feature"]);
+		});
+
+		// DEV-14849: a validation refusal must stay non-zero. The envelope
+		// carries the reason in `error`, and an exit of 0 beside it would make
+		// every shell-out caller read a blocked creation as a successful one.
+		// This pins the status so it cannot regress to 0; it already holds.
+		//
+		// The rest of this file runs with `validation: { enabled: false }` to
+		// isolate command wiring, so the refusal has to be turned on for this
+		// one case — otherwise the command never reaches `enforceValidation`
+		// and the test would pass on an unrelated exit.
+		it("exits non-zero when validation blocks the creation", async () => {
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				validation: { enabled: true },
+			});
+			try {
+				const program = createTestProgram();
+				setupIssuesCommands(program);
+				await runCommand(program, [
+					"issues",
+					"create",
+					"Task",
+					"--team",
+					"DEV",
+					// No --labels/--description/--project: the validator blocks.
+				]);
+
+				// Assert the refusal is the VALIDATION one. A bare exit-code check
+				// passes on any other early exit, which is how the first draft of
+				// this test passed while never reaching the validator at all.
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					expect.stringContaining("Issue creation blocked by validation"),
+				);
+				expect(process.exit).toHaveBeenCalledWith(1);
+				expect(mockCreateIssue).not.toHaveBeenCalled();
+			} finally {
+				mockLoadConfig.mockReturnValue(baseConfig);
+			}
+		});
+
+		// The alias fold used `if (options.label && !options.labels)`, which
+		// dropped `--label` outright when both spellings were given.
+		it("merges --labels and --label instead of dropping the alias", async () => {
+			mockResolveLabels.mockReturnValue(["label-uuid-1", "label-uuid-2"]);
+			mockCreateIssue.mockResolvedValue({ id: "new-issue-id" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Task",
+				"--team",
+				"DEV",
+				"--labels",
+				"bug",
+				"--label",
+				"feature",
+				...requiredArgs,
+			]);
+
+			expect(mockResolveLabels).toHaveBeenCalledWith(["bug", "feature"]);
 		});
 
 		it("normalizes literal newline escapes in inline descriptions", async () => {
@@ -1078,6 +1318,50 @@ describe("issues commands", () => {
 			expect(mockCreateIssue).not.toHaveBeenCalled();
 		});
 
+		it("names the created issue unmistakably when a post-create step fails (DEV-15327)", async () => {
+			// The write succeeds, then the attachment-record step fails. The error
+			// must identify the created issue and forbid a blind retry — before
+			// this, the failure read like a rejected create and a retry filed a
+			// duplicate (DEV-15257/DEV-15258).
+			mockCreateIssue.mockResolvedValue({
+				id: "new-issue-id",
+				identifier: "DEV-999",
+			});
+			mockUploadFile.mockResolvedValue({
+				success: true,
+				assetUrl: "https://uploads.linear.app/asset/report.pdf",
+				filename: "report.pdf",
+			});
+			mockCreateAttachment.mockRejectedValue(
+				new Error("attachment service unavailable"),
+			);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Issue with PDF",
+				"--team",
+				"DEV",
+				"--description",
+				"See attached report.",
+				"--attachment",
+				"/tmp/report.pdf",
+				...requiredArgs,
+			]);
+
+			expect(mockCreateIssue).toHaveBeenCalled();
+			expect(process.exit).toHaveBeenCalledWith(1);
+			expect(mockOutputSuccess).not.toHaveBeenCalled();
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Issue DEV-999 was created (id new-issue-id)"),
+			);
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("attachment service unavailable"),
+			);
+		});
+
 		it("calls resolveDefaultStatus", async () => {
 			mockResolveDefaultStatus.mockReturnValue("status-uuid");
 			mockCreateIssue.mockResolvedValue({ id: "new-issue-id" });
@@ -1153,41 +1437,45 @@ describe("issues commands", () => {
 		const hardBlockTitle =
 			"Rewrite the onboarding email sequence for new customers";
 
-		it("hard-blocks creation when a near-verbatim issue exists (DEV-5590)", async () => {
-			mockLoadConfig.mockReturnValue(enabledConfig);
-			mockSearchIssues.mockResolvedValue([hardBlockCandidate]);
-			mockCreateIssue.mockResolvedValue({ id: "x" });
+		it.each(identityOptions.map((args) => [args]))(
+			"hard-blocks creation when a near-verbatim issue exists (DEV-5590) (identity flags: %j)",
+			async (identityArgs) => {
+				mockLoadConfig.mockReturnValue(enabledConfig);
+				mockSearchIssues.mockResolvedValue([hardBlockCandidate]);
+				mockCreateIssue.mockResolvedValue({ id: "x" });
 
-			const program = createTestProgram();
-			setupIssuesCommands(program);
-			await runCommand(program, [
-				"issues",
-				"create",
-				hardBlockTitle,
-				...validArgs,
-			]);
+				const program = createTestProgram();
+				setupIssuesCommands(program);
+				await runCommand(program, [
+					"issues",
+					"create",
+					hardBlockTitle,
+					...validArgs,
+					...identityArgs,
+				]);
 
-			// Searched the salient keywords, including closed issues.
-			expect(mockSearchIssues).toHaveBeenCalledWith(
-				expect.objectContaining({ excludeTerminalStates: false }),
-			);
-			// Blocked: the candidate prevented the POST.
-			expect(mockCreateIssue).not.toHaveBeenCalled();
-			expect(process.exit).toHaveBeenCalledWith(1);
-			expect(consoleErrorSpy).toHaveBeenCalledWith(
-				expect.stringContaining("DEV-9001"),
-			);
-			// DEV-4834: the blocked decision is recorded for override-rate telemetry.
-			expect(mockEmitGateEvent).toHaveBeenCalledWith(
-				"el-linear",
-				"issues create",
-				expect.objectContaining({
-					gate: "issues-create-dup",
-					outcome: "blocked",
-					candidateCount: 1,
-				}),
-			);
-		});
+				// Searched the salient keywords, including closed issues.
+				expect(mockSearchIssues).toHaveBeenCalledWith(
+					expect.objectContaining({ excludeTerminalStates: false }),
+				);
+				// Blocked: the candidate prevented the POST.
+				expect(mockCreateIssue).not.toHaveBeenCalled();
+				expect(process.exit).toHaveBeenCalledWith(1);
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					expect.stringContaining("DEV-9001"),
+				);
+				// DEV-4834: the blocked decision is recorded for override-rate telemetry.
+				expect(mockEmitGateEvent).toHaveBeenCalledWith(
+					"el-linear",
+					"issues create",
+					expect.objectContaining({
+						gate: "issues-create-dup",
+						outcome: "blocked",
+						candidateCount: 1,
+					}),
+				);
+			},
+		);
 
 		it("--allow-duplicate runs the gate, records an override, and creates", async () => {
 			mockLoadConfig.mockReturnValue(enabledConfig);
@@ -1483,34 +1771,38 @@ describe("issues commands", () => {
 			);
 		});
 
-		it("blocks when an SOP-labeled issue has no parent or related", async () => {
-			mockLoadConfig.mockReturnValue(gateConfig);
+		it.each(identityOptions.map((args) => [args]))(
+			"blocks when an SOP-labeled issue has no parent or related (identity flags: %j)",
+			async (identityArgs) => {
+				mockLoadConfig.mockReturnValue(gateConfig);
 
-			const program = createTestProgram();
-			setupIssuesCommands(program);
-			await runCommand(program, [
-				"issues",
-				"create",
-				"Add onboarding SOP",
-				...sopArgs,
-			]);
+				const program = createTestProgram();
+				setupIssuesCommands(program);
+				await runCommand(program, [
+					"issues",
+					"create",
+					"Add onboarding SOP",
+					...sopArgs,
+					...identityArgs,
+				]);
 
-			// Deterministic block — no fetch needed.
-			expect(mockGetIssueById).not.toHaveBeenCalled();
-			expect(mockCreateIssue).not.toHaveBeenCalled();
-			expect(process.exit).toHaveBeenCalledWith(1);
-			expect(consoleErrorSpy).toHaveBeenCalledWith(
-				expect.stringContaining("has no --parent or --related-to"),
-			);
-			expect(mockEmitGateEvent).toHaveBeenCalledWith(
-				"el-linear",
-				"issues create",
-				expect.objectContaining({
-					gate: "issues-create-sop-parent",
-					outcome: "blocked",
-				}),
-			);
-		});
+				// Deterministic block — no fetch needed.
+				expect(mockGetIssueById).not.toHaveBeenCalled();
+				expect(mockCreateIssue).not.toHaveBeenCalled();
+				expect(process.exit).toHaveBeenCalledWith(1);
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					expect.stringContaining("has no --parent or --related-to"),
+				);
+				expect(mockEmitGateEvent).toHaveBeenCalledWith(
+					"el-linear",
+					"issues create",
+					expect.objectContaining({
+						gate: "issues-create-sop-parent",
+						outcome: "blocked",
+					}),
+				);
+			},
+		);
 
 		it("leaves a non-SOP issue untouched (no parent fetch, creates)", async () => {
 			mockLoadConfig.mockReturnValue(gateConfig);
@@ -1696,30 +1988,34 @@ describe("issues commands", () => {
 			mockCreateIssue.mockResolvedValue({ id: "x", identifier: "DEV-999" });
 		});
 
-		it("blocks before the create POST when intake is absent", async () => {
-			mockLoadConfig.mockReturnValue(blockConfig);
-			const program = createTestProgram();
-			setupIssuesCommands(program);
-			await runCommand(program, [
-				"issues",
-				"create",
-				"Create another workflow",
-				...createArgs,
-				"--description",
-				"A sufficiently long description without an intake decision.",
-			]);
+		it.each(identityOptions.map((args) => [args]))(
+			"blocks before the create POST when intake is absent (identity flags: %j)",
+			async (identityArgs) => {
+				mockLoadConfig.mockReturnValue(blockConfig);
+				const program = createTestProgram();
+				setupIssuesCommands(program);
+				await runCommand(program, [
+					"issues",
+					"create",
+					"Create another workflow",
+					...createArgs,
+					...identityArgs,
+					"--description",
+					"A sufficiently long description without an intake decision.",
+				]);
 
-			expect(mockCreateIssue).not.toHaveBeenCalled();
-			expect(process.exit).toHaveBeenCalledWith(1);
-			expect(mockEmitGateEvent).toHaveBeenCalledWith(
-				"el-linear",
-				"issues create",
-				expect.objectContaining({
-					gate: "issues-create-intake-decision",
-					outcome: "blocked",
-				}),
-			);
-		});
+				expect(mockCreateIssue).not.toHaveBeenCalled();
+				expect(process.exit).toHaveBeenCalledWith(1);
+				expect(mockEmitGateEvent).toHaveBeenCalledWith(
+					"el-linear",
+					"issues create",
+					expect.objectContaining({
+						gate: "issues-create-intake-decision",
+						outcome: "blocked",
+					}),
+				);
+			},
+		);
 
 		it("is not silently bypassed by --skip-validation", async () => {
 			mockLoadConfig.mockReturnValue(blockConfig);
@@ -1990,35 +2286,29 @@ describe("issues commands", () => {
 			expect(mockCreateIssue).toHaveBeenCalled();
 		});
 
-		// DEV-5920 cycle-2 regression guard: a piped `--description-file -` with a
-		// valid falsifiable "Done when" must still create with the gate in block
-		// mode. On create, resolveDescription runs for validation, the body build,
-		// and this gate; each does fs.readFileSync(fd 0), but a stdin pipe drains
-		// after the first read. If the description isn't resolved exactly ONCE,
-		// the gate sees "" and hard-blocks a legitimate create. This simulates the
-		// drain (first fd-0 read returns the piped body, later reads return "")
-		// and asserts the create succeeds AND stdin was read exactly once.
+		// A description resolves once: one data read followed by EOF. A second
+		// resolution would drain stdin again and lose the validated body.
 		it("block mode: piped --description-file - with a falsifiable Done when still creates (stdin drain guard)", async () => {
 			mockLoadConfig.mockReturnValue(blockConfig);
 			const fsModule = await import("node:fs");
-			const originalReadFileSync = fsModule.default.readFileSync;
+			const originalReadSync = fsModule.default.readSync;
 			let stdinReads = 0;
-			const piped =
-				"Context long enough for the length check.\n\n## Done when\n\n- [ ] `pnpm test` reports 0 failures";
-			const spy = vi
-				.spyOn(fsModule.default, "readFileSync")
-				.mockImplementation(((fd: unknown, ...rest: unknown[]) => {
-					// fd 0 is stdin — model a pipe that yields data only on the first
-					// read and drains to "" thereafter.
-					if (fd === 0) {
-						stdinReads += 1;
-						return stdinReads === 1 ? piped : "";
-					}
-					return (
-						originalReadFileSync as (f: unknown, ...r: unknown[]) => string
-					)(fd, ...rest);
-				}) as typeof fsModule.default.readFileSync);
-
+			const piped = Buffer.from(
+				"Context long enough for the length check.\n\n## Done when\n\n- [ ] `pnpm test` reports 0 failures",
+			);
+			const spy = vi.spyOn(fsModule.default, "readSync").mockImplementation(((
+				fd,
+				buffer,
+				offset,
+				length,
+				position,
+			) => {
+				if (fd !== 0)
+					return originalReadSync(fd, buffer, offset, length, position);
+				stdinReads += 1;
+				if (stdinReads > 1) return 0;
+				return piped.copy(buffer as Buffer, offset, 0, length);
+			}) as typeof fsModule.default.readSync);
 			try {
 				const program = createTestProgram();
 				setupIssuesCommands(program);
@@ -2034,8 +2324,8 @@ describe("issues commands", () => {
 				spy.mockRestore();
 			}
 
-			// Resolved exactly once — the pipe was not re-read into "".
-			expect(stdinReads).toBe(1);
+			// One complete consumption: data, then EOF; no second resolution.
+			expect(stdinReads).toBe(2);
 			// The falsifiable section was seen → no block, issue created.
 			expect(process.exit).not.toHaveBeenCalledWith(1);
 			expect(mockCreateIssue).toHaveBeenCalled();
@@ -2148,6 +2438,147 @@ describe("issues commands", () => {
 					.toString()
 					.trim(),
 			).toBe("DEV-4293");
+		});
+	});
+
+	// DEV-10654: `--claim` is the branchless half of `--checkout`. Filing an
+	// issue and leaving it in an unstarted state makes it eligible for the
+	// bot-layer sweep, so an author who will work it in a remote workspace still
+	// needs the claim -- but a local branch there is wrong.
+	//
+	// These run in a real temp git repo so "no branch was created" is an
+	// observation, not an assumption: a regression that re-welded the claim to a
+	// checkout would leave HEAD somewhere new.
+	describe("issues create --claim claims without a branch (DEV-10654)", () => {
+		const STARTED_CLAIM = {
+			issue: { id: "new-issue-id", identifier: "DEV-10654" },
+			claimed: true,
+			alreadyClaimed: false,
+			assigned: true,
+			started: true,
+			assignee: {
+				id: "user-1",
+				name: "Nico Appel",
+				displayName: "Nico",
+				email: "nico@example.com",
+			},
+			previousState: { id: "state-todo", name: "Todo", type: "unstarted" },
+			targetState: { id: "state-first", name: "In Progress" },
+		};
+
+		let repo: string;
+		let cwd: string;
+		let startingBranch: string;
+
+		const head = () =>
+			execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+				stdio: "pipe",
+			})
+				.toString()
+				.trim();
+
+		const branches = () =>
+			execFileSync("git", ["branch", "--format=%(refname:short)"], {
+				stdio: "pipe",
+			})
+				.toString()
+				.trim()
+				.split("\n")
+				.filter(Boolean);
+
+		const create = async (...flags: string[]) => {
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Claim without a branch",
+				"--team",
+				"DEV",
+				"--assignee",
+				"bob",
+				"--project",
+				"Infrastructure",
+				...flags,
+			]);
+		};
+
+		beforeEach(() => {
+			cwd = process.cwd();
+			repo = mkdtempSync(join(tmpdir(), "create-claim-"));
+			process.chdir(repo);
+			execFileSync("git", ["init", "-q"], { stdio: "pipe" });
+			execFileSync("git", ["config", "user.email", "t@example.com"], {
+				stdio: "pipe",
+			});
+			execFileSync("git", ["config", "user.name", "Test"], { stdio: "pipe" });
+			execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "init"], {
+				stdio: "pipe",
+			});
+			startingBranch = head();
+			mockCreateIssue.mockResolvedValue({
+				id: "new-issue-id",
+				identifier: "DEV-10654",
+				branchName: "dev-10654-claim-without-a-branch",
+			});
+			mockClaimIssue.mockResolvedValue(STARTED_CLAIM);
+		});
+
+		afterEach(() => {
+			process.chdir(cwd);
+			rmSync(repo, { recursive: true, force: true });
+		});
+
+		it("moves the issue to a started state and leaves the branch alone", async () => {
+			await create("--claim");
+
+			expect(mockClaimIssue).toHaveBeenCalledWith("DEV-10654");
+			// The point of the flag: the issue left its unstarted state, which is
+			// what makes it ineligible for the sweep.
+			const output = mockOutputSuccess.mock.calls.at(-1)?.[0];
+			expect(output.claim.started).toBe(true);
+			expect(output.claim.previousState.type).toBe("unstarted");
+			expect(output.claim.targetState).toEqual({
+				id: "state-first",
+				name: "In Progress",
+			});
+			// ...and no branch was cut or checked out.
+			expect(output.branch).toBeUndefined();
+			expect(head()).toBe(startingBranch);
+			expect(branches()).toEqual([startingBranch]);
+		});
+
+		it("still claims for --checkout alone, which --claim must not have disturbed", async () => {
+			// Regression guard for the commander pairing: declaring `--claim`
+			// alongside the pre-existing `--no-claim` flips `options.claim`'s
+			// default from `true` to `undefined`. Anything that had read the
+			// default as truthy would silently stop claiming here.
+			await create("--checkout");
+
+			expect(mockClaimIssue).toHaveBeenCalledWith("DEV-10654");
+			expect(head()).toBe("feature/DEV-10654-claim-without-a-branch");
+		});
+
+		it("--no-claim alone neither claims nor branches", async () => {
+			await create("--no-claim");
+
+			expect(mockClaimIssue).not.toHaveBeenCalled();
+			expect(head()).toBe(startingBranch);
+			expect(branches()).toEqual([startingBranch]);
+		});
+
+		it("--no-claim after --claim wins, matching commander's last-one-wins pairing", async () => {
+			await create("--claim", "--no-claim");
+
+			expect(mockClaimIssue).not.toHaveBeenCalled();
+			expect(head()).toBe(startingBranch);
+		});
+
+		it("--claim and --checkout together claim exactly once", async () => {
+			await create("--claim", "--checkout");
+
+			expect(mockClaimIssue).toHaveBeenCalledTimes(1);
+			expect(head()).toBe("feature/DEV-10654-claim-without-a-branch");
 		});
 	});
 
@@ -2810,6 +3241,501 @@ describe("issues commands", () => {
 					parentId: "DEV-7",
 				}),
 			);
+		});
+	});
+
+	describe("issues create/update — label advisor and consent receipt (DEV-10372)", () => {
+		let dir: string;
+		const createArgs = [
+			"issues",
+			"create",
+			"Fix the thing",
+			"--team",
+			"DEV",
+			"--labels",
+			"bug",
+			"--description",
+			"## Done when\n- [ ] it works",
+			"--no-auto-link",
+		];
+
+		function advisor(body: string): string[] {
+			const path = join(dir, "advisor.mjs");
+			writeFileSync(path, body);
+			return [process.execPath, path];
+		}
+
+		function receipt(issue: string): string {
+			return `<!-- el-intake-decision:v1 ${JSON.stringify({
+				policyVersion: "intake-policy/v1",
+				decision: "automatic-implementation",
+				capabilities: ["manual-review", "automatic-implementation"],
+				reason: "Maintainer consented to unattended authoring",
+				provenance: {
+					source: "issue-triage",
+					actor: "Test Person",
+					issue,
+					repo: "acme/tools",
+				},
+			})} -->`;
+		}
+
+		beforeEach(() => {
+			dir = mkdtempSync(join(tmpdir(), "el-linear-advisor-cmd-"));
+			mockResolveLabels.mockImplementation((names: string[]) =>
+				names.map((name) => `label-${name}`),
+			);
+			mockCreateIssue.mockResolvedValue({ id: "x", identifier: "DEV-999" });
+			mockUpdateIssue.mockResolvedValue({ id: "x", identifier: "DEV-1" });
+			mockLinearService.resolveIssueId.mockResolvedValue("issue-uuid");
+		});
+
+		afterEach(() => {
+			rmSync(dir, { recursive: true, force: true });
+		});
+
+		async function run(args: string[]): Promise<void> {
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, args);
+		}
+
+		it("adds the advisor's labels, sends it the proposed issue, and reports them", async () => {
+			const seen = join(dir, "stdin.json");
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				labelAdvisor: {
+					command: advisor(`
+						import { readFileSync, writeFileSync } from "node:fs";
+						writeFileSync(${JSON.stringify(seen)}, readFileSync(0, "utf8"));
+						process.stdout.write(JSON.stringify({ labels: ["bot"], reason: "rubric: BOT" }));
+					`),
+				},
+			});
+			await run(createArgs);
+
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ labelIds: ["label-bug", "label-bot"] }),
+			);
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				"labels added by advisor: bot (rubric: BOT)",
+			);
+			expect(mockOutputSuccess).toHaveBeenCalledWith(
+				expect.objectContaining({
+					labelAdvisor: { added: ["bot"], reason: "rubric: BOT" },
+				}),
+			);
+			expect(JSON.parse(readFileSync(seen, "utf8"))).toEqual({
+				team: "DEV",
+				project: null,
+				title: "Fix the thing",
+				description: "## Done when\n- [ ] it works",
+				labels: ["bug"],
+				state: null,
+			});
+		});
+
+		it("sends the advisor the canonical team key, not the alias typed", async () => {
+			const seen = join(dir, "stdin.json");
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				teams: { DEV: "team-id-backend" },
+				labelAdvisor: {
+					command: advisor(`
+						import { readFileSync, writeFileSync } from "node:fs";
+						writeFileSync(${JSON.stringify(seen)}, readFileSync(0, "utf8"));
+						process.stdout.write("[]");
+					`),
+				},
+			});
+			await run([
+				...createArgs.slice(0, 3),
+				"--team",
+				"backend",
+				...createArgs.slice(5),
+			]);
+
+			expect(JSON.parse(readFileSync(seen, "utf8")).team).toBe("DEV");
+		});
+
+		it("creates without extra labels and warns when the advisor fails", async () => {
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				labelAdvisor: {
+					command: advisor(`process.stdout.write('["bot"]'); process.exit(2);`),
+				},
+			});
+			await run(createArgs);
+
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ labelIds: ["label-bug"] }),
+			);
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringContaining("label advisor failed"),
+			);
+			expect(mockOutputSuccess).toHaveBeenCalledWith(
+				expect.not.objectContaining({ labelAdvisor: expect.anything() }),
+			);
+		});
+
+		it("adds nothing when the advisor prints invalid JSON", async () => {
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				labelAdvisor: { command: advisor(`process.stdout.write("bot");`) },
+			});
+			await run(createArgs);
+
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ labelIds: ["label-bug"] }),
+			);
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringContaining("not valid JSON"),
+			);
+		});
+
+		it("skips the advisor entirely with --no-label-advisor", async () => {
+			const ran = join(dir, "ran");
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				labelAdvisor: {
+					command: advisor(`
+						import { writeFileSync } from "node:fs";
+						writeFileSync(${JSON.stringify(ran)}, "yes");
+						process.stdout.write('["bot"]');
+					`),
+				},
+			});
+			await run([...createArgs, "--no-label-advisor"]);
+
+			expect(existsSync(ran)).toBe(false);
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ labelIds: ["label-bug"] }),
+			);
+		});
+
+		const gateConfig = {
+			...baseConfig,
+			validation: { enabled: false, consentReceiptGate: true },
+		};
+
+		it("refuses an explicit consent label on create and names the missing receipt", async () => {
+			mockLoadConfig.mockReturnValue(gateConfig);
+			await run([
+				...createArgs.slice(0, 5),
+				"--labels",
+				"bug,bot",
+				...createArgs.slice(7),
+			]);
+
+			expect(mockCreateIssue).not.toHaveBeenCalled();
+			expect(process.exit).toHaveBeenCalledWith(1);
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("el-intake-decision:v1 receipt"),
+			);
+		});
+
+		it("refuses a consent label passed as its configured UUID on create", async () => {
+			mockLoadConfig.mockReturnValue({
+				...gateConfig,
+				labels: { workspace: { bot: "bot-label-uuid" }, teams: {} },
+			});
+			await run([
+				...createArgs.slice(0, 5),
+				"--labels",
+				"bug,bot-label-uuid",
+				...createArgs.slice(7),
+			]);
+
+			expect(mockCreateIssue).not.toHaveBeenCalled();
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("el-intake-decision:v1 receipt"),
+			);
+		});
+
+		it("drops an advisor-proposed consent label on create when the gate is on", async () => {
+			mockLoadConfig.mockReturnValue({
+				...gateConfig,
+				labelAdvisor: {
+					command: advisor(
+						`process.stdout.write('{"labels":["bot","docs"]}');`,
+					),
+				},
+			});
+			await run(createArgs);
+
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ labelIds: ["label-bug", "label-docs"] }),
+			);
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringContaining("label advisor proposed bot, not applied"),
+			);
+		});
+
+		function receiptAdvisor(): string[] {
+			return advisor(
+				`process.stdout.write(JSON.stringify({ labels: ["bot", "docs"], reason: "rubric: BOT", receipt: { repo: "acme/tools", reason: "rubric consent" } }));`,
+			);
+		}
+
+		it("applies an advisor-proposed bot after create with a receipt naming the new issue (DEV-10455)", async () => {
+			mockLoadConfig.mockReturnValue({
+				...gateConfig,
+				labelAdvisor: { command: receiptAdvisor() },
+			});
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				viewer: { name: "Test Person", email: "t@example.com", app: false },
+				issue: {
+					identifier: "DEV-999",
+					description: "## Done when\n- [ ] it works",
+				},
+			});
+			mockUpdateIssue.mockImplementation(
+				async (args: { description: string }) => ({
+					id: "x",
+					identifier: "DEV-999",
+					description: args.description,
+					labels: [{ name: "bug" }, { name: "docs" }, { name: "bot" }],
+				}),
+			);
+			await run(createArgs);
+
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ labelIds: ["label-bug", "label-docs"] }),
+			);
+			expect(mockUpdateIssue).toHaveBeenCalledTimes(1);
+			const [args, mode] = mockUpdateIssue.mock.calls[0] as [
+				{ id: string; description: string; labelIds: string[] },
+				string,
+			];
+			expect(mode).toBe("adding");
+			expect(args.id).toBe("x");
+			expect(args.labelIds).toEqual(["bot"]);
+			const marker = args.description.match(
+				/<!-- el-intake-decision:v1 (.+) -->$/,
+			);
+			expect(JSON.parse(marker?.[1] ?? "null")).toEqual({
+				policyVersion: "intake-policy/v1",
+				decision: "automatic-implementation",
+				capabilities: ["manual-review", "automatic-implementation"],
+				reason: "rubric consent",
+				provenance: {
+					source: "issue-triage",
+					actor: "Test Person",
+					issue: "DEV-999",
+					repo: "acme/tools",
+				},
+			});
+			expect(mockOutputSuccess).toHaveBeenCalledWith(
+				expect.objectContaining({
+					identifier: "DEV-999",
+					labelAdvisor: {
+						added: ["docs", "bot"],
+						reason: "rubric: BOT",
+						consent: { labels: ["bot"], applied: true, repo: "acme/tools" },
+					},
+				}),
+			);
+		});
+
+		it("uses the receipt route even when the gate is off", async () => {
+			mockLoadConfig.mockReturnValue({
+				...baseConfig,
+				labelAdvisor: { command: receiptAdvisor() },
+			});
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				viewer: { name: "Test Person", email: null, app: false },
+				issue: { identifier: "DEV-999", description: "" },
+			});
+			mockUpdateIssue.mockImplementation(
+				async (args: { description: string }) => ({
+					id: "x",
+					identifier: "DEV-999",
+					description: args.description,
+				}),
+			);
+			await run(createArgs);
+
+			expect(mockCreateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ labelIds: ["label-bug", "label-docs"] }),
+			);
+			expect(mockUpdateIssue).toHaveBeenCalledWith(
+				expect.objectContaining({ labelIds: ["bot"] }),
+				"adding",
+			);
+		});
+
+		it("does not apply bot when the viewer is an app, and says why", async () => {
+			mockLoadConfig.mockReturnValue({
+				...gateConfig,
+				labelAdvisor: { command: receiptAdvisor() },
+			});
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				viewer: { name: "Some Bot", email: null, app: true },
+				issue: { identifier: "DEV-999", description: "Body" },
+			});
+			await run(createArgs);
+
+			expect(mockCreateIssue).toHaveBeenCalledTimes(1);
+			expect(mockUpdateIssue).not.toHaveBeenCalled();
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringContaining("label advisor proposed bot, not applied"),
+			);
+			expect(mockOutputSuccess).toHaveBeenCalledWith(
+				expect.objectContaining({
+					labelAdvisor: expect.objectContaining({
+						added: ["docs"],
+						consent: expect.objectContaining({ applied: false }),
+					}),
+				}),
+			);
+		});
+
+		it("does not apply bot when the description already holds a receipt marker", async () => {
+			mockLoadConfig.mockReturnValue({
+				...gateConfig,
+				labelAdvisor: { command: receiptAdvisor() },
+			});
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				viewer: { name: "Test Person", email: null, app: false },
+				issue: {
+					identifier: "DEV-999",
+					description: `Body\n\n${receipt("DEV-1")}`,
+				},
+			});
+			await run(createArgs);
+
+			expect(mockUpdateIssue).not.toHaveBeenCalled();
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringContaining("more than one el-intake-decision:v1 receipt"),
+			);
+		});
+
+		it("keeps the created issue when the consent update fails", async () => {
+			mockLoadConfig.mockReturnValue({
+				...gateConfig,
+				labelAdvisor: { command: receiptAdvisor() },
+			});
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				viewer: { name: "Test Person", email: null, app: false },
+				issue: { identifier: "DEV-999", description: "Body" },
+			});
+			mockUpdateIssue.mockRejectedValue(new Error("Linear said no"));
+			await run(createArgs);
+
+			expect(process.exit).not.toHaveBeenCalledWith(1);
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringContaining("Linear said no"),
+			);
+			expect(mockOutputSuccess).toHaveBeenCalledWith(
+				expect.objectContaining({ identifier: "DEV-999" }),
+			);
+		});
+
+		it("refuses to apply bot on update when the issue has no receipt", async () => {
+			mockLoadConfig.mockReturnValue(gateConfig);
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				issue: {
+					identifier: "DEV-1",
+					description: "## Intake decision\n- Decision: PROCEED",
+					labels: { nodes: [{ name: "bug" }] },
+				},
+			});
+			await run(["issues", "update", "DEV-1", "--labels", "bot"]);
+
+			expect(mockUpdateIssue).not.toHaveBeenCalled();
+			expect(process.exit).toHaveBeenCalledWith(1);
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("has no el-intake-decision:v1 receipt"),
+			);
+		});
+
+		it("refuses a receipt that names a different issue", async () => {
+			mockLoadConfig.mockReturnValue(gateConfig);
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				issue: {
+					identifier: "DEV-1",
+					description: `Body\n\n${receipt("DEV-2")}`,
+					labels: { nodes: [] },
+				},
+			});
+			await run(["issues", "update", "DEV-1", "--labels", "bot"]);
+
+			expect(mockUpdateIssue).not.toHaveBeenCalled();
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("names DEV-2, not DEV-1"),
+			);
+		});
+
+		it("applies bot on update when the same update writes the receipt", async () => {
+			mockLoadConfig.mockReturnValue(gateConfig);
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				issue: {
+					identifier: "DEV-1",
+					description: "Body",
+					labels: { nodes: [] },
+				},
+			});
+			await run([
+				"issues",
+				"update",
+				"DEV-1",
+				"--labels",
+				"bot",
+				"--description",
+				`Body\n\n${receipt("DEV-1")}`,
+				"--no-auto-link",
+			]);
+
+			expect(mockUpdateIssue).toHaveBeenCalledTimes(1);
+		});
+
+		it("applies bot on update when --append-description adds the receipt", async () => {
+			mockLoadConfig.mockReturnValue(gateConfig);
+			mockGraphQLService.rawRequest.mockImplementation(async (query: string) =>
+				query.includes("labels")
+					? {
+							issue: {
+								identifier: "DEV-1",
+								description: "Body",
+								labels: { nodes: [] },
+							},
+						}
+					: { issue: { description: "Body" } },
+			);
+			await run([
+				"issues",
+				"update",
+				"DEV-1",
+				"--labels",
+				"bot",
+				"--append-description",
+				receipt("DEV-1"),
+				"--no-auto-link",
+			]);
+
+			expect(mockUpdateIssue).toHaveBeenCalledTimes(1);
+		});
+
+		it("does not re-check an issue that already carries bot", async () => {
+			mockLoadConfig.mockReturnValue(gateConfig);
+			mockGraphQLService.rawRequest.mockResolvedValue({
+				issue: {
+					identifier: "DEV-1",
+					description: "",
+					labels: { nodes: [{ name: "bot" }] },
+				},
+			});
+			await run(["issues", "update", "DEV-1", "--labels", "bot"]);
+
+			expect(mockUpdateIssue).toHaveBeenCalledTimes(1);
+		});
+
+		it("leaves bot alone when the gate is off (open-source default)", async () => {
+			mockLoadConfig.mockReturnValue(baseConfig);
+			await run(["issues", "update", "DEV-1", "--labels", "bot"]);
+
+			expect(mockGraphQLService.rawRequest).not.toHaveBeenCalled();
+			expect(mockUpdateIssue).toHaveBeenCalledTimes(1);
 		});
 	});
 

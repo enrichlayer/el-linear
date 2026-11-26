@@ -124,6 +124,12 @@ describe("buildRelationCandidatePrompt", () => {
 		expect(out).toContain("(+4 more)");
 	});
 
+	it("does not tell agents that their own relate writes are blocked (DEV-15004)", () => {
+		const out = buildRelationCandidatePrompt([{ identifier: "DEV-1" }]);
+		expect(out).not.toMatch(/blocked by auto-mode/i);
+		expect(out).toContain("needs no user confirmation");
+	});
+
 	it("cites DEV-4494 so the rule is traceable from the warning alone", () => {
 		const out = buildRelationCandidatePrompt([{ identifier: "DEV-1" }]);
 		expect(out).toContain("DEV-4494");

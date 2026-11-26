@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { errorChainMessage } from "./error-chain.js";
 import {
 	classifyGraphQLFailure,
 	graphQLErrorCode,
@@ -7,6 +8,7 @@ import {
 	isRetryableHttpStatus,
 	LinearGraphQLError,
 	readGraphQLErrorDetail,
+	readGraphQLErrorDetailFromChain,
 	toLinearGraphQLError,
 } from "./linear-graphql-error.js";
 
@@ -166,6 +168,34 @@ describe("toLinearGraphQLError", () => {
 			"GraphQL request failed: something went wrong",
 		);
 		expect(wrapped.retryable).toBe(true);
+	});
+
+	// DEV-14754: the composed message repeats the rejection's own message, so
+	// the cause chain is the only place the detail below it survives.
+	it("keeps the rejection as the cause so a wrapped detail survives", () => {
+		const wrapped = toLinearGraphQLError(
+			new TypeError("fetch failed", {
+				cause: new Error("connect ECONNREFUSED 127.0.0.1:443"),
+			}),
+			"GraphQL request failed: fetch failed",
+		);
+		expect(errorChainMessage(wrapped.cause)).toBe(
+			"fetch failed: connect ECONNREFUSED 127.0.0.1:443",
+		);
+	});
+
+	it("is still classified when read through itself", () => {
+		// readGraphQLErrorDetailFromChain walks the value first, so attaching a
+		// cause must not change what the envelope reports.
+		const wrapped = toLinearGraphQLError(
+			sdkRejection(429, "RATELIMITED"),
+			"GraphQL request failed: Rate limit exceeded.",
+		);
+		expect(readGraphQLErrorDetailFromChain(wrapped)).toEqual({
+			httpStatus: 429,
+			code: "RATELIMITED",
+			retryable: true,
+		});
 	});
 });
 

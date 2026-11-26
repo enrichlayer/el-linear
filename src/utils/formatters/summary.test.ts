@@ -318,6 +318,31 @@ describe("formatProjectList", () => {
 });
 
 describe("formatCommentSummary / formatCommentList", () => {
+	it("sanitizes alternate author names for terminal output", () => {
+		const output = formatCommentSummary({
+			user: null,
+			botActor: { name: "Bot\u001b[31m" },
+		});
+		expect(output).not.toContain("\u001b");
+		expect(output).toContain("(integration)");
+	});
+
+	it.each([
+		[{ user: null, botActor: { name: "Robot" } }, "Robot (integration)"],
+		[{ user: null, externalUser: { name: "Visitor" } }, "Visitor (external)"],
+		[{ user: null }, "—"],
+		[{ user: { name: "Human" }, botActor: { name: "Robot" } }, "Human"],
+	])("renders nullable author variants", (author, expected) => {
+		expect(
+			formatCommentSummary({
+				id: "c",
+				body: "hello",
+				createdAt: "today",
+				...author,
+			}),
+		).toContain(expected);
+	});
+
 	it("renders a comment with author, createdAt, and clipped body", () => {
 		const comment = {
 			id: "c1",

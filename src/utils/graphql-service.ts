@@ -2,6 +2,7 @@ import { LinearClient } from "@linear/sdk";
 import { type DocumentNode, print } from "graphql";
 import type { LinearCredential } from "../auth/linear-credential.js";
 import type { OAuthState } from "../auth/oauth-storage.js";
+import type { FetchLike } from "../auth/oauth-token.js";
 import {
 	ensureFreshAccessToken,
 	getActiveAuth,
@@ -45,6 +46,8 @@ export interface GraphQLRequestOptions {
 }
 
 interface GraphQLServiceRuntimeOptions {
+	/** Abort the SDK's underlying fetch; used by bounded read operations. */
+	signal?: AbortSignal;
 	retryDelaysMs?: readonly number[];
 	sleep?: (ms: number) => Promise<void>;
 	now?: () => number;
@@ -330,7 +333,10 @@ function rateLimitError(
  */
 export type GraphQLServiceAuth = LinearCredential;
 
-function buildLinearClient(auth: GraphQLServiceAuth): LinearClient {
+function buildLinearClient(
+	auth: GraphQLServiceAuth,
+	signal?: AbortSignal,
+): LinearClient {
 	const baseHeaders = { "public-file-urls-expire-in": "3600" };
 	if ("oauthToken" in auth) {
 		// Linear's SDK natively supports OAuth via the `accessToken` option,
@@ -340,9 +346,14 @@ function buildLinearClient(auth: GraphQLServiceAuth): LinearClient {
 		return new LinearClient({
 			accessToken: auth.oauthToken,
 			headers: baseHeaders,
+			...(signal ? { signal } : {}),
 		});
 	}
-	return new LinearClient({ apiKey: auth.apiKey, headers: baseHeaders });
+	return new LinearClient({
+		apiKey: auth.apiKey,
+		headers: baseHeaders,
+		...(signal ? { signal } : {}),
+	});
 }
 
 interface InstrumentableTransport {
@@ -423,6 +434,7 @@ export function instrumentLinearClient(
 }
 
 export class GraphQLService {
+	private readonly signal?: AbortSignal;
 	private readonly graphQLClient: GraphQLRawClient;
 	private readonly retryDelaysMs: readonly number[];
 	private readonly sleep: (ms: number) => Promise<void>;
@@ -434,7 +446,8 @@ export class GraphQLService {
 		auth: GraphQLServiceAuth,
 		options: GraphQLServiceRuntimeOptions = {},
 	) {
-		const client = buildLinearClient(auth);
+		this.signal = options.signal;
+		const client = buildLinearClient(auth, options.signal);
 		// LinearClient stores a private graphql-request client — access via escape hatch
 		this.graphQLClient = (
 			client as unknown as { client: GraphQLRawClient }
@@ -466,7 +479,9 @@ export class GraphQLService {
 		try {
 			while (true) {
 				try {
+					this.signal?.throwIfAborted();
 					await this.admission.admit();
+					this.signal?.throwIfAborted();
 					const response = await this.graphQLClient.rawRequest<T>(
 						query,
 						variables,
@@ -475,6 +490,7 @@ export class GraphQLService {
 					if (rateLimit) await this.observeRateLimit(rateLimit);
 					return response.data;
 				} catch (error) {
+					this.signal?.throwIfAborted();
 					if (error instanceof RateLimitAdmissionRefusal) throw error;
 					const rateLimit = extractRateLimitInfo(error, this.now);
 					if (rateLimit) await this.observeRateLimit(rateLimit);
@@ -526,18 +542,38 @@ export class GraphQLService {
 
 export async function createGraphQLService(
 	options: AuthOptions,
+	request: { signal?: AbortSignal } = {},
 ): Promise<GraphQLService> {
-	const auth = await getActiveAuth(options);
+	// Reuse the existing OAuth resolver/refresh seam, with the same signal as
+	// the SDK fetch. A bounded read must not leave a token request running.
+	const refresh = request.signal
+		? {
+				fetchImpl: ((url, init) =>
+					globalThis.fetch(url, {
+						...init,
+						signal: request.signal,
+					})) satisfies FetchLike,
+			}
+		: {};
+	const auth = await getActiveAuth({ ...options, ...refresh });
+	request.signal?.throwIfAborted();
 	if (auth.kind === "oauth") {
 		const credential = { oauthToken: auth.token } as const;
 		return new GraphQLService(credential, {
+			...request,
 			admission: createOAuthProfileRateLimitAdmission(
 				credential,
 				auth.oauth.clientId,
 				auth.oauth.viewerId,
 			),
-			renewAccessToken: createClientCredentialsTokenRenewal(auth.oauth),
+			renewAccessToken: createClientCredentialsTokenRenewal(
+				auth.oauth,
+				request.signal
+					? (state, renewalOptions) =>
+							ensureFreshAccessToken(state, { ...renewalOptions, ...refresh })
+					: undefined,
+			),
 		});
 	}
-	return new GraphQLService({ apiKey: auth.token });
+	return new GraphQLService({ apiKey: auth.token }, request);
 }
