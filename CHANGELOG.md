@@ -22,6 +22,8 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Bug Fixes
 
+* **issues:** stop `issues read --body` / `--field` / `--sections` from downloading attachments and rewriting `uploads.linear.app` links to local `el-linear-downloads` paths. Those routes hand the description to scripts that diff it, hash it, or write it back with `issues update --description-file`, and the rewrite persisted host-local temp paths into Linear in place of the attachment links (and made every read wait on the largest attachment). They now print the description as Linear stores it; the JSON envelope and `--format summary` keep the image-viewing rewrite by default and gain `--no-downloads` to opt out, while `--downloads` opts a raw-text route back in (DEV-9667)
+
 * **issues:** exhaust both relation connections within fixed page, row, byte and time bounds for `issues related` / `relations` and `read --with relations`. Successful JSON adds `meta.relations_complete: true` (per issue for batched reads); incomplete enumeration, invalid rows or missing peers fail nonzero with `meta.relations_complete: false`, instead of silently truncating/dropping links or treating a missing include as empty. Existing formatted rows and mutation preflights are unchanged (DEV-14039).
 
 * **comments:** handle null human authors and retain integration/external author names in JSON and summaries.
