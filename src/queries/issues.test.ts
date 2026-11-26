@@ -11,6 +11,7 @@ import {
 	FILTERED_SEARCH_ISSUES_QUERY,
 	GET_ISSUE_BY_ID_QUERY,
 	GET_ISSUE_BY_IDENTIFIER_QUERY,
+	GET_ISSUE_RELATIONS_PAGE_QUERY,
 	GET_ISSUE_RELATIONS_QUERY,
 	GET_ISSUE_START_CONTEXT_QUERY,
 	GET_ISSUE_STATE_HISTORY_QUERY,
@@ -308,6 +309,33 @@ describe("GET_ISSUE_RELATIONS_QUERY", () => {
 		expect(containsField(GET_ISSUE_RELATIONS_QUERY, "relations")).toBe(true);
 		expect(containsField(GET_ISSUE_RELATIONS_QUERY, "inverseRelations")).toBe(
 			true,
+		);
+	});
+});
+
+describe("GET_ISSUE_RELATIONS_PAGE_QUERY", () => {
+	it("requests cursor proof in both directions with independent pagination variables", () => {
+		expect(extractVariables(GET_ISSUE_RELATIONS_PAGE_QUERY)).toEqual(
+			expect.arrayContaining([
+				"id",
+				"first",
+				"outAfter",
+				"inAfter",
+				"outgoing",
+				"incoming",
+			]),
+		);
+		expect(containsField(GET_ISSUE_RELATIONS_PAGE_QUERY, "hasNextPage")).toBe(
+			true,
+		);
+		expect(containsField(GET_ISSUE_RELATIONS_PAGE_QUERY, "endCursor")).toBe(
+			true,
+		);
+		expect(GET_ISSUE_RELATIONS_PAGE_QUERY).toContain(
+			"relations(first: $first, after: $outAfter)",
+		);
+		expect(GET_ISSUE_RELATIONS_PAGE_QUERY).toContain(
+			"inverseRelations(first: $first, after: $inAfter)",
 		);
 	});
 });

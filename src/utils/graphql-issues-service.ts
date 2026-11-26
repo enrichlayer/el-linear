@@ -20,6 +20,7 @@ import {
 	GET_ISSUE_CLAIM_CONTEXT_QUERY,
 	GET_ISSUE_START_CONTEXT_QUERY,
 	GET_ISSUE_TEAM_QUERY,
+	GET_ISSUE_UPDATE_CONTEXT_QUERY,
 	GET_ISSUES_QUERY,
 	SEARCH_ISSUES_QUERY,
 	TEAM_SCOPED_FILTERED_ISSUES_QUERY,
@@ -41,6 +42,7 @@ import type {
 	GetIssueByIdResponse,
 	GetIssuesResponse,
 	GetIssueTeamResponse,
+	GetIssueUpdateContextResponse,
 	IssueArchiveEntity,
 	IssueClaimContextResponse,
 	IssueNode,
@@ -68,6 +70,7 @@ import {
 import type { LinearService } from "./linear-service.js";
 import { logger } from "./logger.js";
 import { isUuid } from "./uuid.js";
+import { validateIssueId } from "./validators.js";
 
 const TEAM_KEY_REGEX = /^[A-Z0-9]+$/i;
 
@@ -212,6 +215,8 @@ export interface UpdateIssueArgs extends IssueMutationFields {
  * the typed shape, `tsc` catches the typo.
  */
 export interface CreateIssueArgs extends IssueMutationFields {
+	/** Caller-selected UUIDv4 for the new issue; omitted to let Linear assign it. */
+	id?: string;
 	/** Original team token (key or name) — used in label resolution error messages. */
 	teamInput?: string;
 	/** Cycle number, name, or UUID — resolved per team. (No `null` on create.) */
@@ -850,6 +855,7 @@ export class GraphQLIssuesService {
 	}
 
 	private async createIssueImpl(args: CreateIssueArgs): Promise<LinearIssue> {
+		if (args.id !== undefined) validateIssueId(args.id);
 		// Pre-resolve URL/slug-id forms of --project to a UUID so the batch
 		// resolver below (which uses a `name eqIgnoreCase` filter) can skip
 		// the project lookup entirely. Plain name inputs flow through unchanged
@@ -1583,6 +1589,7 @@ export class GraphQLIssuesService {
 		},
 	): Record<string, unknown> {
 		const input: Record<string, unknown> = {};
+		if (args.id !== undefined) input.id = args.id;
 		// Title is required by Linear's API unless --from-template is set,
 		// in which case Linear copies the template's title. We only include
 		// the field when explicitly set so a missing title with templateId
@@ -1943,6 +1950,20 @@ export class GraphQLIssuesService {
 			resolveVariables.hasMilestoneName = true;
 		}
 
+		// DEV-10603: the batch resolver loads the issue's labels only when
+		// the issue is addressed by identifier (team key + number). An update
+		// by UUID that sets labels must load them here, or "adding" mode
+		// merges into an empty list and overwrites the labels the issue has.
+		// The same query supplies the team id that label resolution would
+		// otherwise fetch separately.
+		const uuidContextPromise =
+			isUuid(args.id) && args.labelIds && args.labelIds.length > 0
+				? this.graphQLService.rawRequest<GetIssueUpdateContextResponse>(
+						GET_ISSUE_UPDATE_CONTEXT_QUERY,
+						{ issueId: args.id },
+					)
+				: undefined;
+
 		const { __labelNames, ...updateQueryVars } = resolveVariables;
 		const batchPromise =
 			this.graphQLService.rawRequest<BatchResolveForUpdateResponse>(
@@ -1977,6 +1998,13 @@ export class GraphQLIssuesService {
 			resolvedIssueId = resolvedIssueNodes[0].id;
 			issueTeamId = resolvedIssueNodes[0].team?.id;
 			currentIssueLabels = resolvedIssueNodes[0].labels.nodes.map((l) => l.id);
+		} else if (uuidContextPromise) {
+			const context = await uuidContextPromise;
+			if (!context.issue) {
+				throw notFoundError("Issue", args.id);
+			}
+			issueTeamId = context.issue.team?.id;
+			currentIssueLabels = context.issue.labels.nodes.map((l) => l.id);
 		}
 
 		return { resolvedIssueId, issueTeamId, currentIssueLabels, resolveResult };
