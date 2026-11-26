@@ -5,9 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  '@apm-js-collab/code-transformer-bundler-plugins@0.7.1':
-    hash: d027750c4e8b974fe193210c0fd3466533faa6903ba3c911ac83a160f18182fb
-    path: patches/@apm-js-collab__code-transformer-bundler-plugins@0.7.1.patch
+  '@apm-js-collab/code-transformer-bundler-plugins@0.7.1': d027750c4e8b974fe193210c0fd3466533faa6903ba3c911ac83a160f18182fb
 
 importers:
 
@@ -17,8 +15,8 @@ importers:
         specifier: ^8.4.2
         version: 8.5.2(@types/node@26.1.1)
       '@linear/sdk':
-        specifier: ^88.0.0
-        version: 88.0.0(graphql@17.0.2)
+        specifier: ^99.0.0
+        version: 99.0.0(graphql@17.0.2)
       commander:
         specifier: ^15.0.0
         version: 15.0.0
@@ -426,9 +424,9 @@ packages:
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
 
-  '@linear/sdk@88.0.0':
-    resolution: {integrity: sha512-5m3bqEU7MmQwE+BUB8Z0UENnIiyqM0g4Tv0M7wm35qFAj3zCdvbX95102YcfkvwlRiH0etbKRD05JKQvzOgPpg==}
-    engines: {node: '>=18.x'}
+  '@linear/sdk@99.0.0':
+    resolution: {integrity: sha512-VPzig11GUM9Ttz+UlQToUsOFdLfMpaOVaL/KGSOIdi+o1/yno3VXQrShkHXBxXLQd6Cl/N/eSclD9sZSq19crg==}
+    engines: {node: ^20.19.0 || >=22.12.0}
 
   '@napi-rs/wasm-runtime@1.1.6':
     resolution: {integrity: sha512-ZLv/JdUfkvOy9eCnnBaGfiO+XimbjebAeO+MRQqD/B+FR1tnRN0tpKSJHRbE8sFfS6aqsXZ67TQjfwfsxULVbg==}
@@ -465,6 +463,7 @@ packages:
   '@opentelemetry/sdk-trace-base@2.10.0':
     resolution: {integrity: sha512-GuYQQT7QD2EeO8lcZLRQzcbOyhqAzL+6WWTKTU9mSUBYBazkEDl+VrQcXQhbB08OWM9anD1aHleVadzulpOaUQ==}
     engines: {node: ^18.19.0 || >=20.6.0}
+    deprecated: Use @opentelemetry/sdk-trace package
     peerDependencies:
       '@opentelemetry/api': '>=1.3.0 <1.10.0'
 
@@ -1327,7 +1326,7 @@ snapshots:
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
-  '@linear/sdk@88.0.0(graphql@17.0.2)':
+  '@linear/sdk@99.0.0(graphql@17.0.2)':
     dependencies:
       '@graphql-typed-document-node/core': 3.2.0(graphql@17.0.2)
     transitivePeerDependencies:
