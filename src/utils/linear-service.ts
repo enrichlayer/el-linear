@@ -310,19 +310,26 @@ export class LinearService {
 	 * Fetch a bounded team window without treating a full page as complete.
 	 * Each request stays at or below SAFE_TEAM_PAGE_SIZE; a larger requested
 	 * limit is satisfied by following cursors. `truncated` is exact because it
-	 * is derived from pageInfo (and from over-fetching the final safe page), not
-	 * from the count-equals-limit heuristic.
+	 * is derived from pageInfo and the fetched count, not from the
+	 * count-equals-limit heuristic.
+	 *
+	 * The SDK's `fetchNext()` appends the next page to the same connection's
+	 * `nodes` and returns that same connection, so the accumulated list is read
+	 * from `teamsConnection.nodes` once paging stops; collecting each returned
+	 * connection's nodes would count every earlier page again.
 	 */
 	async getTeamsWindow(limit = 100): Promise<LinearTeamListResult> {
 		const first = Math.min(limit, SAFE_TEAM_PAGE_SIZE);
-		let teamsConnection = await this.client.teams({ first });
-		const nodes = [...teamsConnection.nodes];
+		const teamsConnection = await this.client.teams({ first });
 
-		while (nodes.length < limit && teamsConnection.pageInfo.hasNextPage) {
-			teamsConnection = await teamsConnection.fetchNext();
-			nodes.push(...teamsConnection.nodes);
+		while (
+			teamsConnection.nodes.length < limit &&
+			teamsConnection.pageInfo.hasNextPage
+		) {
+			await teamsConnection.fetchNext();
 		}
 
+		const nodes = teamsConnection.nodes;
 		return {
 			teams: nodes
 				.slice(0, limit)
@@ -514,12 +521,12 @@ export class LinearService {
 		}
 
 		// 2. No exact match — fetch all teams for prefix matching
-		let page = await this.client.teams({ first: 50 });
-		const allNodes = [...page.nodes];
+		// fetchNext() appends to this same connection, so read nodes once at the end.
+		const page = await this.client.teams({ first: 50 });
 		while (page.pageInfo.hasNextPage) {
-			page = await page.fetchNext();
-			allNodes.push(...page.nodes);
+			await page.fetchNext();
 		}
+		const allNodes = page.nodes;
 		const input = teamKeyOrNameOrId.toLowerCase();
 
 		const prefixMatches = allNodes.filter(

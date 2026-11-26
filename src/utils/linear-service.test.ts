@@ -55,6 +55,44 @@ beforeEach(() => {
 	vi.resetAllMocks();
 });
 
+type TeamNode = {
+	id: string;
+	key: string;
+	name: string;
+	description: null;
+};
+
+function makeTeamNodes(start: number, count: number): TeamNode[] {
+	return Array.from({ length: count }, (_, offset) => ({
+		id: `team-${start + offset}`,
+		key: `T${start + offset}`,
+		name: `Team ${start + offset}`,
+		description: null,
+	}));
+}
+
+/**
+ * A team connection that pages like the locked @linear/sdk `Connection`:
+ * `fetchNext()` appends the next page to this same object's `nodes`, updates
+ * its `pageInfo`, and resolves to the same object rather than to a new page.
+ */
+function sdkTeamConnection(pages: TeamNode[][]) {
+	let served = 1;
+	const connection = {
+		nodes: [...pages[0]],
+		pageInfo: { hasNextPage: pages.length > 1 },
+		fetchNext: vi.fn(async () => {
+			if (connection.pageInfo.hasNextPage) {
+				connection.nodes = [...connection.nodes, ...pages[served]];
+				served += 1;
+				connection.pageInfo.hasNextPage = served < pages.length;
+			}
+			return connection;
+		}),
+	};
+	return connection;
+}
+
 describe("LinearService", () => {
 	describe("SDK GraphQL error classification", () => {
 		it.each([
@@ -300,6 +338,21 @@ describe("LinearService", () => {
 				});
 			const service = new LinearService({ apiKey: "token" });
 			await expect(service.resolveTeamId("in")).rejects.toThrow("Candidates:");
+		});
+
+		it("matches a first-page prefix once when the teams span several pages", async () => {
+			const connection = sdkTeamConnection([
+				[{ id: "fe-uuid", key: "FE", name: "Frontend", description: null }],
+				makeTeamNodes(0, 1),
+			]);
+			mockTeams
+				.mockResolvedValueOnce(noMatch)
+				.mockResolvedValueOnce(noMatch)
+				.mockResolvedValueOnce(connection);
+			const service = new LinearService({ apiKey: "token" });
+
+			expect(await service.resolveTeamId("front")).toBe("fe-uuid");
+			expect(connection.fetchNext).toHaveBeenCalledTimes(1);
 		});
 
 		it("throws when team not found and lists available teams", async () => {
@@ -691,35 +744,50 @@ describe("LinearService", () => {
 	});
 
 	describe("getTeamsWindow", () => {
-		it("follows safe pages to find a team beyond the first page", async () => {
-			const firstPage = {
-				nodes: Array.from({ length: 100 }, (_, index) => ({
-					id: `team-${index}`,
-					key: `T${index}`,
-					name: `Team ${index}`,
-					description: null,
-				})),
-				pageInfo: { hasNextPage: true },
-				fetchNext: vi.fn(),
-			};
-			const secondPage = {
-				nodes: [
-					{ id: "forage-id", key: "FD", name: "Forage", description: null },
-				],
-				pageInfo: { hasNextPage: false },
-				fetchNext: vi.fn(),
-			};
-			firstPage.fetchNext.mockResolvedValue(secondPage);
-			mockTeams.mockResolvedValue(firstPage);
+		it("counts each page once when fetchNext appends to the same connection", async () => {
+			const connection = sdkTeamConnection([
+				makeTeamNodes(0, 100),
+				makeTeamNodes(100, 50),
+			]);
+			mockTeams.mockResolvedValue(connection);
+			const service = new LinearService({ apiKey: "token" });
+
+			const result = await service.getTeamsWindow(1000);
+
+			expect(mockTeams).toHaveBeenCalledWith({ first: 100 });
+			expect(connection.fetchNext).toHaveBeenCalledTimes(1);
+			expect(result.teams).toHaveLength(150);
+			expect(new Set(result.teams.map((team) => team.id)).size).toBe(150);
+			expect(result.truncated).toBe(false);
+		});
+
+		it("returns teams beyond the first page when the limit covers them", async () => {
+			mockTeams.mockResolvedValue(
+				sdkTeamConnection([makeTeamNodes(0, 100), makeTeamNodes(100, 50)]),
+			);
+			const service = new LinearService({ apiKey: "token" });
+
+			const result = await service.getTeamsWindow(200);
+
+			expect(result.teams.map((team) => team.id).sort()).toEqual(
+				makeTeamNodes(0, 150)
+					.map((team) => team.id)
+					.sort(),
+			);
+			expect(result.truncated).toBe(false);
+		});
+
+		it("marks a limit that stops inside a later page as truncated", async () => {
+			mockTeams.mockResolvedValue(
+				sdkTeamConnection([makeTeamNodes(0, 100), makeTeamNodes(100, 50)]),
+			);
 			const service = new LinearService({ apiKey: "token" });
 
 			const result = await service.getTeamsWindow(101);
 
-			expect(mockTeams).toHaveBeenCalledWith({ first: 100 });
-			expect(firstPage.fetchNext).toHaveBeenCalledTimes(1);
 			expect(result.teams).toHaveLength(101);
-			expect(result.teams).toContainEqual(secondPage.nodes[0]);
-			expect(result.truncated).toBe(false);
+			expect(new Set(result.teams.map((team) => team.id)).size).toBe(101);
+			expect(result.truncated).toBe(true);
 		});
 
 		it("marks a full first page as truncated when another page exists", async () => {
