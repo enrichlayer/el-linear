@@ -97,6 +97,13 @@ intended flow for the CLI.
   // Optional override for the workspace URL key (the segment after `linear.app/`).
   // When omitted, el-linear fetches it from `viewer.organization.urlKey` once
   // per session and caches in memory.
+  //
+  // In a shared TEAM config this also declares which workspace that file's
+  // identifiers belong to. Set it there and in each profile, and a team layer
+  // from another workspace has its `members` / `teams` / `teamAliases` /
+  // `labels` / `defaultTeam` / `defaultAssignee` dropped rather than resolving
+  // to UUIDs the target workspace has never seen. See "Using more than one
+  // Linear workspace" in the README.
   "workspaceUrlKey": "enrichlayer",
 
   // Status defaults for issues create. Either string is the human-readable
@@ -224,15 +231,12 @@ intended flow for the CLI.
     // decision. The narrow override
     // --allow-missing-intake-decision is recorded.
     "intakeDecisionGate": false,
+    // OPT-IN summary check (default: off). "warn" prints a stderr warning
+    // when the description has no "Summary" section. Never blocks.
+    "summaryGate": false,
     // Section headers accepted for the intake decision. Default
     // ["Intake decision"].
-    "intakeSectionHeaders": ["Intake decision"],
-    // OPT-IN consent-label receipt gate (default: off). When true, applying a
-    // consent label is refused unless the description carries one valid
-    // el-intake-decision:v1 receipt for that issue. See below.
-    "consentReceiptGate": false,
-    // Labels treated as consent for `consentReceiptGate`. Default ["bot"].
-    "consentLabels": ["bot"]
+    "intakeSectionHeaders": ["Intake decision"]
   }
 }
 ```
@@ -366,24 +370,6 @@ and reads JSON from stdout: either a bare array (`["bot"]`) or
 Added labels are reported as a warning (`labels added by advisor: bot (rubric:
 ...)`) and under `labelAdvisor` in the JSON output.
 
-**Consent labels with a receipt.** When the advice includes a consent label
-(`validation.consentLabels`, default `["bot"]`), the advisor may also return the
-receipt's policy fields:
-
-```json
-{"labels": ["bot"], "reason": "rubric: BOT", "receipt": {"repo": "acme/tools", "reason": "why unattended work is consented"}}
-```
-
-el-linear then creates the issue without the consent label and, right after,
-applies it in one update together with an `el-intake-decision:v1` receipt (see
-below) naming the new issue, the acting Linear user as `actor`, and the
-advisor's `repo` and `reason`. It never guesses `repo`. The update is skipped
-with a warning — the issue stays without the consent label — when the Linear
-viewer is an app rather than a person, the description already carries a
-receipt marker, or the write fails. The JSON output reports the result under
-`labelAdvisor.consent` (`{labels, applied, repo, problem?}`). A malformed
-`receipt` object fails the whole answer, like any other malformed output.
-
 **Fail-closed on labels.** A non-zero exit, timeout, missing binary, or
 malformed output warns and creates the issue with only the labels you passed —
 a broken advisor never adds a label. `--no-label-advisor` skips the advisor for
@@ -393,37 +379,6 @@ one create. `LINEAR_API_TOKEN` is removed from the advisor's environment.
 as `identity.resolver`: it names a binary el-linear spawns. Override or disable
 per invocation with `EL_LINEAR_LABEL_ADVISOR` (whitespace-separated command;
 empty string = off).
-
-### Consent-label receipt gate (`validation.consentReceiptGate`)
-
-An **opt-in** gate for workspaces where a label is consent for unattended work
-and an automation additionally requires a machine-readable receipt in the
-description:
-
-```
-<!-- el-intake-decision:v1 {"policyVersion":"intake-policy/v1","decision":"automatic-implementation","capabilities":["manual-review","automatic-implementation"],"reason":"...","provenance":{"source":"issue-triage","actor":"<name>","issue":"DEV-123","repo":"<namespace/repo>"}} -->
-```
-
-With `"consentReceiptGate": true`, applying a consent label (`consentLabels`,
-default `["bot"]`) is checked:
-
-- `issues create --labels bot` is refused. The receipt must name the issue,
-  which does not exist yet; create without the label, then apply it with
-  `issues update <ID> --labels bot` and the receipt in the same update.
-- A consent label proposed by the label advisor on create is applied after
-  create with a receipt when the advisor supplied the receipt fields (see the
-  label advisor above); without them it is dropped with a warning and the rest
-  of the advice applies.
-- `issues update` that newly applies a consent label is refused unless the
-  resulting description (the new `--description` / `--description-file` /
-  `--append-description`, else the current one) carries exactly one valid
-  automatic-implementation receipt naming that issue. The refusal names what
-  is missing.
-
-el-linear checks the receipt's structure and issue. It writes a receipt only
-from policy fields a configured label advisor returns, because the target
-repository and its admissibility are the automation's policy. The gate is independent of `validation.enabled` and
-`--skip-validation`, and has no override flag.
 
 ### SOP-label parent gate (`validation.sopLabelParentGate`)
 
@@ -510,6 +465,23 @@ local `--description` override, the description is instantiated server-side and
 is invisible to a client-side check, so the gate no-ops there (same
 client-side-visibility gap as the duplicate-detection gate on a
 template-resolved title).
+
+### Summary check (`validation.summaryGate`)
+
+An **opt-in**, warn-only check that the description has a `Summary` section:
+a few plain-language sentences for readers outside the work. Only presence is
+checked, at any position and heading level.
+
+```json
+{ "validation": { "summaryGate": "warn" } }
+```
+
+- `"warn"` — print a stderr warning; creation always proceeds (recorded as an
+  `advisory` gate event).
+- absent / `false` — off (the open-source default).
+
+`--skip-validation` silences it. Like the goal-completion gate, it does not run
+on the `--from-template` path with no local `--description` override.
 
 ### Intake-decision gate (`validation.intakeDecisionGate`)
 

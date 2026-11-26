@@ -2191,4 +2191,85 @@ describe("GraphQLIssuesService", () => {
 			});
 		});
 	});
+
+	describe("searchIssuesByTitle (DEV-14678)", () => {
+		it("matches any salient title word, not the whole title as one substring", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const service = new GraphQLIssuesService(
+				graphQLService,
+				new LinearService({ apiKey: "token" }),
+			);
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValue({ issues: { nodes: [] } });
+
+			await service.searchIssuesByTitle(
+				"Rewrite the onboarding email sequence for new customers",
+				{ limit: 50 },
+			);
+
+			expect(rawRequest).toHaveBeenCalledTimes(1);
+			const variables = rawRequest.mock.calls[0]?.[1] as {
+				first: number;
+				filter: { or: Array<{ title: { containsIgnoreCase: string } }> };
+			};
+			expect(variables.first).toBe(50);
+			// One clause per salient word (stopwords dropped), longest first, so
+			// "... new enterprise customers" is found by "onboarding" etc. even
+			// though it does not contain the whole new title.
+			expect(variables.filter).toEqual({
+				or: [
+					{ title: { containsIgnoreCase: "onboarding" } },
+					{ title: { containsIgnoreCase: "customers" } },
+					{ title: { containsIgnoreCase: "sequence" } },
+					{ title: { containsIgnoreCase: "rewrite" } },
+					{ title: { containsIgnoreCase: "email" } },
+					{ title: { containsIgnoreCase: "new" } },
+				],
+			});
+		});
+
+		it("caps the clause count at the six longest words", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const service = new GraphQLIssuesService(
+				graphQLService,
+				new LinearService({ apiKey: "token" }),
+			);
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValue({ issues: { nodes: [] } });
+
+			await service.searchIssuesByTitle(
+				"alpha bravo charlie deltas echoes foxtrot golfing hotels",
+			);
+
+			const variables = rawRequest.mock.calls[0]?.[1] as {
+				filter: { or: Array<{ title: { containsIgnoreCase: string } }> };
+			};
+			expect(
+				variables.filter.or.map((c) => c.title.containsIgnoreCase),
+			).toEqual([
+				"charlie",
+				"foxtrot",
+				"golfing",
+				"deltas",
+				"echoes",
+				"hotels",
+			]);
+		});
+
+		it("runs no query for a title with no salient words", async () => {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const service = new GraphQLIssuesService(
+				graphQLService,
+				new LinearService({ apiKey: "token" }),
+			);
+			const rawRequest = vi.spyOn(graphQLService, "rawRequest");
+
+			await expect(service.searchIssuesByTitle("the and of")).resolves.toEqual(
+				[],
+			);
+			expect(rawRequest).not.toHaveBeenCalled();
+		});
+	});
 });

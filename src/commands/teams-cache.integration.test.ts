@@ -26,9 +26,11 @@ vi.mock("node:os", async (importOriginal) => {
 	return { ...overridden, default: overridden };
 });
 
-const mockGetTeams = vi.fn();
+const mockGetTeamsWindow = vi.fn();
 vi.mock("../utils/linear-service.js", () => ({
-	createLinearService: vi.fn().mockResolvedValue({ getTeams: mockGetTeams }),
+	createLinearService: vi
+		.fn()
+		.mockResolvedValue({ getTeamsWindow: mockGetTeamsWindow }),
 }));
 
 const mockOutputSuccess = vi.fn();
@@ -48,7 +50,7 @@ const { createTestProgram, runCommand, suppressExit } = await import(
 
 beforeEach(async () => {
 	await fs.rm(TEST_HOME, { recursive: true, force: true });
-	mockGetTeams.mockReset();
+	mockGetTeamsWindow.mockReset();
 	mockOutputSuccess.mockReset();
 	suppressExit();
 });
@@ -56,7 +58,10 @@ beforeEach(async () => {
 describe("teams list — disk cache integration", () => {
 	it("first invocation fetches; second invocation reads from cache", async () => {
 		const teamsData = [{ id: "t1", key: "ENG", name: "Engineering" }];
-		mockGetTeams.mockResolvedValue(teamsData);
+		mockGetTeamsWindow.mockResolvedValue({
+			teams: teamsData,
+			truncated: false,
+		});
 
 		const program1 = createTestProgram();
 		setupTeamsCommands(program1);
@@ -67,22 +72,37 @@ describe("teams list — disk cache integration", () => {
 		await runCommand(program2, ["teams", "list"]);
 
 		// Fetcher called exactly once across both invocations.
-		expect(mockGetTeams).toHaveBeenCalledTimes(1);
+		expect(mockGetTeamsWindow).toHaveBeenCalledTimes(1);
 		// Both invocations produced the same data via outputSuccess.
 		expect(mockOutputSuccess).toHaveBeenCalledTimes(2);
 		expect(mockOutputSuccess).toHaveBeenNthCalledWith(1, {
 			data: teamsData,
-			meta: { count: 1 },
+			meta: {
+				count: 1,
+				_limit_applied: 100,
+				_fetched: 1,
+				truncated: false,
+				availability: { status: "complete" },
+			},
 		});
 		expect(mockOutputSuccess).toHaveBeenNthCalledWith(2, {
 			data: teamsData,
-			meta: { count: 1 },
+			meta: {
+				count: 1,
+				_limit_applied: 100,
+				_fetched: 1,
+				truncated: false,
+				availability: { status: "complete" },
+			},
 		});
 	});
 
 	it("--no-cache bypasses the on-disk envelope", async () => {
 		const teamsData = [{ id: "t1", key: "ENG", name: "Engineering" }];
-		mockGetTeams.mockResolvedValue(teamsData);
+		mockGetTeamsWindow.mockResolvedValue({
+			teams: teamsData,
+			truncated: false,
+		});
 
 		// Warm the cache.
 		const program1 = createTestProgram();
@@ -98,18 +118,19 @@ describe("teams list — disk cache integration", () => {
 		await runCommand(program2, ["--no-cache", "teams", "list"]);
 
 		// Two fetches: one for the cache warm, one for --no-cache.
-		expect(mockGetTeams).toHaveBeenCalledTimes(2);
+		expect(mockGetTeamsWindow).toHaveBeenCalledTimes(2);
 	});
 
 	it("different limits use distinct cache keys", async () => {
-		mockGetTeams.mockImplementation((limit: number) =>
-			Promise.resolve(
-				Array.from({ length: limit }, (_, i) => ({
+		mockGetTeamsWindow.mockImplementation((limit: number) =>
+			Promise.resolve({
+				teams: Array.from({ length: limit }, (_, i) => ({
 					id: `t${i}`,
 					key: `T${i}`,
 					name: `Team ${i}`,
 				})),
-			),
+				truncated: false,
+			}),
 		);
 
 		const program1 = createTestProgram();
@@ -121,8 +142,8 @@ describe("teams list — disk cache integration", () => {
 		await runCommand(program2, ["teams", "list", "--limit", "10"]);
 
 		// Two fetches because the cache keys differ.
-		expect(mockGetTeams).toHaveBeenCalledTimes(2);
-		expect(mockGetTeams).toHaveBeenNthCalledWith(1, 5);
-		expect(mockGetTeams).toHaveBeenNthCalledWith(2, 10);
+		expect(mockGetTeamsWindow).toHaveBeenCalledTimes(2);
+		expect(mockGetTeamsWindow).toHaveBeenNthCalledWith(1, 5);
+		expect(mockGetTeamsWindow).toHaveBeenNthCalledWith(2, 10);
 	});
 });

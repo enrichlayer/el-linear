@@ -1,7 +1,7 @@
 /**
  * `el-linear branch validate [branch]` — validate that a branch name carries a
- * **real** Linear team prefix, checked against the workspace's actual teams
- * (cached `teams list`) rather than a hand-maintained allowlist.
+ * **real** Linear team prefix, checked against the workspace's actual team
+ * (targeted `teams lookup`) rather than a hand-maintained allowlist.
  *
  * Built so the tools-repo pre-commit gate (`check-linear-branch.sh`) can
  * delegate team-validity here instead of hardcoding a bash regex that drifts
@@ -11,20 +11,17 @@
  * Exit codes (so a caller can distinguish "block" from "fall back"):
  *   0 — valid: a real team, or an exempt branch (main/master/detached/empty)
  *   1 — invalid: parsed a team that isn't a real workspace team, or no Linear ID
- *   2 — indeterminate: the team set couldn't be loaded (offline + cold cache);
+ *   2 — indeterminate: the targeted team lookup couldn't be loaded;
  *       lets the caller fall back to its own check rather than hard-block
  *
  * `--exit-zero` reports the JSON verdict but always exits 0 (report-only).
  */
 
 import type { Command, OptionValues } from "commander";
-import { loadConfig } from "../config/config.js";
-import { cached, resolveCacheTTL } from "../utils/disk-cache.js";
 import { createLinearService } from "../utils/linear-service.js";
 import { handleAsyncCommand, outputSuccess } from "../utils/output.js";
 import { getRootOpts } from "../utils/root-opts.js";
 import { getCurrentBranch, parseBranchName } from "./issue-id.js";
-import { TEAMS_LIST_DEFAULT_LIMIT } from "./teams.js";
 
 // Branches that never carry a Linear ID and must not be blocked. Mirrors the
 // exemptions in the tools-repo gate (main/master/detached HEAD/empty).
@@ -77,26 +74,22 @@ export function setupBranchCommands(program: Command): void {
 						return;
 					}
 
-					let teamKeys: string[];
 					try {
 						const rootOpts = getRootOpts(command);
-						const ttl = resolveCacheTTL({
-							configTTL: loadConfig().cacheTTLSeconds,
-							noCacheFlag: rootOpts.cache === false,
+						const service = await createLinearService(rootOpts);
+						const team = await service.getTeam(parsed.team);
+						const valid = team !== null;
+						outputSuccess({
+							branch: branchName,
+							valid,
+							team: parsed.team,
+							issueId: parsed.issueId,
+							reason: valid ? "ok" : "unknown-team",
 						});
-						// Same cache key and limit as `teams list` default — share the entry.
-						const teams = await cached(
-							`teams-list-limit:${TEAMS_LIST_DEFAULT_LIMIT}`,
-							ttl,
-							async () => {
-								const service = await createLinearService(rootOpts);
-								return service.getTeams(TEAMS_LIST_DEFAULT_LIMIT);
-							},
-						);
-						teamKeys = teams.map((t) => t.key);
+						if (!(valid || options.exitZero)) process.exitCode = 1;
 					} catch {
-						// Couldn't load the team set (offline + cold cache). Signal
-						// indeterminate so the caller can fall back instead of blocking.
+						// A targeted lookup failure is indeterminate. Signal it instead
+						// of turning an unreadable source into proof of an unknown team.
 						outputSuccess({
 							branch: branchName,
 							valid: null,
@@ -107,17 +100,6 @@ export function setupBranchCommands(program: Command): void {
 						if (!options.exitZero) process.exitCode = 2;
 						return;
 					}
-
-					const valid = teamKeys.includes(parsed.team);
-					outputSuccess({
-						branch: branchName,
-						valid,
-						team: parsed.team,
-						issueId: parsed.issueId,
-						reason: valid ? "ok" : "unknown-team",
-						...(valid ? {} : { knownTeams: teamKeys }),
-					});
-					if (!(valid || options.exitZero)) process.exitCode = 1;
 				},
 			),
 		);

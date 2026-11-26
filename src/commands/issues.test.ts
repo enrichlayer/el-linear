@@ -25,6 +25,7 @@ const mockGetIssueById = vi.fn();
 const mockCreateIssue = vi.fn();
 const mockUpdateIssue = vi.fn();
 const mockSearchIssues = vi.fn();
+const mockSearchIssuesByTitle = vi.fn();
 const mockArchiveIssue = vi.fn();
 const mockDeleteIssue = vi.fn();
 const mockStartIssue = vi.fn();
@@ -36,6 +37,7 @@ class MockGraphQLIssuesService {
 	createIssue = mockCreateIssue;
 	updateIssue = mockUpdateIssue;
 	searchIssues = mockSearchIssues;
+	searchIssuesByTitle = mockSearchIssuesByTitle;
 	archiveIssue = mockArchiveIssue;
 	deleteIssue = mockDeleteIssue;
 	startIssue = mockStartIssue;
@@ -132,6 +134,18 @@ vi.mock("../utils/file-service.js", () => ({
 	FileService: class {
 		uploadFile = mockUploadFile;
 	},
+}));
+
+// DEV-9667: the read routes gate attachment downloads per route. Mock the
+// downloader (it would otherwise mkdir under tmpdir and call
+// fileService.downloadFile) but keep the real shouldDownloadUploads policy.
+const mockDownloadLinearUploads = vi.fn(
+	(issue: unknown, _fileService: unknown) => issue,
+);
+vi.mock("../utils/download-uploads.js", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../utils/download-uploads.js")>()),
+	downloadLinearUploads: (issue: unknown, fileService: unknown) =>
+		mockDownloadLinearUploads(issue, fileService),
 }));
 
 const mockCreateAttachment = vi.fn();
@@ -624,6 +638,58 @@ describe("issues commands", () => {
 			);
 			expect(mockGetIssueById).not.toHaveBeenCalled();
 		});
+
+		describe("attachment downloads on the nested route (DEV-9667)", () => {
+			const storedUrl = "https://uploads.linear.app/ws/aaaa/bbbb/shot.png";
+			const issueWithUpload = {
+				id: "uuid-1",
+				identifier: "DEV-123",
+				title: "My issue",
+				description: `![shot](${storedUrl})`,
+			};
+
+			it.each(["issues", "issue"])(
+				"%s read --body never downloads and prints the stored link",
+				async (commandName) => {
+					mockGetIssueById.mockResolvedValue(issueWithUpload);
+
+					const program = createTestProgram();
+					setupIssuesCommands(program);
+					await runCommand(program, [commandName, "read", "DEV-123", "--body"]);
+
+					expect(mockDownloadLinearUploads).not.toHaveBeenCalled();
+					expect(stdoutSpy).toHaveBeenCalledWith(
+						`${issueWithUpload.description}\n`,
+					);
+				},
+			);
+
+			it("issues read downloads by default on the JSON envelope", async () => {
+				mockGetIssueById.mockResolvedValue(issueWithUpload);
+
+				const program = createTestProgram();
+				setupIssuesCommands(program);
+				await runCommand(program, ["issues", "read", "DEV-123"]);
+
+				expect(mockDownloadLinearUploads).toHaveBeenCalledTimes(1);
+			});
+
+			it("issues read --no-downloads reaches readIssues through the parent-owned option merge", async () => {
+				mockGetIssueById.mockResolvedValue(issueWithUpload);
+
+				const program = createTestProgram();
+				setupIssuesCommands(program);
+				await runCommand(program, [
+					"issues",
+					"read",
+					"DEV-123",
+					"--no-downloads",
+				]);
+
+				expect(mockDownloadLinearUploads).not.toHaveBeenCalled();
+				expect(mockOutputSuccess).toHaveBeenCalledWith(issueWithUpload);
+			});
+		});
 	});
 
 	describe("issues <id> shorthand (DEV-5174)", () => {
@@ -675,6 +741,24 @@ describe("issues commands", () => {
 			await runCommand(program, ["issues", "DEV-123", "--field", "Done when"]);
 
 			expect(stdoutWriteSpy).toHaveBeenCalledWith("Ship it.\n");
+		});
+
+		it("carries --no-downloads on the shorthand path (DEV-9667)", async () => {
+			const issueData = {
+				id: "uuid-1",
+				identifier: "DEV-123",
+				title: "My issue",
+				description:
+					"![shot](https://uploads.linear.app/ws/aaaa/bbbb/shot.png)",
+			};
+			mockGetIssueById.mockResolvedValue(issueData);
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, ["issues", "DEV-123", "--no-downloads"]);
+
+			expect(mockDownloadLinearUploads).not.toHaveBeenCalled();
+			expect(mockOutputSuccess).toHaveBeenCalledWith(issueData);
 		});
 
 		it("falls through to help with no issue ID (does not call getIssueById)", async () => {
@@ -1490,6 +1574,65 @@ describe("issues commands", () => {
 			expect(mockCreateIssue).toHaveBeenCalled();
 		});
 
+		const rerankerFailure = new Error(
+			"EXTERNAL_SERVICE_ERROR: Failed to rerank search results with Google reranker",
+		);
+
+		it("degrades to an unranked title check when Linear's reranker fails (DEV-14678)", async () => {
+			mockLoadConfig.mockReturnValue(enabledConfig);
+			mockSearchIssues.mockRejectedValue(rerankerFailure);
+			// The unranked path sees the same near-verbatim title the ranked
+			// search would have returned.
+			mockSearchIssuesByTitle.mockResolvedValue([hardBlockCandidate]);
+			mockCreateIssue.mockResolvedValue({ id: "x", identifier: "DEV-999" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				hardBlockTitle,
+				...validArgs,
+			]);
+
+			// Fell back to the structured title filter with the raw title.
+			expect(mockSearchIssuesByTitle).toHaveBeenCalledWith(hardBlockTitle, {
+				limit: 50,
+			});
+			// A reranker outage no longer silently disables the gate: the
+			// near-verbatim duplicate still prevents the POST.
+			expect(mockCreateIssue).not.toHaveBeenCalled();
+			expect(process.exit).toHaveBeenCalledWith(1);
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("DEV-9001"),
+			);
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringContaining("unranked"),
+			);
+		});
+
+		it("creates through a reranker outage when no title matches, and reports the unranked check (DEV-14678)", async () => {
+			mockLoadConfig.mockReturnValue(enabledConfig);
+			mockSearchIssues.mockRejectedValue(rerankerFailure);
+			mockSearchIssuesByTitle.mockResolvedValue([]);
+			mockCreateIssue.mockResolvedValue({ id: "x", identifier: "DEV-999" });
+
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Rewrite the onboarding email sequence for new customers",
+				...validArgs,
+			]);
+
+			// No --allow-duplicate needed to file during an outage.
+			expect(mockCreateIssue).toHaveBeenCalled();
+			expect(mockOutputWarning).toHaveBeenCalledWith(
+				expect.stringContaining("compared 0 unranked title match"),
+			);
+		});
+
 		it("validation.duplicateDetection:false disables only the gate", async () => {
 			mockLoadConfig.mockReturnValue({
 				...baseConfig,
@@ -1558,9 +1701,10 @@ describe("issues commands", () => {
 			expect(mockCreateIssue).toHaveBeenCalled();
 		});
 
-		it("proceeds (best-effort) when the dup search itself fails", async () => {
+		it("proceeds (best-effort) when both the ranked search and its fallback fail", async () => {
 			mockLoadConfig.mockReturnValue(enabledConfig);
 			mockSearchIssues.mockRejectedValue(new Error("network down"));
+			mockSearchIssuesByTitle.mockRejectedValue(new Error("network down"));
 			mockCreateIssue.mockResolvedValue({ id: "x", identifier: "DEV-999" });
 
 			const program = createTestProgram();
@@ -1877,6 +2021,69 @@ describe("issues commands", () => {
 				}),
 			);
 			expect(mockCreateIssue).toHaveBeenCalled();
+		});
+	});
+
+	describe("issues create — summary check (DEV-16785)", () => {
+		const run = async (
+			validation: Record<string, unknown>,
+			description: string,
+			extra: string[] = [],
+		) => {
+			mockSearchIssues.mockResolvedValue([]);
+			mockCreateIssue.mockResolvedValue({ id: "x", identifier: "DEV-999" });
+			mockLoadConfig.mockReturnValue({ ...baseConfig, validation });
+			const program = createTestProgram();
+			setupIssuesCommands(program);
+			await runCommand(program, [
+				"issues",
+				"create",
+				"Improve the widget pipeline",
+				"--team",
+				"DEV",
+				"--labels",
+				"feature",
+				"--assignee",
+				"bob",
+				"--project",
+				"Infrastructure",
+				"--description",
+				description,
+				...extra,
+			]);
+			expect(mockCreateIssue).toHaveBeenCalled();
+			expect(process.exit).not.toHaveBeenCalledWith(1);
+		};
+		const warning = expect.stringContaining('no "## Summary" section');
+		const without =
+			"A sufficiently long description that passes the length check.";
+		const withSummary = `## Summary\n\n${without}`;
+
+		it("warns, records advisory, and still creates", async () => {
+			await run({ enabled: true, summaryGate: "warn" }, without);
+			expect(mockOutputWarning).toHaveBeenCalledWith(warning);
+			expect(mockEmitGateEvent).toHaveBeenCalledWith(
+				"el-linear",
+				"issues create",
+				{ gate: "issues-create-summary", outcome: "advisory" },
+			);
+		});
+
+		it("is silent when the description has a summary", async () => {
+			await run({ enabled: true, summaryGate: "warn" }, withSummary);
+			expect(mockOutputWarning).not.toHaveBeenCalledWith(warning);
+		});
+
+		it("is off unless opted in", async () => {
+			await run({ enabled: true }, without);
+			expect(mockOutputWarning).not.toHaveBeenCalledWith(warning);
+		});
+
+		it("is silenced by --skip-validation", async () => {
+			await run({ enabled: true, summaryGate: "warn" }, without, [
+				"--skip-validation",
+			]);
+			expect(mockOutputWarning).not.toHaveBeenCalledWith(warning);
 		});
 	});
 
@@ -3162,7 +3369,7 @@ describe("issues commands", () => {
 		});
 	});
 
-	describe("issues create/update — label advisor and consent receipt (DEV-10372)", () => {
+	describe("issues create/update — label advisor (DEV-10372)", () => {
 		let dir: string;
 		const createArgs = [
 			"issues",
@@ -3181,21 +3388,6 @@ describe("issues commands", () => {
 			const path = join(dir, "advisor.mjs");
 			writeFileSync(path, body);
 			return [process.execPath, path];
-		}
-
-		function receipt(issue: string): string {
-			return `<!-- el-intake-decision:v1 ${JSON.stringify({
-				policyVersion: "intake-policy/v1",
-				decision: "automatic-implementation",
-				capabilities: ["manual-review", "automatic-implementation"],
-				reason: "Maintainer consented to unattended authoring",
-				provenance: {
-					source: "issue-triage",
-					actor: "Test Person",
-					issue,
-					repo: "acme/tools",
-				},
-			})} -->`;
 		}
 
 		beforeEach(() => {
@@ -3243,6 +3435,7 @@ describe("issues commands", () => {
 					labelAdvisor: { added: ["bot"], reason: "rubric: BOT" },
 				}),
 			);
+			expect(mockUpdateIssue).not.toHaveBeenCalled();
 			expect(JSON.parse(readFileSync(seen, "utf8"))).toEqual({
 				team: "DEV",
 				project: null,
@@ -3331,324 +3524,17 @@ describe("issues commands", () => {
 			);
 		});
 
-		const gateConfig = {
-			...baseConfig,
-			validation: { enabled: false, consentReceiptGate: true },
-		};
-
-		it("refuses an explicit consent label on create and names the missing receipt", async () => {
-			mockLoadConfig.mockReturnValue(gateConfig);
-			await run([
-				...createArgs.slice(0, 5),
-				"--labels",
-				"bug,bot",
-				...createArgs.slice(7),
-			]);
-
-			expect(mockCreateIssue).not.toHaveBeenCalled();
-			expect(process.exit).toHaveBeenCalledWith(1);
-			expect(consoleErrorSpy).toHaveBeenCalledWith(
-				expect.stringContaining("el-intake-decision:v1 receipt"),
-			);
-		});
-
-		it("refuses a consent label passed as its configured UUID on create", async () => {
-			mockLoadConfig.mockReturnValue({
-				...gateConfig,
-				labels: { workspace: { bot: "bot-label-uuid" }, teams: {} },
-			});
-			await run([
-				...createArgs.slice(0, 5),
-				"--labels",
-				"bug,bot-label-uuid",
-				...createArgs.slice(7),
-			]);
-
-			expect(mockCreateIssue).not.toHaveBeenCalled();
-			expect(consoleErrorSpy).toHaveBeenCalledWith(
-				expect.stringContaining("el-intake-decision:v1 receipt"),
-			);
-		});
-
-		it("drops an advisor-proposed consent label on create when the gate is on", async () => {
-			mockLoadConfig.mockReturnValue({
-				...gateConfig,
-				labelAdvisor: {
-					command: advisor(
-						`process.stdout.write('{"labels":["bot","docs"]}');`,
-					),
-				},
-			});
-			await run(createArgs);
+		it("accepts an explicit bot label on create without an extra update", async () => {
+			mockLoadConfig.mockReturnValue(baseConfig);
+			await run([...createArgs, "--labels", "bot"]);
 
 			expect(mockCreateIssue).toHaveBeenCalledWith(
-				expect.objectContaining({ labelIds: ["label-bug", "label-docs"] }),
+				expect.objectContaining({ labelIds: ["label-bug", "label-bot"] }),
 			);
-			expect(mockOutputWarning).toHaveBeenCalledWith(
-				expect.stringContaining("label advisor proposed bot, not applied"),
-			);
-		});
-
-		function receiptAdvisor(): string[] {
-			return advisor(
-				`process.stdout.write(JSON.stringify({ labels: ["bot", "docs"], reason: "rubric: BOT", receipt: { repo: "acme/tools", reason: "rubric consent" } }));`,
-			);
-		}
-
-		it("applies an advisor-proposed bot after create with a receipt naming the new issue (DEV-10455)", async () => {
-			mockLoadConfig.mockReturnValue({
-				...gateConfig,
-				labelAdvisor: { command: receiptAdvisor() },
-			});
-			mockGraphQLService.rawRequest.mockResolvedValue({
-				viewer: { name: "Test Person", email: "t@example.com", app: false },
-				issue: {
-					identifier: "DEV-999",
-					description: "## Done when\n- [ ] it works",
-				},
-			});
-			mockUpdateIssue.mockImplementation(
-				async (args: { description: string }) => ({
-					id: "x",
-					identifier: "DEV-999",
-					description: args.description,
-					labels: [{ name: "bug" }, { name: "docs" }, { name: "bot" }],
-				}),
-			);
-			await run(createArgs);
-
-			expect(mockCreateIssue).toHaveBeenCalledWith(
-				expect.objectContaining({ labelIds: ["label-bug", "label-docs"] }),
-			);
-			expect(mockUpdateIssue).toHaveBeenCalledTimes(1);
-			const [args, mode] = mockUpdateIssue.mock.calls[0] as [
-				{ id: string; description: string; labelIds: string[] },
-				string,
-			];
-			expect(mode).toBe("adding");
-			expect(args.id).toBe("x");
-			expect(args.labelIds).toEqual(["bot"]);
-			const marker = args.description.match(
-				/<!-- el-intake-decision:v1 (.+) -->$/,
-			);
-			expect(JSON.parse(marker?.[1] ?? "null")).toEqual({
-				policyVersion: "intake-policy/v1",
-				decision: "automatic-implementation",
-				capabilities: ["manual-review", "automatic-implementation"],
-				reason: "rubric consent",
-				provenance: {
-					source: "issue-triage",
-					actor: "Test Person",
-					issue: "DEV-999",
-					repo: "acme/tools",
-				},
-			});
-			expect(mockOutputSuccess).toHaveBeenCalledWith(
-				expect.objectContaining({
-					identifier: "DEV-999",
-					labelAdvisor: {
-						added: ["docs", "bot"],
-						reason: "rubric: BOT",
-						consent: { labels: ["bot"], applied: true, repo: "acme/tools" },
-					},
-				}),
-			);
-		});
-
-		it("uses the receipt route even when the gate is off", async () => {
-			mockLoadConfig.mockReturnValue({
-				...baseConfig,
-				labelAdvisor: { command: receiptAdvisor() },
-			});
-			mockGraphQLService.rawRequest.mockResolvedValue({
-				viewer: { name: "Test Person", email: null, app: false },
-				issue: { identifier: "DEV-999", description: "" },
-			});
-			mockUpdateIssue.mockImplementation(
-				async (args: { description: string }) => ({
-					id: "x",
-					identifier: "DEV-999",
-					description: args.description,
-				}),
-			);
-			await run(createArgs);
-
-			expect(mockCreateIssue).toHaveBeenCalledWith(
-				expect.objectContaining({ labelIds: ["label-bug", "label-docs"] }),
-			);
-			expect(mockUpdateIssue).toHaveBeenCalledWith(
-				expect.objectContaining({ labelIds: ["bot"] }),
-				"adding",
-			);
-		});
-
-		it("does not apply bot when the viewer is an app, and says why", async () => {
-			mockLoadConfig.mockReturnValue({
-				...gateConfig,
-				labelAdvisor: { command: receiptAdvisor() },
-			});
-			mockGraphQLService.rawRequest.mockResolvedValue({
-				viewer: { name: "Some Bot", email: null, app: true },
-				issue: { identifier: "DEV-999", description: "Body" },
-			});
-			await run(createArgs);
-
-			expect(mockCreateIssue).toHaveBeenCalledTimes(1);
 			expect(mockUpdateIssue).not.toHaveBeenCalled();
-			expect(mockOutputWarning).toHaveBeenCalledWith(
-				expect.stringContaining("label advisor proposed bot, not applied"),
-			);
-			expect(mockOutputSuccess).toHaveBeenCalledWith(
-				expect.objectContaining({
-					labelAdvisor: expect.objectContaining({
-						added: ["docs"],
-						consent: expect.objectContaining({ applied: false }),
-					}),
-				}),
-			);
 		});
 
-		it("does not apply bot when the description already holds a receipt marker", async () => {
-			mockLoadConfig.mockReturnValue({
-				...gateConfig,
-				labelAdvisor: { command: receiptAdvisor() },
-			});
-			mockGraphQLService.rawRequest.mockResolvedValue({
-				viewer: { name: "Test Person", email: null, app: false },
-				issue: {
-					identifier: "DEV-999",
-					description: `Body\n\n${receipt("DEV-1")}`,
-				},
-			});
-			await run(createArgs);
-
-			expect(mockUpdateIssue).not.toHaveBeenCalled();
-			expect(mockOutputWarning).toHaveBeenCalledWith(
-				expect.stringContaining("more than one el-intake-decision:v1 receipt"),
-			);
-		});
-
-		it("keeps the created issue when the consent update fails", async () => {
-			mockLoadConfig.mockReturnValue({
-				...gateConfig,
-				labelAdvisor: { command: receiptAdvisor() },
-			});
-			mockGraphQLService.rawRequest.mockResolvedValue({
-				viewer: { name: "Test Person", email: null, app: false },
-				issue: { identifier: "DEV-999", description: "Body" },
-			});
-			mockUpdateIssue.mockRejectedValue(new Error("Linear said no"));
-			await run(createArgs);
-
-			expect(process.exit).not.toHaveBeenCalledWith(1);
-			expect(mockOutputWarning).toHaveBeenCalledWith(
-				expect.stringContaining("Linear said no"),
-			);
-			expect(mockOutputSuccess).toHaveBeenCalledWith(
-				expect.objectContaining({ identifier: "DEV-999" }),
-			);
-		});
-
-		it("refuses to apply bot on update when the issue has no receipt", async () => {
-			mockLoadConfig.mockReturnValue(gateConfig);
-			mockGraphQLService.rawRequest.mockResolvedValue({
-				issue: {
-					identifier: "DEV-1",
-					description: "## Intake decision\n- Decision: PROCEED",
-					labels: { nodes: [{ name: "bug" }] },
-				},
-			});
-			await run(["issues", "update", "DEV-1", "--labels", "bot"]);
-
-			expect(mockUpdateIssue).not.toHaveBeenCalled();
-			expect(process.exit).toHaveBeenCalledWith(1);
-			expect(consoleErrorSpy).toHaveBeenCalledWith(
-				expect.stringContaining("has no el-intake-decision:v1 receipt"),
-			);
-		});
-
-		it("refuses a receipt that names a different issue", async () => {
-			mockLoadConfig.mockReturnValue(gateConfig);
-			mockGraphQLService.rawRequest.mockResolvedValue({
-				issue: {
-					identifier: "DEV-1",
-					description: `Body\n\n${receipt("DEV-2")}`,
-					labels: { nodes: [] },
-				},
-			});
-			await run(["issues", "update", "DEV-1", "--labels", "bot"]);
-
-			expect(mockUpdateIssue).not.toHaveBeenCalled();
-			expect(consoleErrorSpy).toHaveBeenCalledWith(
-				expect.stringContaining("names DEV-2, not DEV-1"),
-			);
-		});
-
-		it("applies bot on update when the same update writes the receipt", async () => {
-			mockLoadConfig.mockReturnValue(gateConfig);
-			mockGraphQLService.rawRequest.mockResolvedValue({
-				issue: {
-					identifier: "DEV-1",
-					description: "Body",
-					labels: { nodes: [] },
-				},
-			});
-			await run([
-				"issues",
-				"update",
-				"DEV-1",
-				"--labels",
-				"bot",
-				"--description",
-				`Body\n\n${receipt("DEV-1")}`,
-				"--no-auto-link",
-			]);
-
-			expect(mockUpdateIssue).toHaveBeenCalledTimes(1);
-		});
-
-		it("applies bot on update when --append-description adds the receipt", async () => {
-			mockLoadConfig.mockReturnValue(gateConfig);
-			mockGraphQLService.rawRequest.mockImplementation(async (query: string) =>
-				query.includes("labels")
-					? {
-							issue: {
-								identifier: "DEV-1",
-								description: "Body",
-								labels: { nodes: [] },
-							},
-						}
-					: { issue: { description: "Body" } },
-			);
-			await run([
-				"issues",
-				"update",
-				"DEV-1",
-				"--labels",
-				"bot",
-				"--append-description",
-				receipt("DEV-1"),
-				"--no-auto-link",
-			]);
-
-			expect(mockUpdateIssue).toHaveBeenCalledTimes(1);
-		});
-
-		it("does not re-check an issue that already carries bot", async () => {
-			mockLoadConfig.mockReturnValue(gateConfig);
-			mockGraphQLService.rawRequest.mockResolvedValue({
-				issue: {
-					identifier: "DEV-1",
-					description: "",
-					labels: { nodes: [{ name: "bot" }] },
-				},
-			});
-			await run(["issues", "update", "DEV-1", "--labels", "bot"]);
-
-			expect(mockUpdateIssue).toHaveBeenCalledTimes(1);
-		});
-
-		it("leaves bot alone when the gate is off (open-source default)", async () => {
+		it("updates bot like any other label without a preflight read", async () => {
 			mockLoadConfig.mockReturnValue(baseConfig);
 			await run(["issues", "update", "DEV-1", "--labels", "bot"]);
 

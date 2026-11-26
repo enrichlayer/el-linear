@@ -461,6 +461,38 @@ preferences; those stay in personal config. Example team file:
 Run `el-linear config show` to see the resolved config and confirm which team
 config path is active (`teamConfig` field in the output).
 
+#### Using more than one Linear workspace
+
+Most of a team config is identity: `members`, `teams`, `teamAliases`, `labels`,
+`defaultTeam`, `defaultAssignee` are UUIDs and team keys that exist in exactly
+one workspace. A profile pointed at a second workspace that inherits them sends
+identifiers the API has never seen, and Linear answers with
+`Entity not found in validateAccess` — a message naming a field, but neither the
+value nor the file it came from. Auto-discovery makes this easy to hit: the
+marker applies the same shared file to *every* profile on the machine.
+
+Declare the workspace on both sides and el-linear sorts it out:
+
+```json
+// the shared team config — which workspace its identifiers came from
+{ "workspaceUrlKey": "acme", "teams": { "ENG": "<uuid>" }, "validation": { "enabled": true } }
+
+// ~/.config/el-linear/profiles/side-project/config.json
+{ "workspaceUrlKey": "widgets" }
+```
+
+When the two disagree, the team layer's workspace-specific keys are dropped and
+you get a warning naming both workspaces and the file. What survives is the half
+that travels — `validation`, `terms`, `statusDefaults`, `footer`, cache settings
+— so a shared config still contributes its rules to every workspace.
+
+Both sides must declare it. A team config with no `workspaceUrlKey` cannot be
+shown to belong elsewhere, so it is applied unchanged; that keeps every existing
+single-workspace setup working exactly as before.
+
+To switch the layer off for a profile entirely — including marker
+auto-discovery — set `"teamConfigPath": ""` in that profile's config.
+
 #### Migrating a personal-heavy config
 
 Before the team-config split, members typically carried full local copies of
@@ -548,10 +580,18 @@ el-linear <command> --help       # detailed help for one command
 | Search | `search <query>` (semantic, cross-resource) |
 | Refs | `refs wrap` (rewrite issue identifiers in arbitrary text as links) |
 | Escape hatch | `graphql [query]` (with `--introspect`) |
-| Config | `config show`, `users {list, read}`, `teams list`, `templates list` |
+| Config | `config show`, `users {list, read}`, `teams {list, lookup, read}`, `templates list` |
 
 All `list` subcommands support `-l, --limit <n>`. All commands accept the
 top-level filters: `--format <json|summary>`, `--raw`, `--jq <expr>`, `--fields <list>`.
+
+For an exact team-key check, use `el-linear teams lookup DEV` (or
+`teams read DEV`). It uses a server-side key filter and returns
+`meta.status: "found"` or `"not-found"` with `availability.status: "complete"`;
+a transport or malformed-response failure exits non-zero instead of becoming a
+false not-found result. `teams list` follows safe 100-item pages when a larger
+`--limit` is requested and reports `meta.truncated` plus
+`meta.availability.status: "partial"` when more teams remain beyond the result.
 
 `issues list` also accepts `--all` (equivalent to `--limit 0`) to fetch **every**
 matching issue. It paginates the full set in safe chunks under the hood, so
@@ -936,6 +976,39 @@ el-linear issues read DEV-123 --body
 
 Mutually exclusive with `--field` / `--sections` / `--with`.
 
+`--body` (like `--field` and `--sections`) prints the description **as
+Linear stores it** — `uploads.linear.app` attachment links intact, nothing
+downloaded. That makes it the right input for diffing, hashing, and writing
+back with `issues update --description-file`. See the next section for the
+envelope routes, which download attachments by default.
+
+### Attachment downloads: `--downloads` / `--no-downloads`
+
+The JSON envelope and `--format summary` download every
+`uploads.linear.app` attachment referenced by the description or comments
+into `<tmpdir>/el-linear-downloads/` and rewrite those URLs to the local
+paths, so an agent reading the envelope can open the images directly. That
+rewrite is an affordance for *viewing*, not a faithful copy of the
+description: the text now carries host-local temp paths, and the read takes
+as long as the largest attachment takes to download.
+
+The raw-text routes (`--body`, `--field`, `--sections`) therefore skip the
+download by default. Two flags override the per-route default:
+
+```bash
+# JSON envelope with the stored links and no download side effect —
+# use this when the text will be diffed, hashed, or written back.
+el-linear issues read DEV-123 --no-downloads
+
+# Opt a raw-text route back into the rewrite (local image paths in --body).
+el-linear issues read DEV-123 --body --downloads
+```
+
+Never feed a description read *with* the rewrite back into
+`issues update --description-file`: the local paths would replace the
+attachment links in Linear, and the originals are not recoverable from the
+description afterwards.
+
 ### Read full comment bodies without JSON parsing
 
 `comments read <comment-id>` reads one comment by full UUID, `comment-<hash>`
@@ -967,6 +1040,10 @@ the comment has no body, and `comments list --body` exits 1 with
 and writes nothing to stdout. The structured surfaces need no such signal and
 stay exit 0 — `--format summary` prints `(no results)` and the JSON envelope
 carries `meta.count`.
+
+For file-backed comment writes, `--body-file <path>` is the canonical option.
+`comments create` and `comments update` also accept `--file <path>` as a
+backwards-compatible alias. Do not pass both spellings in one command.
 
 ### One-line write confirmations: `-q, --quiet`
 

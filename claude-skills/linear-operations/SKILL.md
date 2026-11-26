@@ -71,6 +71,8 @@ el-linear issues update DEV-123 --status Done --quiet 2>&1
 
 The summary formatter exists exactly because every consumer (humans and LLMs) was reinventing the same `python -c` / `jq` extraction in shell. Pick the canonical path; the per-resource format is a stable contract.
 
+**How these shapes are checked.** No hook flags them: el-hook's deterministic `cli-pipe-transform` guard was retired by DEV-9625 under the guard ceiling.
+
 ### Extracting one description section: `--field`
 
 When you need a single named section out of an issue's markdown description (e.g. "Done when", "Out of scope", "Why we need this"), use `issues read --field`. It matches `##`/`###` headers and bold pseudo-headers (`**Done when**`) case-insensitively, prints just that section's text, and exits non-zero when the section is missing — the canonical replacement for piping into `python3 -c "...desc.find(...)"`.
@@ -98,6 +100,21 @@ el-linear issues read DEV-123 --format json 2>&1 | python3 -c "import json,sys; 
 ```
 
 `--body` is mutually exclusive with `--field` / `--sections` / `--with` (those extract named parts or extend the JSON envelope; `--body` is the whole thing as text).
+
+#### Gotcha: attachment links rewritten to local download paths (el-linear without `--no-downloads`)
+
+**Symptom.** A description read through `issues read` and written back with `issues update --description-file` now carries `/var/folders/.../el-linear-downloads/...` (or other `<tmpdir>/el-linear-downloads/`) paths where `https://uploads.linear.app/...` attachment links used to be, and the original links are gone — [FE-1388](https://linear.app/verticalint/issue/FE-1388/) lost two this way. Reads of issues with large attachments also stall (a 24 MB recording made `--body` take 11–19 s). **Cause.** In el-linear releases before the one that adds `--no-downloads`, every read route — including `--body` — downloaded each attachment into `<tmpdir>/el-linear-downloads/` and rewrote the URLs to the local paths before printing, so "raw description" was not the description Linear stores. **Correct action.** Check that `el-linear issues read --help` lists `--no-downloads`. When it does, `--body` / `--field` / `--sections` are byte-exact by default (no download, no rewrite); the JSON envelope and `--format summary` still download by default and take `--no-downloads` to opt out. When it does not, read the description with `el-linear graphql` instead of `issues read` before any write-back. Never write a description back that contains `el-linear-downloads` paths. Background: [DEV-9667](https://linear.app/verticalint/issue/DEV-9667/) (the el-linear fix), [DEV-9640](https://linear.app/verticalint/issue/DEV-9640/) and [DEV-9658](https://linear.app/verticalint/issue/DEV-9658/) (the tools consumers that moved to a raw GraphQL read).
+
+```bash
+# ✅ Byte-exact description (when `issues read --help` lists --no-downloads) — safe to diff, hash, and write back
+el-linear issues read DEV-123 --body 2>&1
+
+# ✅ Byte-exact JSON envelope (no attachment download, stored links intact)
+el-linear issues read DEV-123 --no-downloads 2>&1
+
+# ❌ Don't write back text produced by a download-rewriting read
+el-linear issues update DEV-123 --description-file body-with-local-paths.md 2>&1
+```
 
 #### Citing an issue's stated rationale: `--body` or `--field`, never `--format summary`
 
@@ -217,6 +234,11 @@ Every issue should communicate **why** the work matters and **what** success loo
 ### Example
 
 ```markdown
+## Summary
+We track customer contacts in spreadsheets, Linear and people's memory, so
+details get lost. This sets up one shared CRM the team can rely on. Next:
+install it, then move the existing contacts in.
+
 ## Intake decision
 - Needed: Yes — contact tracking is split across spreadsheets, Linear, and memory.
 - Worth doing: Yes — outbound scale makes the fragmentation costly now, not later.
@@ -224,12 +246,6 @@ Every issue should communicate **why** the work matters and **what** success loo
 - Owner: Nico (operations tooling).
 - Placement: OPS / Sales infrastructure; self-hosted on the Hetzner box.
 - Decision: PROCEED
-
-## Set up a self-hosted CRM
-
-The team needs a CRM to replace fragmented contact tracking
-(spreadsheets + Linear + memory). Should be production-ready:
-reliable, backed up, accessible.
 
 ## Why we need this
 As we scale outbound, we need customer relationships, pipeline,
@@ -243,9 +259,26 @@ and outreach tracked in one place.
 
 ---
 
+## Summary Section (write it first)
+
+**Every new issue opens with `## Summary`, written for someone who doesn't know the code.** A manager setting priorities or a teammate picking up the work should get the point from these lines alone. Three to six sentences; two are enough for a small issue:
+
+1. **What this is about.**
+2. **Why it matters, or what was concluded**, including what is not known.
+3. **What happens next.**
+
+- No function names, paths, env vars or internal shorthand. They go in the sections below.
+- It replaces the opening paragraph; don't say the same thing twice.
+- When the conclusions change, update the summary in the same edit.
+- On an older issue, add one when you next edit it substantially. Don't rewrite issues in bulk.
+
+With `validation.summaryGate: "warn"`, `el-linear issues create` warns when the section is missing. It never blocks, and it can't judge the summary.
+
+---
+
 ## Intake Decision Block (MANDATORY, blocking)
 
-**`el-linear issues create` refuses any description without a `## Intake decision` section.** It must open the description, and the six lines must appear in this order:
+**`el-linear issues create` refuses any description without a `## Intake decision` section.** It comes right after the summary, and the six lines must appear in this order:
 
 ```markdown
 ## Intake decision
@@ -437,14 +470,15 @@ Don't start implementation work on an unassigned issue — the assignee is the p
 
 Complete ALL items before creating any issue:
 
-- [ ] **Intake decision** — description opens with the `## Intake decision` block (above). Blocking.
+- [ ] **Summary** — description opens with a plain-language `## Summary` (above).
+- [ ] **Intake decision** — the `## Intake decision` block follows the summary (above). Blocking.
 - [ ] **Duplicate & related check** — searched for existing issues, linked related ones (above).
 - [ ] **Team** — ask user if unclear (`el-linear teams list`).
 - [ ] **Assignee** — ask user if unclear (`el-linear users list --active`).
 - [ ] **Project** — always ask user, never guess (`el-linear projects list`).
 - [ ] **Labels** — exactly 1 type label + 1–2 domain labels (see Label Taxonomy below).
 - [ ] **Title** — action verb matching the type label (see Title Verb Convention), sentence case, specific scope, **plain-language and jargon-free** (see Title Readability).
-- [ ] **Description** — 2–4 sentences with context and intent, formatted with **bold** and `inline code`.
+- [ ] **Description** — beyond the summary, the context and intent the assignee needs, formatted with **bold** and `inline code`.
 - [ ] **"Why we need this"** — genuine motivation, not a restatement of the title.
 
 If any field is missing, **STOP and use AskUserQuestion**.
@@ -471,20 +505,14 @@ The label is plain config — set it to anything you want, or skip it entirely. 
 
 ---
 
-## Label advisor defaults and consent labels (`bot`)
+## Label advisor
 
-A workspace can configure a **label advisor** (`labelAdvisor.command` in personal config, or `EL_LINEAR_LABEL_ADVISOR`): a command `issues create` consults with the proposed issue. Whatever labels it returns are added and reported — a `labels added by advisor: … (<reason>)` warning on stderr and a `labelAdvisor` field in the JSON output. In Enrich Layer's Tools setup the advisor is `el-bot linear-rubric --advise`, the bot-suitability rubric: an issue it marks BOT gets `bot` **by default**, and an EXCLUDE issue is unchanged.
+A workspace can configure a **label advisor** (`labelAdvisor.command` in personal config, or `EL_LINEAR_LABEL_ADVISOR`): a command `issues create` consults with the proposed issue. Whatever labels it returns are added and reported — a `labels added by advisor: … (<reason>)` warning on stderr and a `labelAdvisor` field in the JSON output.
 
-- **Opt out for one create** with `--no-label-advisor` (for example, work you intend to do yourself, or an issue whose consent you are not in a position to give).
-- **Read the create output.** `labelAdvisor.added` lists what the advisor added; `labelAdvisor.consent` reports a consent label (`{labels, applied, repo, problem?}`). `applied: false` means the issue exists without that label, and `problem` says why.
+- **Opt out for one create** with `--no-label-advisor`.
+- **Read the create output.** `labelAdvisor.added` lists what the advisor added.
 
-**Consent labels need a receipt.** Where `validation.consentReceiptGate` is on (Enrich Layer's shared config turns it on), a consent label (`validation.consentLabels`, default `bot`) is only valid with exactly one `<!-- el-intake-decision:v1 {...} -->` receipt in the description that names the issue — bot-layer intake silently skips a `bot` issue without one. So:
-
-- **Default route: let the advisor apply it.** When the advisor returns `bot` with its receipt fields, el-linear creates the issue and then, in one update, applies `bot` with a receipt naming the new issue and you (the acting Linear user) as `actor`.
-- **Never pass `--labels bot` on create.** It is refused: the receipt must name an issue that does not exist yet.
-- **Adding `bot` to an existing issue** needs the receipt in the same update, or the update is refused and the error names what is missing. Enrich Layer: run `el-bot linear-consent <ID> --automatic-implementation --reason "<why>"`, which writes the label and a valid receipt together. Elsewhere: `el-linear issues update <ID> --labels bot --description-file <body-ending-with-the-receipt>`.
-
-The gate has no override flag and ignores `--skip-validation`: it protects consent, not field hygiene.
+el-linear does not author or validate automation consent receipts. Any receipt precondition remains the responsibility of the automation consuming the issue.
 
 ---
 

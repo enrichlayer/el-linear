@@ -33,14 +33,53 @@ export function setupTeamsCommands(program: Command): void {
 					noCacheFlag: rootOpts.cache === false,
 				});
 				const result = await cached(
-					`teams-list-limit:${limit}`,
+					`teams-list-window-v2-limit:${limit}`,
 					ttl,
 					async () => {
 						const service = await createLinearService(rootOpts);
-						return service.getTeams(limit);
+						return service.getTeamsWindow(limit);
 					},
 				);
-				outputSuccess({ data: result, meta: { count: result.length } });
+				outputSuccess({
+					data: result.teams,
+					meta: {
+						count: result.teams.length,
+						_limit_applied: limit,
+						_fetched: result.teams.length,
+						truncated: result.truncated,
+						availability: result.truncated
+							? {
+									status: "partial",
+									detail: `more teams exist beyond --limit ${limit}`,
+								}
+							: { status: "complete" },
+					},
+				});
 			}),
+		);
+
+	teams
+		.command("lookup <key>")
+		.alias("read")
+		.description("Look up one team by exact key without scanning the workspace")
+		.action(
+			handleAsyncCommand(
+				async (key: string, _options: OptionValues, command: Command) => {
+					const normalizedKey = key.trim().toUpperCase();
+					if (!normalizedKey) {
+						throw new Error("Team key must not be empty");
+					}
+					const service = await createLinearService(getRootOpts(command));
+					const team = await service.getTeam(normalizedKey);
+					outputSuccess({
+						data: team,
+						meta: {
+							status: team ? "found" : "not-found",
+							availability: { status: "complete" },
+							query: { key: normalizedKey },
+						},
+					});
+				},
+			),
 		);
 }

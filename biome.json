@@ -10,6 +10,16 @@
 			"!.tmp"
 		]
 	},
+	"markdown": {
+		"formatter": {
+			"enabled": false
+		}
+	},
+	"yaml": {
+		"formatter": {
+			"enabled": false
+		}
+	},
 	"overrides": [
 		{
 			"includes": ["**/*.test.ts", "**/__tests__/**/*.ts"],

@@ -6,17 +6,25 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Removed
+
+* **issues:** remove the dormant consent-label receipt gate and the label advisor's post-create consent/receipt path. The optional `labelAdvisor.consent` JSON field is no longer emitted; ordinary advisor labels and `labelAdvisor.added` / `reason` are unchanged. Automation-side receipt preconditions are unchanged (DEV-15663).
+
 ### Features
 
 * **issues:** accept `issues create --issue-id <uuid-v4>` for caller-selected stable identity through the existing validation and creation flow; invalid IDs are rejected before provider mutations (DEV-11113).
 
 * **auth:** support optional OAuth app credentials and client-credentials renewal while preserving explicit/API-key precedence; coordinate shared local or distributed request headroom, and batch project/label/cycle catalog reads to reduce request and complexity pressure (DEV-7874)
+* **issues:** add an opt-in, warn-only check for a `Summary` section in new issue descriptions via `validation.summaryGate` (DEV-16785)
 * **issues:** add an opt-in intake-decision gate that requires explicit need, value, ownership, placement, and a `PROCEED` decision before creation; `--skip-validation` cannot silently bypass it (DEV-6163)
 * **issues:** add an opt-in create-time goal-completion gate — checks the description for a falsifiable "Done when" / acceptance-criteria section, `warn`/`block` modes via `validation.goalCompletionGate`, bypass with `--allow-vague-goal` (DEV-5920)
 * **projects:** add `projects update --name/--description/--content` for editing project metadata without raw GraphQL (DEV-5749)
 * **projects:** add `projects update --status <name>` to set a project's status via the proper `projectUpdate` mutation instead of a hand-written GraphQL call; resolves the workspace's configured statuses by name (case-insensitive), lists the valid names on a miss, supports `--quiet`, and adds `status`, `progress`, and `url` to the JSON result (DEV-7021)
+* **teams:** add exact-key `teams lookup <KEY>` / `teams read <KEY>` and make `teams list` follow safe pages with explicit `truncated` and `availability` metadata, so callers never infer team absence from a capped page (DEV-8300)
 
 ### Bug Fixes
+
+* **issues:** stop `issues read --body` / `--field` / `--sections` from downloading attachments and rewriting `uploads.linear.app` links to local `el-linear-downloads` paths. Those routes hand the description to scripts that diff it, hash it, or write it back with `issues update --description-file`, and the rewrite persisted host-local temp paths into Linear in place of the attachment links (and made every read wait on the largest attachment). They now print the description as Linear stores it; the JSON envelope and `--format summary` keep the image-viewing rewrite by default and gain `--no-downloads` to opt out, while `--downloads` opts a raw-text route back in (DEV-9667)
 
 * **issues:** exhaust both relation connections within fixed page, row, byte and time bounds for `issues related` / `relations` and `read --with relations`. Successful JSON adds `meta.relations_complete: true` (per issue for batched reads); incomplete enumeration, invalid rows or missing peers fail nonzero with `meta.relations_complete: false`, instead of silently truncating/dropping links or treating a missing include as empty. Existing formatted rows and mutation preflights are unchanged (DEV-14039).
 
