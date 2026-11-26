@@ -71,6 +71,8 @@ el-linear issues update DEV-123 --status Done --quiet 2>&1
 
 The summary formatter exists exactly because every consumer (humans and LLMs) was reinventing the same `python -c` / `jq` extraction in shell. Pick the canonical path; the per-resource format is a stable contract.
 
+**How these shapes are checked.** No hook flags them: el-hook's deterministic `cli-pipe-transform` guard was retired by DEV-9625 under the guard ceiling.
+
 ### Extracting one description section: `--field`
 
 When you need a single named section out of an issue's markdown description (e.g. "Done when", "Out of scope", "Why we need this"), use `issues read --field`. It matches `##`/`###` headers and bold pseudo-headers (`**Done when**`) case-insensitively, prints just that section's text, and exits non-zero when the section is missing — the canonical replacement for piping into `python3 -c "...desc.find(...)"`.
