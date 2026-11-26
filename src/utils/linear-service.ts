@@ -53,6 +53,12 @@ import { isUuid } from "./uuid.js";
 
 const DEFAULT_CYCLE_PAGINATION_LIMIT = 250;
 
+// Linear's workspace-level team connection becomes too complex when callers
+// ask for the whole workspace in one request (DEV-8300). Keep each page at the
+// known-safe default and let callers request a larger bounded window by
+// following cursors instead of widening one query past the API complexity cap.
+const SAFE_TEAM_PAGE_SIZE = 100;
+
 // Filter-building helpers for Linear SDK queries.
 function eqFilter(value: unknown): { eq: unknown } {
 	return { eq: value };
@@ -125,6 +131,12 @@ function issueFromCatalog(issue: CatalogIssueNode): LinearIssue {
  * legacy arm was dropped in DEV-4068 T7.
  */
 export type LinearServiceAuth = LinearCredential;
+
+export interface LinearTeamListResult {
+	teams: LinearTeam[];
+	/** More teams exist beyond the requested window. */
+	truncated: boolean;
+}
 
 type LinearSdkRequest = <Response, Variables extends Record<string, unknown>>(
 	document: string,
@@ -284,15 +296,65 @@ export class LinearService {
 		return issues.nodes[0].id;
 	}
 
+	async getTeam(key: string): Promise<LinearTeam | null> {
+		const normalizedKey = key.trim().toUpperCase();
+		const teamsConnection = await this.client.teams({
+			filter: { key: { eq: normalizedKey } },
+			first: 1,
+		});
+		const team = teamsConnection.nodes[0];
+		return team ? this.toLinearTeam(team) : null;
+	}
+
+	/**
+	 * Fetch a bounded team window without treating a full page as complete.
+	 * Each request stays at or below SAFE_TEAM_PAGE_SIZE; a larger requested
+	 * limit is satisfied by following cursors. `truncated` is exact because it
+	 * is derived from pageInfo and the fetched count, not from the
+	 * count-equals-limit heuristic.
+	 *
+	 * The SDK's `fetchNext()` appends the next page to the same connection's
+	 * `nodes` and returns that same connection, so the accumulated list is read
+	 * from `teamsConnection.nodes` once paging stops; collecting each returned
+	 * connection's nodes would count every earlier page again.
+	 */
+	async getTeamsWindow(limit = 100): Promise<LinearTeamListResult> {
+		const first = Math.min(limit, SAFE_TEAM_PAGE_SIZE);
+		const teamsConnection = await this.client.teams({ first });
+
+		while (
+			teamsConnection.nodes.length < limit &&
+			teamsConnection.pageInfo.hasNextPage
+		) {
+			await teamsConnection.fetchNext();
+		}
+
+		const nodes = teamsConnection.nodes;
+		return {
+			teams: nodes
+				.slice(0, limit)
+				.map((team) => this.toLinearTeam(team))
+				.sort((a, b) => a.name.localeCompare(b.name)),
+			truncated: nodes.length > limit || teamsConnection.pageInfo.hasNextPage,
+		};
+	}
+
 	async getTeams(limit = 100): Promise<LinearTeam[]> {
-		const teamsConnection = await this.client.teams({ first: limit });
-		const teams = teamsConnection.nodes.map((team) => ({
+		return (await this.getTeamsWindow(limit)).teams;
+	}
+
+	private toLinearTeam(team: {
+		description?: string | null;
+		id: string;
+		key: string;
+		name: string;
+	}): LinearTeam {
+		return {
 			id: team.id,
 			key: team.key,
 			name: team.name,
 			description: team.description || null,
-		}));
-		return teams.sort((a, b) => a.name.localeCompare(b.name));
+		};
 	}
 
 	async resolveUserId(nameOrEmailOrId: string): Promise<string> {
@@ -459,12 +521,12 @@ export class LinearService {
 		}
 
 		// 2. No exact match — fetch all teams for prefix matching
-		let page = await this.client.teams({ first: 50 });
-		const allNodes = [...page.nodes];
+		// fetchNext() appends to this same connection, so read nodes once at the end.
+		const page = await this.client.teams({ first: 50 });
 		while (page.pageInfo.hasNextPage) {
-			page = await page.fetchNext();
-			allNodes.push(...page.nodes);
+			await page.fetchNext();
 		}
+		const allNodes = page.nodes;
 		const input = teamKeyOrNameOrId.toLowerCase();
 
 		const prefixMatches = allNodes.filter(
