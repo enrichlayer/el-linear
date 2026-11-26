@@ -1,7 +1,7 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import fs, { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readTextInputFile } from "./text-input-file.js";
 
 describe("readTextInputFile", () => {
@@ -67,4 +67,53 @@ describe("readTextInputFile", () => {
 			`Description file not found: ${missing}`,
 		);
 	});
+});
+
+describe("nonblocking stdin", () => {
+	afterEach(() => vi.restoreAllMocks());
+
+	it("retries temporary empty reads and decodes UTF-8 after joining all chunks", () => {
+		const payload = Buffer.from("  before 🌍 after  ");
+		const split = payload.indexOf(Buffer.from("🌍")) + 2;
+		const steps: (Buffer | string)[] = [
+			"EAGAIN",
+			payload.subarray(0, split),
+			"EWOULDBLOCK",
+			payload.subarray(split),
+			Buffer.alloc(0),
+		];
+		const wait = vi.spyOn(Atomics, "wait").mockReturnValue("timed-out");
+		vi.spyOn(fs, "readSync").mockImplementation((_fd, buffer) => {
+			const step = steps.shift();
+			if (typeof step === "string")
+				throw Object.assign(new Error(step), { code: step });
+			if (!step) throw new Error("read beyond EOF");
+			step.copy(buffer as Buffer);
+			return step.length;
+		});
+		expect(readTextInputFile("-", "Description")).toBe("before 🌍 after");
+		expect(wait).toHaveBeenCalledTimes(2);
+		expect(steps).toEqual([]);
+	});
+
+	it("returns an empty string for immediate EOF", () => {
+		vi.spyOn(fs, "readSync").mockReturnValue(0);
+		expect(readTextInputFile("-", "Description")).toBe("");
+	});
+
+	it.each([Object.assign(new Error("bad fd"), { code: "EBADF" }), null])(
+		"propagates non-retryable read errors unchanged",
+		(error) => {
+			vi.spyOn(fs, "readSync").mockImplementation(() => {
+				throw error;
+			});
+			let caught: unknown = "not thrown";
+			try {
+				readTextInputFile("-", "Description");
+			} catch (value) {
+				caught = value;
+			}
+			expect(caught).toBe(error);
+		},
+	);
 });
