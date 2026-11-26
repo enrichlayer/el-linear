@@ -7,6 +7,7 @@ import {
 	it,
 	vi,
 } from "vitest";
+import { LinearGraphQLError } from "./linear-graphql-error.js";
 import {
 	type CliListEnvelope,
 	handleAsyncCommand,
@@ -15,6 +16,7 @@ import {
 	outputSingle,
 	outputSuccess,
 	outputWarning,
+	recordRateLimitInfo,
 	resetWarnings,
 	setFieldsFilter,
 	setQuietMode,
@@ -22,6 +24,7 @@ import {
 	type WindowedMeta,
 	warnIfTruncated,
 } from "./output.js";
+import { RateLimitAdmissionRefusal } from "./rate-limit-admission.js";
 
 describe("outputSuccess", () => {
 	let stdoutSpy: ReturnType<typeof vi.spyOn>;
@@ -208,6 +211,93 @@ describe("warning buffer", () => {
 		const parsed = JSON.parse(allStdout);
 		expect(parsed.identifier).toBe("DEV-1");
 		expect(parsed._warnings).toEqual(["mid-execution warning"]);
+	});
+});
+
+describe("rate-limit metadata", () => {
+	let stdoutSpy: ReturnType<typeof vi.spyOn>;
+	let stderrSpy: ReturnType<typeof vi.spyOn>;
+
+	beforeEach(() => {
+		resetWarnings();
+		stdoutSpy = vi
+			.spyOn(process.stdout, "write")
+			.mockImplementation(() => true);
+		stderrSpy = vi
+			.spyOn(process.stderr, "write")
+			.mockImplementation(() => true);
+	});
+
+	afterEach(() => {
+		stdoutSpy.mockRestore();
+		stderrSpy.mockRestore();
+	});
+
+	it("adds the latest observed request budget to normal JSON output", () => {
+		recordRateLimitInfo({
+			limit: 2500,
+			remaining: 2498,
+			resetAt: "2026-08-11T10:00:00.000Z",
+		});
+		outputSuccess({ id: "DEV-1" });
+
+		const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+		expect(parsed._rateLimit).toEqual({
+			limit: 2500,
+			remaining: 2498,
+			resetAt: "2026-08-11T10:00:00.000Z",
+			observedRequests: 1,
+			minimumRemaining: 2498,
+		});
+	});
+
+	it("aggregates quota cost and minimum headroom for a multi-request command", () => {
+		recordRateLimitInfo({
+			limit: 2500,
+			remaining: 2499,
+			complexity: { cost: 20, limit: 2_000_000, remaining: 1_999_980 },
+			endpoints: { Issue: { limit: 1000, remaining: 999 } },
+		});
+		recordRateLimitInfo({
+			limit: 2500,
+			remaining: 2498,
+			complexity: { cost: 30, limit: 2_000_000, remaining: 1_999_950 },
+			endpoints: { Issue: { limit: 1000, remaining: 998 } },
+		});
+		outputSuccess({ id: "DEV-1" });
+
+		const parsed = JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim());
+		expect(parsed._rateLimit).toMatchObject({
+			remaining: 2498,
+			minimumRemaining: 2498,
+			observedRequests: 2,
+			complexity: {
+				cost: 30,
+				totalCost: 50,
+				remaining: 1_999_950,
+				minimumRemaining: 1_999_950,
+			},
+			endpoints: {
+				Issue: {
+					remaining: 998,
+					minimumRemaining: 998,
+					observedRequests: 2,
+				},
+			},
+		});
+	});
+
+	it("routes rate-limit metadata to stderr for bare-array output", () => {
+		recordRateLimitInfo({ limit: 2500, remaining: 2498 });
+		outputSuccess([1, 2, 3]);
+
+		expect(JSON.parse((stdoutSpy.mock.calls[0][0] as string).trim())).toEqual([
+			1, 2, 3,
+		]);
+		const stderr = stderrSpy.mock.calls
+			.map((call: unknown[]) => call[0] as string)
+			.join("");
+		expect(stderr).toContain("_rateLimit: 2498/2500 requests remaining");
 	});
 });
 
@@ -585,6 +675,155 @@ describe("handleAsyncCommand", () => {
 		expect(parsed.error).toBe("test failure");
 		expect(parsed.activeProfile).toEqual(expect.any(String));
 		expect(exitSpy).toHaveBeenCalledWith(1);
+	});
+
+	// DEV-7987: the flattened envelope is what kept a shell-out caller from
+	// telling a retryable rate limit from a permanent schema error.
+	it("publishes errorDetail for a classified Linear GraphQL failure", async () => {
+		recordRateLimitInfo({
+			limit: 2500,
+			remaining: 0,
+			resetAt: "2026-08-11T10:00:00.000Z",
+		});
+		const fn = vi.fn().mockRejectedValue(
+			new LinearGraphQLError("Ratelimit exceeded", {
+				httpStatus: 429,
+				code: "RATELIMITED",
+				retryable: true,
+			}),
+		);
+		await handleAsyncCommand(fn)();
+		const parsed = JSON.parse(stdoutSpy.mock.calls[0]?.[0] as string);
+		expect(parsed.error).toBe("Ratelimit exceeded");
+		expect(parsed.errorDetail).toEqual({
+			httpStatus: 429,
+			code: "RATELIMITED",
+			retryable: true,
+		});
+		expect(parsed._rateLimit).toMatchObject({
+			limit: 2500,
+			remaining: 0,
+			observedRequests: 1,
+		});
+	});
+
+	it("marks a permanent GraphQL failure non-retryable in the same shape", async () => {
+		const fn = vi.fn().mockRejectedValue(
+			new LinearGraphQLError("Cannot query field 'nope'", {
+				httpStatus: 400,
+				code: "GRAPHQL_VALIDATION_FAILED",
+				retryable: false,
+			}),
+		);
+		await handleAsyncCommand(fn)();
+		const parsed = JSON.parse(stdoutSpy.mock.calls[0]?.[0] as string);
+		expect(parsed.errorDetail).toEqual({
+			httpStatus: 400,
+			code: "GRAPHQL_VALIDATION_FAILED",
+			retryable: false,
+		});
+	});
+
+	it("publishes a pre-request quota deadline without fabricating an HTTP response", async () => {
+		await handleAsyncCommand(async () => {
+			throw new RateLimitAdmissionRefusal(
+				"local quota refusal",
+				"2026-09-11T09:44:05.282Z",
+			);
+		})();
+		const parsed = JSON.parse(stdoutSpy.mock.calls[0]?.[0] as string);
+		expect(parsed.errorDetail).toEqual({
+			httpStatus: null,
+			code: "RATELIMITED",
+			retryable: true,
+			resetAt: "2026-09-11T09:44:05.282Z",
+		});
+		expect(parsed).not.toHaveProperty("_rateLimit");
+		expect(exitSpy).toHaveBeenCalledWith(1);
+	});
+
+	it("omits errorDetail entirely for an unclassified error", async () => {
+		// Absence is the signal for "this was not a Linear GraphQL failure":
+		// emitting a fabricated `retryable: false` here would let an argv or
+		// filesystem error masquerade as a verdict about Linear.
+		const fn = vi.fn().mockRejectedValue(new Error("File not found: q.gql"));
+		await handleAsyncCommand(fn)();
+		const parsed = JSON.parse(stdoutSpy.mock.calls[0]?.[0] as string);
+		expect(parsed.error).toBe("File not found: q.gql");
+		expect("errorDetail" in parsed).toBe(false);
+	});
+
+	// DEV-14754: the envelope described only the outermost error, so any
+	// wrapper that added context took the reason — and the retry verdict —
+	// with it.
+	it("publishes the cause chain below a wrapped failure", async () => {
+		const fn = vi.fn().mockRejectedValue(
+			new Error("creating issue failed", {
+				cause: new Error("team not found"),
+			}),
+		);
+		await handleAsyncCommand(fn)();
+		const parsed = JSON.parse(stdoutSpy.mock.calls[0]?.[0] as string);
+		expect(parsed.error).toBe("creating issue failed");
+		expect(parsed.cause).toBe("team not found");
+	});
+
+	it("renders a multi-level chain as one line", async () => {
+		const fn = vi.fn().mockRejectedValue(
+			new Error("command failed", {
+				cause: new Error("request failed", {
+					cause: new Error("socket hang up"),
+				}),
+			}),
+		);
+		await handleAsyncCommand(fn)();
+		const parsed = JSON.parse(stdoutSpy.mock.calls[0]?.[0] as string);
+		expect(parsed.cause).toBe("request failed: socket hang up");
+	});
+
+	it("omits cause entirely for an error that has none", async () => {
+		// Every existing consumer reads this envelope; an error without a cause
+		// must produce byte-identical output to before.
+		const fn = vi.fn().mockRejectedValue(new Error("plain failure"));
+		await handleAsyncCommand(fn)();
+		const parsed = JSON.parse(stdoutSpy.mock.calls[0]?.[0] as string);
+		expect("cause" in parsed).toBe(false);
+	});
+
+	it("publishes errorDetail for a wrapped Linear GraphQL failure", async () => {
+		const fn = vi.fn().mockRejectedValue(
+			new Error("claiming issue failed", {
+				cause: new LinearGraphQLError("Ratelimit exceeded", {
+					httpStatus: 429,
+					code: "RATELIMITED",
+					retryable: true,
+				}),
+			}),
+		);
+		await handleAsyncCommand(fn)();
+		const parsed = JSON.parse(stdoutSpy.mock.calls[0]?.[0] as string);
+		expect(parsed.error).toBe("claiming issue failed");
+		expect(parsed.cause).toBe("Ratelimit exceeded");
+		expect(parsed.errorDetail).toEqual({
+			httpStatus: 429,
+			code: "RATELIMITED",
+			retryable: true,
+		});
+	});
+
+	it("redacts a Linear token embedded in a cause", async () => {
+		// The cause is printed to the same streams as the message, so it needs
+		// the same treatment: a wrapper that quotes a provider body can carry a
+		// token one link down.
+		const fn = vi.fn().mockRejectedValue(
+			new Error("request failed", {
+				cause: new Error("Bearer lin_api_abcdefghijklmnop1234567890 rejected"),
+			}),
+		);
+		await handleAsyncCommand(fn)();
+		const parsed = JSON.parse(stdoutSpy.mock.calls[0]?.[0] as string);
+		expect(parsed.cause).not.toContain("lin_api_abcdefghijklmnop1234567890");
+		expect(parsed.cause).toContain("lin_api_***REDACTED***");
 	});
 
 	it("wraps non-Error throws in Error", async () => {

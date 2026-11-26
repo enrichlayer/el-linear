@@ -115,6 +115,23 @@ export interface ElLinearConfig {
 		resolverTimeoutMs?: number;
 	};
 	/**
+	 * Optional label-advisor hook (DEV-10372). `command` is an argv array that
+	 * `issues create` runs with the proposed issue as JSON on stdin
+	 * (`{team, project, title, description, labels, state}`); any labels it
+	 * prints are added to the issue and reported. `--no-label-advisor` skips it
+	 * for one create. Fail-closed on labels: any advisor failure warns and
+	 * creates the issue without extra labels. See `label-advisor.ts`.
+	 *
+	 * Like `identity.resolver`, this names a binary el-linear spawns, so it is
+	 * honored only from personal config or `EL_LINEAR_LABEL_ADVISOR` — never
+	 * from the shared team layer.
+	 */
+	labelAdvisor?: {
+		command?: string[];
+		/** Milliseconds before the advisor is treated as failed (default 5000). */
+		timeoutMs?: number;
+	};
+	/**
 	 * Term-enforcement rules. Each rule has a canonical form and a list of
 	 * rejected forms; rejected forms in issue titles/descriptions are flagged
 	 * (or thrown on, in strict mode) with a hint to use the canonical form.
@@ -205,6 +222,19 @@ export interface ElLinearConfig {
 		intakeDecisionGate?: false | "warn" | "block";
 		/** Headers accepted for the intake section. Defaults to `["Intake decision"]`. */
 		intakeSectionHeaders?: string[];
+		/**
+		 * OPT-IN consent-label receipt gate (DEV-10372). When `true`, applying a
+		 * consent label (see `consentLabels`) is refused unless the issue
+		 * description carries exactly one valid `el-intake-decision:v1`
+		 * automatic-implementation receipt for that issue. `issues create`
+		 * always refuses an explicit consent label (the receipt must name an
+		 * issue that does not exist yet) and drops an advisor-proposed one with
+		 * a warning. Independent of `enabled` and `--skip-validation`. See
+		 * `consent-receipt.ts`.
+		 */
+		consentReceiptGate?: boolean;
+		/** Labels treated as consent for the receipt gate. Defaults to `["bot"]`. */
+		consentLabels?: string[];
 	};
 	/**
 	 * Optional override for the Linear workspace URL key (the part after
@@ -439,6 +469,9 @@ export function loadConfig(): ElLinearConfig {
 	// into their personal config at setup time; that keeps the decision with the
 	// machine's owner instead of with whoever can land a commit upstream.
 	delete teamRaw.identity;
+	// Same reasoning for the label advisor (DEV-10372): it is a binary el-linear
+	// spawns on every `issues create`, so only the operator's own files choose it.
+	delete teamRaw.labelAdvisor;
 
 	// Merge order: defaults → team config → personal config.
 	// Arrays (terms, defaultLabels, etc.) are concatenated so personal entries

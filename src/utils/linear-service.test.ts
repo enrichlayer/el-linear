@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { OAuthState } from "../auth/oauth-storage.js";
+import { readGraphQLErrorDetail } from "./linear-graphql-error.js";
 
 const mockTeams = vi.fn();
 const mockTeam = vi.fn();
@@ -13,9 +15,11 @@ const mockProjectStatuses = vi.fn();
 const mockIssueLabels = vi.fn();
 const mockIssueLabel = vi.fn();
 const mockCreateComment = vi.fn();
+const mockRawRequest = vi.fn();
 
 vi.mock("@linear/sdk", () => ({
 	LinearClient: class MockLinearClient {
+		client = { rawRequest: mockRawRequest };
 		teams = mockTeams;
 		team = mockTeam;
 		users = mockUsers;
@@ -32,7 +36,14 @@ vi.mock("@linear/sdk", () => ({
 	},
 }));
 
-const { LinearService } = await import("./linear-service.js");
+const {
+	LinearService,
+	instrumentClientCredentialsRenewal,
+	instrumentLinearGraphQLErrorClassification,
+} = await import("./linear-service.js");
+const { createClientCredentialsTokenRenewal } = await import(
+	"./graphql-service.js"
+);
 
 // Reset every mock before each test so tests are order-independent: call
 // logs, queued `mockResolvedValueOnce` entries, AND base implementations.
@@ -45,6 +56,153 @@ beforeEach(() => {
 });
 
 describe("LinearService", () => {
+	describe("SDK GraphQL error classification", () => {
+		it.each([
+			{
+				name: "HTTP 429",
+				error: { status: 429, message: "Ratelimit exceeded" },
+				expected: { httpStatus: 429, code: null, retryable: true },
+			},
+			{
+				name: "permanent HTTP 403",
+				error: { status: 403, message: "Forbidden" },
+				expected: { httpStatus: 403, code: null, retryable: false },
+			},
+			{
+				name: "RATELIMITED GraphQL code",
+				error: {
+					status: 400,
+					message: "Rate limited",
+					raw: {
+						response: {
+							errors: [{ extensions: { code: "RATELIMITED" } }],
+						},
+					},
+				},
+				expected: {
+					httpStatus: 400,
+					code: "RATELIMITED",
+					retryable: true,
+				},
+			},
+			{
+				name: "no-response transport failure",
+				error: new Error("fetch failed"),
+				expected: { httpStatus: null, code: null, retryable: true },
+			},
+		])(
+			"classifies $name at the shared SDK request boundary",
+			async ({ error, expected }) => {
+				const sdk = {
+					_request: vi.fn().mockRejectedValue(error),
+				};
+				instrumentLinearGraphQLErrorClassification(sdk as never);
+
+				let thrown: unknown;
+				try {
+					await sdk._request("query Viewer { viewer { id } }");
+				} catch (caught) {
+					thrown = caught;
+				}
+
+				expect(readGraphQLErrorDetail(thrown)).toEqual(expected);
+				expect((thrown as Error).message).toBe(error.message);
+			},
+		);
+
+		it("leaves local not-found failures unclassified", async () => {
+			mockIssues.mockResolvedValue({ nodes: [] });
+			const service = new LinearService({ apiKey: "token" });
+
+			let thrown: unknown;
+			try {
+				await service.resolveIssueId("DEV-999");
+			} catch (caught) {
+				thrown = caught;
+			}
+
+			expect(readGraphQLErrorDetail(thrown)).toBeNull();
+			expect((thrown as Error).message).toContain('Issue "DEV-999" not found');
+		});
+	});
+
+	it("renews the SDK transport once after HTTP 401", async () => {
+		const request = vi
+			.fn()
+			.mockRejectedValueOnce({ status: 401 })
+			.mockResolvedValueOnce({ nodes: [{ id: "team" }] });
+		const setHeader = vi.fn();
+		const renewAccessToken = vi.fn().mockResolvedValue("renewed-token");
+		const client = { client: { request, setHeader } };
+		instrumentClientCredentialsRenewal(client as never, renewAccessToken);
+
+		await expect(client.client.request("query")).resolves.toEqual({
+			nodes: [{ id: "team" }],
+		});
+		expect(renewAccessToken).toHaveBeenCalledTimes(1);
+		expect(setHeader).toHaveBeenCalledWith(
+			"authorization",
+			"Bearer renewed-token",
+		);
+	});
+
+	it("renews the SDK transport from the latest state on two separate 401s", async () => {
+		const initial: OAuthState = {
+			v: 1,
+			grantType: "client_credentials",
+			actor: "app",
+			clientId: "client-id",
+			clientSecret: "client-secret",
+			accessToken: "token-1",
+			tokenType: "Bearer",
+			scopes: ["read"],
+			expiresAt: 1,
+			obtainedAt: 1,
+		};
+		const second = { ...initial, accessToken: "token-2", obtainedAt: 2 };
+		const third = { ...initial, accessToken: "token-3", obtainedAt: 3 };
+		const renew = vi
+			.fn()
+			.mockResolvedValueOnce(second)
+			.mockResolvedValueOnce(third);
+		const renewAccessToken = createClientCredentialsTokenRenewal(
+			initial,
+			renew,
+		);
+		const request = vi
+			.fn()
+			.mockRejectedValueOnce({ status: 401 })
+			.mockResolvedValueOnce({ nodes: [{ id: "first" }] })
+			.mockRejectedValueOnce({ status: 401 })
+			.mockResolvedValueOnce({ nodes: [{ id: "second" }] });
+		const setHeader = vi.fn();
+		const client = { client: { request, setHeader } };
+		instrumentClientCredentialsRenewal(client as never, renewAccessToken);
+
+		await expect(client.client.request("query First")).resolves.toEqual({
+			nodes: [{ id: "first" }],
+		});
+		await expect(client.client.request("query Second")).resolves.toEqual({
+			nodes: [{ id: "second" }],
+		});
+		expect(renew).toHaveBeenNthCalledWith(1, initial, {
+			forceOAuthRenewal: true,
+		});
+		expect(renew).toHaveBeenNthCalledWith(2, second, {
+			forceOAuthRenewal: true,
+		});
+		expect(setHeader).toHaveBeenNthCalledWith(
+			1,
+			"authorization",
+			"Bearer token-2",
+		);
+		expect(setHeader).toHaveBeenNthCalledWith(
+			2,
+			"authorization",
+			"Bearer token-3",
+		);
+	});
+
 	describe("resolveIssueId", () => {
 		it("returns UUID directly", async () => {
 			const service = new LinearService({ apiKey: "token" });
@@ -218,14 +376,24 @@ describe("LinearService", () => {
 		});
 
 		it("resolves by name", async () => {
-			mockProjects.mockResolvedValue({ nodes: [{ id: "project-uuid" }] });
+			mockRawRequest.mockResolvedValue({
+				data: {
+					projects: {
+						nodes: [
+							{ id: "project-uuid", name: "My Project", teams: { nodes: [] } },
+						],
+					},
+				},
+			});
 			const service = new LinearService({ apiKey: "token" });
 			const result = await service.resolveProjectId("My Project");
 			expect(result).toBe("project-uuid");
 		});
 
 		it("throws when project not found", async () => {
-			mockProjects.mockResolvedValue({ nodes: [] });
+			mockRawRequest.mockResolvedValue({
+				data: { projects: { nodes: [] } },
+			});
 			const service = new LinearService({ apiKey: "token" });
 			await expect(service.resolveProjectId("Nonexistent")).rejects.toThrow(
 				'Project "Nonexistent" not found',
@@ -233,32 +401,46 @@ describe("LinearService", () => {
 		});
 
 		it("resolves a Linear project URL via slugId filter (includeArchived)", async () => {
-			mockProjects.mockResolvedValue({ nodes: [{ id: "slug-uuid" }] });
+			mockRawRequest.mockResolvedValue({
+				data: {
+					projects: {
+						nodes: [{ id: "slug-uuid", name: "Tools", teams: { nodes: [] } }],
+					},
+				},
+			});
 			const service = new LinearService({ apiKey: "token" });
 			const result = await service.resolveProjectId(
 				"https://linear.app/verticalint/project/tools-and-standardization-40815d9beb16/overview",
 			);
 			expect(result).toBe("slug-uuid");
-			expect(mockProjects).toHaveBeenCalledWith(
+			expect(mockRawRequest).toHaveBeenCalledWith(
+				expect.any(String),
 				expect.objectContaining({
 					filter: {
 						slugId: { eq: "tools-and-standardization-40815d9beb16" },
 					},
-					// URLs in the wild commonly point at archived projects; the
-					// slugId path must resolve them so the caller can inspect.
 					includeArchived: true,
 				}),
 			);
 		});
 
 		it("resolves a bare slug-id via slugId filter", async () => {
-			mockProjects.mockResolvedValue({ nodes: [{ id: "slug-uuid-2" }] });
+			mockRawRequest.mockResolvedValue({
+				data: {
+					projects: {
+						nodes: [
+							{ id: "slug-uuid-2", name: "Customer", teams: { nodes: [] } },
+						],
+					},
+				},
+			});
 			const service = new LinearService({ apiKey: "token" });
 			const result = await service.resolveProjectId(
 				"customer-api-abc123def456",
 			);
 			expect(result).toBe("slug-uuid-2");
-			expect(mockProjects).toHaveBeenCalledWith(
+			expect(mockRawRequest).toHaveBeenCalledWith(
+				expect.any(String),
 				expect.objectContaining({
 					filter: { slugId: { eq: "customer-api-abc123def456" } },
 				}),
@@ -270,14 +452,15 @@ describe("LinearService", () => {
 			// slugId. We assert the resolver doesn't silently fall back to a
 			// name-based eqIgnoreCase query (which would never match a URL) —
 			// the last and only filter shape sent for this call is the slugId one.
-			mockProjects.mockResolvedValue({ nodes: [] });
+			mockRawRequest.mockResolvedValue({ data: { projects: { nodes: [] } } });
 			const service = new LinearService({ apiKey: "token" });
 			await expect(
 				service.resolveProjectId(
 					"https://linear.app/x/project/missing-aaaaaaaaaaaa/overview",
 				),
 			).rejects.toThrow("not found");
-			expect(mockProjects).toHaveBeenLastCalledWith(
+			expect(mockRawRequest).toHaveBeenLastCalledWith(
+				expect.any(String),
 				expect.objectContaining({
 					filter: { slugId: { eq: "missing-aaaaaaaaaaaa" } },
 				}),
@@ -295,18 +478,30 @@ describe("LinearService", () => {
 				mockTeams.mockResolvedValueOnce({
 					nodes: [{ id: "uuid-dev", key: "DEV", name: "Dev" }],
 				});
-				const mockTeamProjects = vi.fn().mockResolvedValueOnce({
-					nodes: [{ id: "shared-id-dev" }],
+				mockRawRequest.mockResolvedValueOnce({
+					data: {
+						team: {
+							projects: {
+								nodes: [
+									{
+										id: "shared-id-dev",
+										name: "Shared Name",
+										teams: { nodes: [] },
+									},
+								],
+							},
+						},
+					},
 				});
-				mockTeam.mockResolvedValueOnce({ projects: mockTeamProjects });
 				const service = new LinearService({ apiKey: "token" });
 				const result = await service.resolveProjectId("Shared Name", "DEV");
 				expect(result).toBe("shared-id-dev");
-				expect(mockTeam).toHaveBeenCalledWith("uuid-dev");
-				expect(mockTeamProjects).toHaveBeenLastCalledWith(
+				expect(mockRawRequest).toHaveBeenLastCalledWith(
+					expect.any(String),
 					expect.objectContaining({
 						filter: { name: { eqIgnoreCase: "Shared Name" } },
-						first: 5,
+						teamId: "uuid-dev",
+						teamScoped: true,
 					}),
 				);
 				// The invalid shape must not be sent at all.
@@ -321,21 +516,27 @@ describe("LinearService", () => {
 
 			it("throws ambiguous when multiple projects share a name and no --team is set", async () => {
 				// Pretend both DEV and INF have a project called "Shared Name".
-				mockProjects.mockResolvedValueOnce({
-					nodes: [
-						{
-							id: "shared-id-dev",
-							name: "Shared Name",
-							teams: () =>
-								Promise.resolve({ nodes: [{ id: "uuid-dev", key: "DEV" }] }),
+				mockRawRequest.mockResolvedValueOnce({
+					data: {
+						projects: {
+							nodes: [
+								{
+									id: "shared-id-dev",
+									name: "Shared Name",
+									teams: {
+										nodes: [{ id: "uuid-dev", key: "DEV", name: "Dev" }],
+									},
+								},
+								{
+									id: "shared-id-inf",
+									name: "Shared Name",
+									teams: {
+										nodes: [{ id: "uuid-inf", key: "INF", name: "Infra" }],
+									},
+								},
+							],
 						},
-						{
-							id: "shared-id-inf",
-							name: "Shared Name",
-							teams: () =>
-								Promise.resolve({ nodes: [{ id: "uuid-inf", key: "INF" }] }),
-						},
-					],
+					},
 				});
 				const service = new LinearService({ apiKey: "token" });
 				await expect(service.resolveProjectId("Shared Name")).rejects.toThrow(
@@ -348,8 +549,8 @@ describe("LinearService", () => {
 					nodes: [{ id: "uuid-dev", key: "DEV", name: "Dev" }],
 				});
 				// DEV-5325: team-scoped lookups go through Team.projects.
-				mockTeam.mockResolvedValueOnce({
-					projects: vi.fn().mockResolvedValueOnce({ nodes: [] }),
+				mockRawRequest.mockResolvedValueOnce({
+					data: { team: { projects: { nodes: [] } } },
 				});
 				const service = new LinearService({ apiKey: "token" });
 				await expect(
@@ -428,7 +629,13 @@ describe("LinearService", () => {
 		});
 
 		it("resolves URL inputs to a UUID via slugId", async () => {
-			mockProjects.mockResolvedValue({ nodes: [{ id: "resolved-uuid" }] });
+			mockRawRequest.mockResolvedValue({
+				data: {
+					projects: {
+						nodes: [{ id: "resolved-uuid", name: "Foo", teams: { nodes: [] } }],
+					},
+				},
+			});
 			const service = new LinearService({ apiKey: "token" });
 			const result = await service.normalizeProjectInput(
 				"https://linear.app/x/project/foo-1234567890ab/overview",
@@ -567,54 +774,184 @@ describe("LinearService", () => {
 	});
 });
 
-// DEV-5325: `--team` scoping must go through Team.projects — ProjectFilter
-// rejects a `teams` relation filter against the live schema, so the pre-fix
-// `client.projects({ filter: { teams: { some: … } } })` shape GraphQL-errored
-// in production ("Field \"teams\" is not defined by type \"ProjectFilter\"").
-describe("getProjects team scoping (DEV-5325)", () => {
+describe("bounded catalog queries", () => {
 	const projectNode = {
 		id: "p1",
 		name: "Proj",
 		description: "",
 		state: "started",
 		progress: 0,
-		teams: () => Promise.resolve({ nodes: [] }),
-		lead: Promise.resolve(undefined),
+		teams: { nodes: [{ id: "t1", key: "DEV", name: "Dev" }] },
+		lead: { id: "u1", name: "Alice" },
+		createdAt: "2026-08-01T00:00:00Z",
+		updatedAt: "2026-08-02T00:00:00Z",
+		targetDate: null,
 	};
 
-	it("uses the team's projects connection when teamId is set", async () => {
-		const mockTeamProjects = vi.fn().mockResolvedValueOnce({
-			nodes: [projectNode],
-			pageInfo: { hasNextPage: false },
+	it("selects project relationships in the same team-scoped request", async () => {
+		mockRawRequest.mockResolvedValueOnce({
+			data: {
+				team: {
+					projects: {
+						nodes: [projectNode],
+						pageInfo: { hasNextPage: false, endCursor: null },
+					},
+				},
+			},
 		});
-		mockTeam.mockResolvedValueOnce({ projects: mockTeamProjects });
 		const service = new LinearService({ apiKey: "token" });
 		const result = await service.getProjects(10, { teamId: "uuid-dev" });
-		expect(result).toHaveLength(1);
-		expect(mockTeam).toHaveBeenCalledWith("uuid-dev");
-		expect(mockTeamProjects).toHaveBeenCalledWith(
-			expect.objectContaining({ first: 10, includeArchived: false }),
-		);
-		// The invalid ProjectFilter.teams shape must never be sent.
-		const sentFilter = mockTeamProjects.mock.calls[0][0].filter;
-		expect(sentFilter?.teams).toBeUndefined();
-		expect(mockProjects).not.toHaveBeenCalledWith(
+		expect(result[0]).toMatchObject({
+			teams: [{ key: "DEV" }],
+			lead: { name: "Alice" },
+		});
+		expect(mockRawRequest).toHaveBeenCalledTimes(1);
+		expect(mockRawRequest).toHaveBeenCalledWith(
+			expect.stringContaining("team(id: $teamId)"),
 			expect.objectContaining({
-				filter: expect.objectContaining({ teams: expect.anything() }),
+				teamId: "uuid-dev",
+				teamScoped: true,
+				first: 10,
 			}),
 		);
 	});
 
-	it("uses the global projects connection without teamId", async () => {
-		mockProjects.mockResolvedValueOnce({
-			nodes: [projectNode],
-			pageInfo: { hasNextPage: false },
+	it("paginates --all by connection pages rather than project count", async () => {
+		mockRawRequest
+			.mockResolvedValueOnce({
+				data: {
+					projects: {
+						nodes: [projectNode],
+						pageInfo: { hasNextPage: true, endCursor: "next" },
+					},
+				},
+			})
+			.mockResolvedValueOnce({
+				data: {
+					projects: {
+						nodes: [{ ...projectNode, id: "p2" }],
+						pageInfo: { hasNextPage: false, endCursor: null },
+					},
+				},
+			});
+		const service = new LinearService({ apiKey: "token" });
+		const result = await service.getProjects(0);
+		expect(result.map((project) => project.id)).toEqual(["p1", "p2"]);
+		expect(mockRawRequest).toHaveBeenLastCalledWith(
+			expect.any(String),
+			expect.objectContaining({ after: "next", first: 250 }),
+		);
+	});
+
+	it("selects label parent and team without relationship fetches", async () => {
+		mockRawRequest.mockResolvedValueOnce({
+			data: {
+				issueLabels: {
+					nodes: [
+						{
+							id: "l1",
+							name: "bug",
+							color: "#f00",
+							isGroup: false,
+							parent: { id: "g1", name: "Type" },
+							team: { id: "t1", key: "DEV", name: "Dev" },
+						},
+					],
+				},
+			},
 		});
 		const service = new LinearService({ apiKey: "token" });
-		const result = await service.getProjects(10, {});
-		expect(result).toHaveLength(1);
-		expect(mockProjects).toHaveBeenCalledWith(
-			expect.objectContaining({ first: 10 }),
+		await expect(service.getLabels()).resolves.toEqual({
+			labels: [
+				expect.objectContaining({
+					group: { id: "g1", name: "Type" },
+					team: { id: "t1", key: "DEV", name: "Dev" },
+				}),
+			],
+		});
+		expect(mockRawRequest).toHaveBeenCalledTimes(1);
+	});
+
+	it("selects each cycle team in the cycle-list request", async () => {
+		mockRawRequest.mockResolvedValueOnce({
+			data: {
+				cycles: {
+					nodes: [
+						{
+							id: "c1",
+							name: "Cycle 1",
+							number: 1,
+							startsAt: null,
+							endsAt: null,
+							isActive: true,
+							isPrevious: false,
+							isNext: false,
+							progress: 0.5,
+							issueCountHistory: [1],
+							team: { id: "t1", key: "DEV", name: "Dev" },
+						},
+					],
+				},
+			},
+		});
+		const service = new LinearService({ apiKey: "token" });
+		const cycles = await service.getCycles(undefined, true, 20);
+		expect(cycles[0]).toMatchObject({ team: { key: "DEV" } });
+		expect(mockRawRequest).toHaveBeenCalledTimes(1);
+		expect(mockRawRequest).toHaveBeenCalledWith(
+			expect.stringContaining("team { id key name }"),
+			expect.objectContaining({
+				filter: { isActive: { eq: true } },
+				first: 20,
+			}),
 		);
+	});
+
+	it("selects cycle team and issue relationships in one detail request", async () => {
+		mockRawRequest.mockResolvedValueOnce({
+			data: {
+				cycle: {
+					id: "c1",
+					name: "Cycle 1",
+					number: 1,
+					startsAt: "2026-08-01T00:00:00Z",
+					endsAt: "2026-08-14T00:00:00Z",
+					isActive: true,
+					isPrevious: false,
+					isNext: false,
+					progress: 0.5,
+					issueCountHistory: [1],
+					team: { id: "t1", key: "DEV", name: "Dev" },
+					issues: {
+						nodes: [
+							{
+								id: "i1",
+								identifier: "DEV-1",
+								url: "https://linear.app/issue/DEV-1",
+								title: "Issue",
+								description: null,
+								priority: 2,
+								estimate: null,
+								createdAt: "2026-08-01T00:00:00Z",
+								updatedAt: "2026-08-02T00:00:00Z",
+								state: { id: "s1", name: "Todo" },
+								assignee: null,
+								team: { id: "t1", key: "DEV", name: "Dev" },
+								project: { id: "p1", name: "Tools" },
+								labels: { nodes: [{ id: "l1", name: "bug" }] },
+							},
+						],
+					},
+				},
+			},
+		});
+		const service = new LinearService({ apiKey: "token" });
+		const detail = await service.getCycleById("c1", 50);
+		expect(detail.issues[0]).toMatchObject({
+			identifier: "DEV-1",
+			state: { name: "Todo" },
+			labels: [{ name: "bug" }],
+		});
+		expect(mockRawRequest).toHaveBeenCalledTimes(1);
 	});
 });

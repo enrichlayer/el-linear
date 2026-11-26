@@ -24,10 +24,37 @@ import fs from "node:fs";
  */
 export function readTextInputFile(filePath: string, label: string): string {
 	if (filePath === "-") {
-		return fs.readFileSync(0, "utf8").trim();
+		return readStdinSync().trim();
 	}
 	if (!fs.existsSync(filePath)) {
 		throw new Error(`${label} file not found: ${filePath}`);
 	}
 	return fs.readFileSync(filePath, "utf8").trim();
+}
+
+/** Nonblocking stdin can temporarily have no bytes without reaching EOF. */
+function readStdinSync(): string {
+	const buffer = Buffer.alloc(65536);
+	const wait = new Int32Array(new SharedArrayBuffer(4));
+	const chunks: Buffer[] = [];
+	for (;;) {
+		let length: number;
+		try {
+			length = fs.readSync(0, buffer, 0, buffer.length, null);
+		} catch (error) {
+			const code =
+				error !== null && typeof error === "object"
+					? (error as NodeJS.ErrnoException).code
+					: undefined;
+			if (code === "EAGAIN" || code === "EWOULDBLOCK") {
+				Atomics.wait(wait, 0, 0, 10);
+				continue;
+			}
+			throw error;
+		}
+		if (length === 0) break;
+		chunks.push(Buffer.from(buffer.subarray(0, length)));
+	}
+	// Decode after joining: one Unicode character may span multiple pipe reads.
+	return Buffer.concat(chunks).toString("utf8");
 }

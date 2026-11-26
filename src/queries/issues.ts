@@ -541,6 +541,19 @@ export const GET_ISSUE_TEAM_QUERY = `
   }
 `;
 
+// DEV-10603: an update addressed by issue UUID skips the batch resolver's
+// identifier lookup, so it needs this query for the issue's current labels.
+// Otherwise "adding" mode merges into an empty list and overwrites them.
+export const GET_ISSUE_UPDATE_CONTEXT_QUERY = `
+  query GetIssueUpdateContext($issueId: String!) {
+    issue(id: $issueId) {
+      id
+      team { id }
+      labels { nodes { id } }
+    }
+  }
+`;
+
 export const GET_ISSUE_START_CONTEXT_QUERY = `
   query GetIssueStartContext($id: String!) {
     issue(id: $id) {
@@ -612,6 +625,19 @@ export const ISSUE_RELATION_CREATE_MUTATION = `
   }
 `;
 
+/**
+ * DEV-14607 — remove one relation by id. `issues relate` could create a
+ * relation but nothing could retract one, so a relation recorded from an
+ * analysis that later turned out to be wrong had to stay on the issue.
+ */
+export const ISSUE_RELATION_DELETE_MUTATION = `
+  mutation IssueRelationDelete($id: String!) {
+    issueRelationDelete(id: $id) {
+      success
+    }
+  }
+`;
+
 export const GET_ISSUE_RELATIONS_QUERY = `
   query GetIssueRelations($id: String!) {
     issue(id: $id) {
@@ -648,6 +674,40 @@ export const GET_ISSUE_RELATIONS_QUERY = `
             team { id key name }
           }
         }
+      }
+    }
+  }
+`;
+
+/**
+ * Bounded relation enumeration. SDK 88 exposes peers and their state through
+ * lazy IssueRelation/Issue getters; selecting both directions here avoids
+ * per-edge/peer/state requests while retaining explicit connection cursors.
+ * The older query remains for existing mutation preflights only.
+ */
+export const GET_ISSUE_RELATIONS_PAGE_QUERY = `
+  query GetIssueRelationsPage($id: String!, $first: Int!, $outAfter: String, $inAfter: String, $outgoing: Boolean!, $incoming: Boolean!) {
+    issue(id: $id) {
+      id identifier title
+      relations(first: $first, after: $outAfter) @include(if: $outgoing) {
+        nodes {
+          id type
+          relatedIssue {
+            id identifier title state { id name } priority
+            assignee { id name } team { id key name }
+          }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+      inverseRelations(first: $first, after: $inAfter) @include(if: $incoming) {
+        nodes {
+          id type
+          issue {
+            id identifier title state { id name } priority
+            assignee { id name } team { id key name }
+          }
+        }
+        pageInfo { hasNextPage endCursor }
       }
     }
   }

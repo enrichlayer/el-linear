@@ -8,6 +8,9 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Features
 
+* **issues:** accept `issues create --issue-id <uuid-v4>` for caller-selected stable identity through the existing validation and creation flow; invalid IDs are rejected before provider mutations (DEV-11113).
+
+* **auth:** support optional OAuth app credentials and client-credentials renewal while preserving explicit/API-key precedence; coordinate shared local or distributed request headroom, and batch project/label/cycle catalog reads to reduce request and complexity pressure (DEV-7874)
 * **issues:** add an opt-in intake-decision gate that requires explicit need, value, ownership, placement, and a `PROCEED` decision before creation; `--skip-validation` cannot silently bypass it (DEV-6163)
 * **issues:** add an opt-in create-time goal-completion gate — checks the description for a falsifiable "Done when" / acceptance-criteria section, `warn`/`block` modes via `validation.goalCompletionGate`, bypass with `--allow-vague-goal` (DEV-5920)
 * **projects:** add `projects update --name/--description/--content` for editing project metadata without raw GraphQL (DEV-5749)
@@ -15,6 +18,14 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Bug Fixes
 
+* **issues:** exhaust both relation connections within fixed page, row, byte and time bounds for `issues related` / `relations` and `read --with relations`. Successful JSON adds `meta.relations_complete: true` (per issue for batched reads); incomplete enumeration, invalid rows or missing peers fail nonzero with `meta.relations_complete: false`, instead of silently truncating/dropping links or treating a missing include as empty. Existing formatted rows and mutation preflights are unchanged (DEV-14039).
+
+* **comments:** handle null human authors and retain integration/external author names in JSON and summaries.
+* **input:** preserve delayed nonblocking stdin and UTF-8 split across reads (DEV-11118).
+
+* **graphql:** publish typed pre-request quota refusals and known reset/probe deadlines in `errorDetail`, preserving configured headroom and avoiding immediate retries (DEV-9503).
+* **graphql:** classify SDK and raw GraphQL failures by HTTP status and extension code, preserving permanent failures separately from transient errors in the additive `errorDetail` output field (DEV-7987, #302); declare the request printer as a runtime dependency for production installs (DEV-7874).
+* **graphql:** stop immediate retries after server rate limits, refuse locally before configured shared/distributed headroom is consumed, preserve preflight refusals separately from possibly-committed mutations, report request/endpoint/complexity reset budgets, and expose the latest budget as `_rateLimit` output metadata (DEV-7874)
 * **config:** accept any ordinary separator between an intake verdict and its reason, not only an em dash. The separator class was `[-—:;,]` plus `because`, so `Yes, <reason>` passed while `Yes. <reason>` — the most natural form when the reason is a full sentence — was rejected despite carrying both the verdict and the reason the gate exists to require. The verdict-plus-reason requirement is unchanged: a bare `Yes`, `Yes.`, or `Yes —` still fails. The `no-judgment` message no longer names one dash as though it were the requirement ("it is not an explicit `Yes — <reason>` judgment") and instead names the actual defect — the verdict is there, but no reason follows it (DEV-7602)
 * **config:** read intake-decision fields whose labels are bolded or italicized — `* **Needed:** …` previously left the closing `**` at the head of the value, so a complete, well-reasoned block was rejected, and the message blamed the content ("empty, a placeholder, or lacks an explicit yes-and-reason judgment") for what was a formatting mismatch. Field failures are now diagnosed specifically: an unreadable line, an absent field, an empty value, a placeholder, or a present-but-unjudged value, each with the value the author actually wrote. `evaluateIntakeDecision`'s `invalid-field` result gains `problem` and `value`, and adds an `unparsed-field` reason (DEV-7074)
 * **comments:** exit non-zero with a stderr hint when `comments list --body` has no text to print. An issue with no comments (or whose comment bodies all came back blank) previously wrote a lone newline and exited 0, so "this issue has no comments" was byte-identical to "the fetch or render silently dropped the list". It now mirrors `comments read --body`'s guard; `--format summary` and the JSON envelope keep exit 0 because `(no results)` and `meta.count` already say "empty" in band (DEV-7160)
@@ -22,6 +33,67 @@ project adheres to [Semantic Versioning](https://semver.org/).
 * **issues:** honor read options such as `--body` on the nested `issues read` and `issue read` routes (DEV-6141)
 * **quality:** restore a clean full-repository lint baseline (DEV-6142)
 * **labels:** resolve `labels create --team` keys and names before creating the label (DEV-5749)
+
+## [1.48.0](https://github.com/enrichlayer/el-linear/compare/v1.47.1...v1.48.0) (2026-10-27)
+
+
+### Features
+
+* **issues:** claim an issue at creation without cutting a branch (DEV-10654) ([#336](https://github.com/enrichlayer/el-linear/issues/336)) ([d95ef9c](https://github.com/enrichlayer/el-linear/commit/d95ef9c9b86b7712103f604c19f4b6d4172f556c))
+
+
+### Bug Fixes
+
+* **issues:** return complete bounded relation reads (DEV-14039) ([#349](https://github.com/enrichlayer/el-linear/issues/349)) ([a203f1e](https://github.com/enrichlayer/el-linear/commit/a203f1ed9fd09935f22c04297dad4f8fc8093492))
+* **output:** publish the cause chain and classify through it (DEV-14754) ([#353](https://github.com/enrichlayer/el-linear/issues/353)) ([9e76a9f](https://github.com/enrichlayer/el-linear/commit/9e76a9f08536a11418808d9bd2be9338b2d2c247))
+
+## [1.47.1](https://github.com/enrichlayer/el-linear/compare/v1.47.0...v1.47.1) (2026-10-03)
+
+
+### Bug Fixes
+
+* **cli:** preserve comment and stdin safeguards (DEV-11118) ([#342](https://github.com/enrichlayer/el-linear/issues/342)) ([bbf4545](https://github.com/enrichlayer/el-linear/commit/bbf45456faed7814282d832191463c5060a5faf0))
+
+## [1.47.0](https://github.com/enrichlayer/el-linear/compare/v1.46.1...v1.47.0) (2026-10-03)
+
+
+### Features
+
+* **issues:** accept caller-selected issue UUIDs (DEV-11113) ([#340](https://github.com/enrichlayer/el-linear/issues/340)) ([5ca5017](https://github.com/enrichlayer/el-linear/commit/5ca5017679f683d9b279410fac0b1e295698cc18))
+
+## [1.46.1](https://github.com/enrichlayer/el-linear/compare/v1.46.0...v1.46.1) (2026-09-28)
+
+
+### Bug Fixes
+
+* **issues:** keep existing labels when adding labels by issue UUID (DEV-10603) ([#335](https://github.com/enrichlayer/el-linear/issues/335)) ([95bfed3](https://github.com/enrichlayer/el-linear/commit/95bfed3953a1d6be31155691cad45f67bb0ed096))
+
+## [1.46.0](https://github.com/enrichlayer/el-linear/compare/v1.45.1...v1.46.0) (2026-09-27)
+
+
+### Features
+
+* label advisor hook and consent-label receipt gate (DEV-10372) ([#332](https://github.com/enrichlayer/el-linear/issues/332)) ([959c733](https://github.com/enrichlayer/el-linear/commit/959c7334e9ed9bfa7714d0b7277cfdb3e1dd1cd7))
+
+## [1.45.1](https://github.com/enrichlayer/el-linear/compare/v1.45.0...v1.45.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* **graphql:** classify quota admission refusals (DEV-9503) ([#323](https://github.com/enrichlayer/el-linear/issues/323)) ([1f54b49](https://github.com/enrichlayer/el-linear/commit/1f54b498e53d75f132b915581f7150c4633c78e7))
+
+## [1.45.0](https://github.com/enrichlayer/el-linear/compare/v1.44.2...v1.45.0) (2026-09-06)
+
+
+### Features
+
+* **graphql:** classify GraphQL failures with HTTP status and extensions.code ([#302](https://github.com/enrichlayer/el-linear/issues/302)) ([6a08808](https://github.com/enrichlayer/el-linear/commit/6a0880846aefe3f91e7a2f4e2d3f7fae1d3b0711))
+
+
+### Bug Fixes
+
+* **ci:** restore automated releases without a repository PAT (DEV-4269) ([#318](https://github.com/enrichlayer/el-linear/issues/318)) ([cc7cf74](https://github.com/enrichlayer/el-linear/commit/cc7cf7424bac739f9450582e7fda3cfe34f64751))
+* **cli:** coordinate Linear rate-limit usage (DEV-7874) ([#301](https://github.com/enrichlayer/el-linear/issues/301)) ([892b668](https://github.com/enrichlayer/el-linear/commit/892b668e66b7742e8226c27351d268dc22e7a876))
 
 ## [1.44.2](https://github.com/enrichlayer/el-linear/compare/v1.44.1...v1.44.2) (2026-08-09)
 
