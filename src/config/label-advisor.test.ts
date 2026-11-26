@@ -55,24 +55,6 @@ describe("parseLabelAdvisorOutput", () => {
 			ok: true,
 			labels,
 			reason,
-			receipt: null,
-		});
-	});
-
-	it("accepts receipt policy fields next to a consent label (DEV-10455)", () => {
-		expect(
-			parseLabelAdvisorOutput(
-				JSON.stringify({
-					labels: ["bot"],
-					reason: "rubric: BOT",
-					receipt: { repo: " acme/tools ", reason: "rubric consent" },
-				}),
-			),
-		).toEqual({
-			ok: true,
-			labels: ["bot"],
-			reason: "rubric: BOT",
-			receipt: { repo: "acme/tools", reason: "rubric consent" },
 		});
 	});
 
@@ -86,13 +68,6 @@ describe("parseLabelAdvisorOutput", () => {
 		["control characters", '["bot\\n"]'],
 		["non-string reason", '{"labels":["bot"],"reason":5}'],
 		["scalar", "true"],
-		["non-object receipt", '{"labels":["bot"],"receipt":"acme/tools"}'],
-		["receipt without repo", '{"labels":["bot"],"receipt":{"reason":"x"}}'],
-		["receipt without reason", '{"labels":["bot"],"receipt":{"repo":"a/b"}}'],
-		[
-			"receipt repo with control characters",
-			'{"labels":["bot"],"receipt":{"repo":"a/b\\n","reason":"x"}}',
-		],
 	])("fails closed on %s", (_name, stdout) => {
 		const result = parseLabelAdvisorOutput(stdout);
 		expect(result.ok).toBe(false);
@@ -132,7 +107,6 @@ describe("runLabelAdvisor (real subprocess)", () => {
 			ok: true,
 			labels: ["bot"],
 			reason: "rubric: BOT",
-			receipt: null,
 		});
 		expect(JSON.parse(readFileSync(seen, "utf8"))).toEqual(INPUT);
 	});
@@ -150,7 +124,6 @@ describe("runLabelAdvisor (real subprocess)", () => {
 			ok: true,
 			labels: [],
 			reason: null,
-			receipt: null,
 		});
 	});
 
