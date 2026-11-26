@@ -277,6 +277,37 @@ describe.skipIf(!JJ_AVAILABLE)("currentJjBookmark (DEV-8479)", () => {
 	});
 
 	/**
+	 * Rung 3 must not reach across trunk. With `@` freshly on trunk, every
+	 * feature bookmark branched off trunk descends from `@-`, so the sibling
+	 * revset alone would adopt one that has nothing to do with this work and
+	 * `mark-branch` would claim its issue.
+	 */
+	it("ignores an unrelated bookmark off trunk when @'s parent is trunk", () => {
+		// Make the seed commit trunk. Repo-scoped, so it applies regardless of
+		// how the environment layers user config.
+		run("jj", "config", "set", "--repo", 'revset-aliases."trunk()"', "root()+");
+		run("jj", "bookmark", "create", "feature/DEV-1-unrelated", "-r", "@");
+		run("jj", "new", "@-");
+		// Pin the fixture: without the guard, rung 3 alone would answer it.
+		const viaSibling = execFileSync(
+			"jj",
+			[
+				"log",
+				"-r",
+				"bookmarks() & @-::",
+				"--no-graph",
+				"-T",
+				'local_bookmarks.map(|b| b.name()) ++ "\\n"',
+			],
+			{ stdio: "pipe" },
+		)
+			.toString()
+			.trim();
+		expect(viaSibling).toBe("feature/DEV-1-unrelated");
+		expect(currentJjBookmark()).toBeNull();
+	});
+
+	/**
 	 * Two bookmarks on one commit give no basis for choosing, and `mark-branch`
 	 * would write its marker under whichever happened to sort first. Null is the
 	 * honest answer, and the caller already fails loudly on it.

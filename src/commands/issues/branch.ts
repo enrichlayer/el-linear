@@ -153,29 +153,67 @@ export function currentGitBranch(): string | null {
  * which is not a branch anyone is on -- and `mark-branch` would then write its
  * marker under that name. Carried deliberately from DEV-8469.
  *
- * The template is `local_bookmarks ++ "\n"` as jj's templating language sees
- * it, so the BACKSLASH has to survive this TypeScript literal -- hence the
- * doubling. Writing a real newline would embed one inside jj's own string.
+ * `.map(|b| b.name())`, NOT the bare list. Rendering a bookmark directly
+ * decorates it with its sync state -- `name*` when it is ahead of its remote,
+ * `name??` when it is conflicted -- and that decoration would become part of
+ * the name `mark-branch` writes its marker under. `name()` is the bare name.
  *
- * `jj log` is a read verb: it cannot alter history, the working copy, the
- * operation log, or any remote.
+ * The template ends `++ "\n"` as jj's templating language sees it, so the
+ * BACKSLASH has to survive this TypeScript literal -- hence the doubling.
+ * Writing a real newline would embed one inside jj's own string.
  */
 function jjBookmarksAt(revset: string): string[] {
+	// jj absent, not a jj repo, or the revset resolved to nothing all mean "jj
+	// does not name this work", which the caller treats as null.
+	return (jjLog(revset, 'local_bookmarks.map(|b| b.name()) ++ "\\n"') ?? "")
+		.trim()
+		.split(/\s+/)
+		.filter((name) => name.length > 0);
+}
+
+/**
+ * Run `jj log` over `revset` with `template` and return its stdout, or `null`
+ * when jj cannot answer (jj absent, not a jj repo, an invalid revset).
+ *
+ * `--ignore-working-copy` is load-bearing. By default every jj command, `log`
+ * included, first SNAPSHOTS the working copy: it records file changes into `@`
+ * and writes a new operation to the op log. A branch lookup must not do that,
+ * so the flag keeps this a pure read of the repository as last recorded.
+ */
+function jjLog(revset: string, template: string): string | null {
 	try {
 		return execFileSync(
 			"jj",
-			["log", "-r", revset, "--no-graph", "-T", 'local_bookmarks ++ "\\n"'],
+			[
+				"--ignore-working-copy",
+				"log",
+				"-r",
+				revset,
+				"--no-graph",
+				"-T",
+				template,
+			],
 			{ stdio: "pipe", timeout: 5000 },
-		)
-			.toString()
-			.trim()
-			.split(/\s+/)
-			.filter((name) => name.length > 0);
+		).toString();
 	} catch {
-		// jj absent, not a jj repo, or the revset resolved to nothing. All three
-		// mean "jj does not name this work", which the caller treats as null.
-		return [];
+		return null;
 	}
+}
+
+/**
+ * True when `@`'s parent is trunk or immutable, or when jj cannot say.
+ *
+ * Rung 3 below reads every bookmark descending from `@`'s parent. That is this
+ * stack only while the parent is the caller's own mutable work. When the parent
+ * is trunk (`jj new main`, the start of every new change) or any immutable
+ * commit, its descendants include every feature bookmark branched off it, and
+ * rung 3 would adopt an unrelated one -- after which `mark-branch` with no
+ * argument claims THAT bookmark's issue. Fails closed: when the check cannot
+ * run, the rung is skipped.
+ */
+function jjParentIsShared(): boolean {
+	const out = jjLog("@- & (trunk() | immutable())", 'commit_id ++ "\\n"');
+	return out === null || out.trim().length > 0;
 }
 
 /**
@@ -201,8 +239,15 @@ const JJ_BOOKMARK_REVSETS = [
 	//    degrades to `root()` whenever `main@origin` is absent -- the normal state
 	//    of a `--single-branch` pilot clone. A resolver whose correctness depends
 	//    on configuration that is broken by default is not a resolver (DEV-8469).
+	//
+	//    Guarded by jjParentIsShared(): when `@-` is trunk or immutable, `@-::`
+	//    is everyone's work rather than this stack, so the rung is skipped. The
+	//    cost is that a sibling sitting directly on trunk resolves to null (the
+	//    caller then fails loudly) instead of being found -- never a wrong name.
 	"bookmarks() & @-::",
 ] as const;
+
+const JJ_SIBLING_REVSET = JJ_BOOKMARK_REVSETS[2];
 
 /**
  * The jj bookmark naming the current work, or `null` when there is not exactly
@@ -234,6 +279,9 @@ const JJ_BOOKMARK_REVSETS = [
  */
 export function currentJjBookmark(): string | null {
 	for (const revset of JJ_BOOKMARK_REVSETS) {
+		if (revset === JJ_SIBLING_REVSET && jjParentIsShared()) {
+			return null;
+		}
 		const names = jjBookmarksAt(revset);
 		if (names.length === 1) {
 			return names[0];
