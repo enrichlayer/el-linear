@@ -655,6 +655,69 @@ describe("GraphQLIssuesService", () => {
 		});
 	});
 
+	describe("createIssue caller-selected identity (DEV-11113)", () => {
+		const id = "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE";
+		const teamId = "11111111-1111-4111-8111-111111111111";
+
+		function setupIdentityCreate() {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockResolvedValue({
+					issueCreate: {
+						success: true,
+						issue: makeIssueNode({ id }),
+						lastSyncId: 1,
+					},
+				});
+			const linearService = new LinearService({ apiKey: "token" });
+			return {
+				service: new GraphQLIssuesService(graphQLService, linearService),
+				rawRequest,
+			};
+		}
+
+		it("forwards the exact UUIDv4 to IssueCreateInput.id", async () => {
+			const { service, rawRequest } = setupIdentityCreate();
+			await service.createIssue({ id, title: "Test", teamId });
+			expect(rawRequest).toHaveBeenCalledExactlyOnceWith(
+				expect.stringContaining("issueCreate"),
+				{ input: { id, title: "Test", teamId } },
+			);
+		});
+
+		it("omits id when no caller-selected identity was supplied", async () => {
+			const { service, rawRequest } = setupIdentityCreate();
+			await service.createIssue({ title: "Test", teamId });
+			expect(rawRequest).toHaveBeenCalledExactlyOnceWith(
+				expect.stringContaining("issueCreate"),
+				{ input: { title: "Test", teamId } },
+			);
+		});
+
+		it.each([
+			"invalid",
+			"aaaaaaaa-bbbb-1ccc-8ddd-eeeeeeeeeeee",
+			"aaaaaaaa-bbbb-4ccc-7ddd-eeeeeeeeeeee",
+			"",
+		])("rejects invalid identity %j before any request", async (invalidId) => {
+			const { service, rawRequest } = setupIdentityCreate();
+			await expect(
+				service.createIssue({ id: invalidId, title: "Test", teamId }),
+			).rejects.toThrow("Invalid --issue-id: must be a UUIDv4");
+			expect(rawRequest).not.toHaveBeenCalled();
+		});
+
+		it("surfaces duplicate-ID rejection without replaying the mutation", async () => {
+			const { service, rawRequest } = setupIdentityCreate();
+			rawRequest.mockRejectedValue(new Error("duplicate issue ID"));
+			await expect(
+				service.createIssue({ id, title: "Test", teamId }),
+			).rejects.toThrow("duplicate issue ID");
+			expect(rawRequest).toHaveBeenCalledTimes(1);
+		});
+	});
+
 	describe("createIssue project/team resolution", () => {
 		const PROJECT_UUID = "11111111-1111-4111-8111-111111111111";
 		const issueNode = {
@@ -1126,6 +1189,151 @@ describe("GraphQLIssuesService", () => {
 			// No throw — the DEV-matching candidate was picked. The mutation
 			// would have failed if the wrong project was chosen because the
 			// project-id passed to the mutation is the resolver's pick.
+		});
+	});
+
+	// DEV-10603: an update addressed by issue UUID in "adding" mode must merge
+	// into the labels the issue already has. The label advisor adds `bot` to a
+	// just-created issue this way, and before the fix it wiped the create-time
+	// labels. Only the GraphQL transport is faked here; label resolution and the
+	// merge run through the real updateIssue.
+	describe("updateIssue label merge by issue UUID (DEV-10603)", () => {
+		const ISSUE_UUID = "44444444-4444-4444-8444-444444444444";
+		const BUG_LABEL = "55555555-5555-4555-8555-555555555555";
+		const BOT_LABEL = "66666666-6666-4666-8666-666666666666";
+		const issueNode = {
+			id: ISSUE_UUID,
+			identifier: "DEV-1",
+			title: "Test",
+			priority: 0,
+			labels: { nodes: [] },
+			createdAt: "2026-01-01T00:00:00.000Z",
+			updatedAt: "2026-01-01T00:00:00.000Z",
+		};
+
+		function setup(
+			contextIssue: unknown = {
+				id: ISSUE_UUID,
+				team: { id: "team-dev" },
+				labels: { nodes: [{ id: BUG_LABEL }] },
+			},
+		) {
+			const graphQLService = new GraphQLService({ apiKey: "token" });
+			const linearService = new LinearService({ apiKey: "token" });
+			const rawRequest = vi
+				.spyOn(graphQLService, "rawRequest")
+				.mockImplementation(async (query: string) => {
+					if (query.includes("GetIssueUpdateContext")) {
+						return { issue: contextIssue };
+					}
+					if (query.includes("BatchResolveForUpdate")) {
+						return {
+							issues: {
+								nodes: [
+									{
+										id: ISSUE_UUID,
+										identifier: "DEV-1",
+										team: { id: "team-dev", key: "DEV" },
+										labels: { nodes: [{ id: BUG_LABEL, name: "Bug" }] },
+										project: null,
+									},
+								],
+							},
+						};
+					}
+					if (query.includes("ResolveLabels")) {
+						return {
+							labels: {
+								nodes: [
+									{
+										id: BOT_LABEL,
+										name: "bot",
+										isGroup: false,
+										team: { id: "team-dev" },
+									},
+								],
+							},
+						};
+					}
+					if (query.includes("issueUpdate")) {
+						return {
+							issueUpdate: { success: true, issue: issueNode, lastSyncId: 1 },
+						};
+					}
+					throw new Error(`unexpected query: ${query}`);
+				});
+			const service = new GraphQLIssuesService(graphQLService, linearService);
+			return { service, rawRequest };
+		}
+
+		function calls(rawRequest: ReturnType<typeof vi.spyOn>, name: string) {
+			return rawRequest.mock.calls.filter(([q]: unknown[]) =>
+				String(q).includes(name),
+			);
+		}
+
+		function updateLabelIds(rawRequest: ReturnType<typeof vi.spyOn>) {
+			const [call] = calls(rawRequest, "issueUpdate");
+			if (!call) {
+				throw new Error("expected an issueUpdate call");
+			}
+			return (call[1] as { input: { labelIds?: string[] } }).input.labelIds;
+		}
+
+		it("keeps the issue's existing labels when adding a label by issue UUID", async () => {
+			const { service, rawRequest } = setup();
+
+			await service.updateIssue(
+				{ id: ISSUE_UUID, description: "body", labelIds: ["bot"] },
+				"adding",
+			);
+
+			expect(updateLabelIds(rawRequest)).toEqual([BUG_LABEL, BOT_LABEL]);
+			expect(calls(rawRequest, "GetIssueUpdateContext")).toHaveLength(1);
+			// The context query supplies the team id, so label resolution does
+			// not make its own team lookup.
+			expect(calls(rawRequest, "GetIssueTeam(")).toHaveLength(0);
+		});
+
+		it("adds by identifier exactly as it adds by UUID", async () => {
+			const { service, rawRequest } = setup();
+
+			await service.updateIssue({ id: "DEV-1", labelIds: ["bot"] }, "adding");
+
+			expect(updateLabelIds(rawRequest)).toEqual([BUG_LABEL, BOT_LABEL]);
+			expect(calls(rawRequest, "GetIssueUpdateContext")).toHaveLength(0);
+		});
+
+		it("still replaces the labels in overwriting mode", async () => {
+			const { service, rawRequest } = setup();
+
+			await service.updateIssue(
+				{ id: ISSUE_UUID, labelIds: ["bot"] },
+				"overwriting",
+			);
+
+			expect(updateLabelIds(rawRequest)).toEqual([BOT_LABEL]);
+		});
+
+		it("skips the context query when the update sets no labels", async () => {
+			const { service, rawRequest } = setup();
+
+			await service.updateIssue(
+				{ id: ISSUE_UUID, description: "body" },
+				"adding",
+			);
+
+			expect(calls(rawRequest, "GetIssueUpdateContext")).toHaveLength(0);
+			expect(updateLabelIds(rawRequest)).toBeUndefined();
+		});
+
+		it("reports a missing issue instead of overwriting its labels", async () => {
+			const { service, rawRequest } = setup(null);
+
+			await expect(
+				service.updateIssue({ id: ISSUE_UUID, labelIds: ["bot"] }, "adding"),
+			).rejects.toThrow(notFoundError("Issue", ISSUE_UUID).message);
+			expect(calls(rawRequest, "issueUpdate")).toHaveLength(0);
 		});
 	});
 

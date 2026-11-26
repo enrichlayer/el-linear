@@ -103,6 +103,7 @@ describe("read-shortcut", () => {
 					title: "Parent",
 					description: null,
 					relations: {
+						pageInfo: { hasNextPage: false, endCursor: null },
 						nodes: [
 							{
 								id: "rel-1",
@@ -119,7 +120,10 @@ describe("read-shortcut", () => {
 							},
 						],
 					},
-					inverseRelations: { nodes: [] },
+					inverseRelations: {
+						nodes: [],
+						pageInfo: { hasNextPage: false, endCursor: null },
+					},
 				},
 			});
 
@@ -131,12 +135,18 @@ describe("read-shortcut", () => {
 			// Fetched relations via raw GraphQL using the resolved UUID.
 			expect(mockRawRequest).toHaveBeenCalledWith(
 				expect.stringContaining("GetIssueRelations"),
-				{ id: "uuid-1" },
+				expect.objectContaining({
+					id: "uuid-1",
+					first: 50,
+					outgoing: true,
+					incoming: true,
+				}),
 			);
 			expect(mockOutputSuccess).toHaveBeenCalledWith(
 				expect.objectContaining({
 					id: "uuid-1",
 					identifier: "DEV-1",
+					meta: { relations_complete: true },
 					relations: [
 						expect.objectContaining({
 							id: "rel-1",
@@ -144,6 +154,61 @@ describe("read-shortcut", () => {
 							direction: "outgoing",
 							issue: expect.objectContaining({ identifier: "DEV-2" }),
 						}),
+					],
+				}),
+			);
+		});
+
+		it("includes a blocker beyond the first incoming page before emitting completeness", async () => {
+			mockGetIssueById.mockResolvedValue({ id: "uuid-1", identifier: "DEV-1" });
+			const peer = {
+				id: "peer",
+				identifier: "DEV-2",
+				title: "Peer",
+				state: { id: "s", name: "Todo" },
+				priority: null,
+				assignee: null,
+				team: null,
+			};
+			const issue = {
+				id: "uuid-1",
+				identifier: "DEV-1",
+				title: "Root",
+				relations: {
+					nodes: [],
+					pageInfo: { hasNextPage: false, endCursor: null },
+				},
+			};
+			mockRawRequest
+				.mockReset()
+				.mockResolvedValueOnce({
+					issue: {
+						...issue,
+						inverseRelations: {
+							nodes: [{ id: "r1", type: "related", issue: peer }],
+							pageInfo: { hasNextPage: true, endCursor: "next" },
+						},
+					},
+				})
+				.mockResolvedValueOnce({
+					issue: {
+						...issue,
+						inverseRelations: {
+							nodes: [{ id: "r2", type: "blocks", issue: peer }],
+							pageInfo: { hasNextPage: false, endCursor: null },
+						},
+					},
+				});
+			const program = createTestProgram();
+			setupReadShortcut(program);
+			await runCommand(program, ["read", "DEV-1", "--with", "relations"]);
+			expect(mockRawRequest).toHaveBeenCalledTimes(2);
+			expect(mockOutputSuccess).toHaveBeenCalledWith(
+				expect.objectContaining({
+					meta: { relations_complete: true },
+					relations: [
+						expect.objectContaining({ type: "related" }),
+						expect.objectContaining({ type: "blockedBy" }),
 					],
 				}),
 			);
@@ -203,16 +268,23 @@ describe("read-shortcut", () => {
 			// with a once-queue here would leave unconsumed values that bleed into
 			// later tests (clearAllMocks does not drain once-queues).
 			mockGetIssuesByRefs.mockResolvedValue([i1, i2]);
-			mockRawRequest.mockResolvedValue({
-				issue: {
-					id: "any",
-					identifier: "any",
-					title: "any",
-					description: null,
-					relations: { nodes: [] },
-					inverseRelations: { nodes: [] },
-				},
-			});
+			mockRawRequest.mockImplementation(
+				async (_query: string, { id }: { id: string }) => ({
+					issue: {
+						id,
+						identifier: id === "uuid-1" ? "DEV-1" : "DEV-2",
+						title: "Issue",
+						relations: {
+							nodes: [],
+							pageInfo: { hasNextPage: false, endCursor: null },
+						},
+						inverseRelations: {
+							nodes: [],
+							pageInfo: { hasNextPage: false, endCursor: null },
+						},
+					},
+				}),
+			);
 
 			const program = createTestProgram();
 			setupReadShortcut(program);
@@ -245,6 +317,7 @@ describe("read-shortcut", () => {
 					title: "Parent",
 					description: null,
 					relations: {
+						pageInfo: { hasNextPage: false, endCursor: null },
 						nodes: [
 							{
 								id: "rel-out",
@@ -262,6 +335,7 @@ describe("read-shortcut", () => {
 						],
 					},
 					inverseRelations: {
+						pageInfo: { hasNextPage: false, endCursor: null },
 						nodes: [
 							{
 								id: "rel-in",
@@ -305,26 +379,15 @@ describe("read-shortcut", () => {
 			);
 		});
 
-		it("emits relations: [] when Linear loses the issue between fetches (race; cycle-1 nit)", async () => {
-			// getIssueById succeeds → we have a UUID and emit the base
-			// envelope. The relations query then returns `issue: null`
-			// (true race: issue deleted between calls). Contract: surface
-			// the base issue with relations: [] rather than throwing.
-			const issue = { id: "uuid-1", identifier: "DEV-1" };
-			mockGetIssueById.mockResolvedValue(issue);
+		it("fails an include when Linear loses the issue instead of claiming empty relations", async () => {
+			mockGetIssueById.mockResolvedValue({ id: "uuid-1", identifier: "DEV-1" });
 			mockRawRequest.mockResolvedValue({ issue: null });
-
 			const program = createTestProgram();
 			setupReadShortcut(program);
-			await runCommand(program, ["read", "DEV-1", "--with", "relations"]);
-
-			expect(mockOutputSuccess).toHaveBeenCalledWith(
-				expect.objectContaining({
-					id: "uuid-1",
-					identifier: "DEV-1",
-					relations: [],
-				}),
-			);
+			await expect(
+				runCommand(program, ["read", "DEV-1", "--with", "relations"]),
+			).rejects.toThrow(/Incomplete issue relations/);
+			expect(mockOutputSuccess).not.toHaveBeenCalled();
 		});
 	});
 });
