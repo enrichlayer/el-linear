@@ -217,6 +217,11 @@ Every issue should communicate **why** the work matters and **what** success loo
 ### Example
 
 ```markdown
+## Summary
+We track customer contacts in spreadsheets, Linear and people's memory, so
+details get lost. This sets up one shared CRM the team can rely on. Next:
+install it, then move the existing contacts in.
+
 ## Intake decision
 - Needed: Yes — contact tracking is split across spreadsheets, Linear, and memory.
 - Worth doing: Yes — outbound scale makes the fragmentation costly now, not later.
@@ -224,12 +229,6 @@ Every issue should communicate **why** the work matters and **what** success loo
 - Owner: Nico (operations tooling).
 - Placement: OPS / Sales infrastructure; self-hosted on the Hetzner box.
 - Decision: PROCEED
-
-## Set up a self-hosted CRM
-
-The team needs a CRM to replace fragmented contact tracking
-(spreadsheets + Linear + memory). Should be production-ready:
-reliable, backed up, accessible.
 
 ## Why we need this
 As we scale outbound, we need customer relationships, pipeline,
@@ -243,9 +242,26 @@ and outreach tracked in one place.
 
 ---
 
+## Summary Section (write it first)
+
+**Every new issue opens with `## Summary`, written for someone who doesn't know the code.** A manager setting priorities or a teammate picking up the work should get the point from these lines alone. Three to six sentences; two are enough for a small issue:
+
+1. **What this is about.**
+2. **Why it matters, or what was concluded**, including what is not known.
+3. **What happens next.**
+
+- No function names, paths, env vars or internal shorthand. They go in the sections below.
+- It replaces the opening paragraph; don't say the same thing twice.
+- When the conclusions change, update the summary in the same edit.
+- On an older issue, add one when you next edit it substantially. Don't rewrite issues in bulk.
+
+With `validation.summaryGate: "warn"`, `el-linear issues create` warns when the section is missing. It never blocks, and it can't judge the summary.
+
+---
+
 ## Intake Decision Block (MANDATORY, blocking)
 
-**`el-linear issues create` refuses any description without a `## Intake decision` section.** It must open the description, and the six lines must appear in this order:
+**`el-linear issues create` refuses any description without a `## Intake decision` section.** It comes right after the summary, and the six lines must appear in this order:
 
 ```markdown
 ## Intake decision
@@ -437,14 +453,15 @@ Don't start implementation work on an unassigned issue — the assignee is the p
 
 Complete ALL items before creating any issue:
 
-- [ ] **Intake decision** — description opens with the `## Intake decision` block (above). Blocking.
+- [ ] **Summary** — description opens with a plain-language `## Summary` (above).
+- [ ] **Intake decision** — the `## Intake decision` block follows the summary (above). Blocking.
 - [ ] **Duplicate & related check** — searched for existing issues, linked related ones (above).
 - [ ] **Team** — ask user if unclear (`el-linear teams list`).
 - [ ] **Assignee** — ask user if unclear (`el-linear users list --active`).
 - [ ] **Project** — always ask user, never guess (`el-linear projects list`).
 - [ ] **Labels** — exactly 1 type label + 1–2 domain labels (see Label Taxonomy below).
 - [ ] **Title** — action verb matching the type label (see Title Verb Convention), sentence case, specific scope, **plain-language and jargon-free** (see Title Readability).
-- [ ] **Description** — 2–4 sentences with context and intent, formatted with **bold** and `inline code`.
+- [ ] **Description** — beyond the summary, the context and intent the assignee needs, formatted with **bold** and `inline code`.
 - [ ] **"Why we need this"** — genuine motivation, not a restatement of the title.
 
 If any field is missing, **STOP and use AskUserQuestion**.

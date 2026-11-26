@@ -220,6 +220,12 @@ export interface ElLinearConfig {
 		 * `--allow-missing-intake-decision`.
 		 */
 		intakeDecisionGate?: false | "warn" | "block";
+		/**
+		 * OPT-IN summary check (DEV-16785). When `"warn"`, `issues create` prints
+		 * a stderr warning if the description has no `Summary` section. It never
+		 * stops creation. Defaults to off.
+		 */
+		summaryGate?: false | "warn";
 		/** Headers accepted for the intake section. Defaults to `["Intake decision"]`. */
 		intakeSectionHeaders?: string[];
 		/**

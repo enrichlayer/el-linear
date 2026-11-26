@@ -224,6 +224,9 @@ intended flow for the CLI.
     // decision. The narrow override
     // --allow-missing-intake-decision is recorded.
     "intakeDecisionGate": false,
+    // OPT-IN summary check (default: off). "warn" prints a stderr warning
+    // when the description has no "Summary" section. Never blocks.
+    "summaryGate": false,
     // Section headers accepted for the intake decision. Default
     // ["Intake decision"].
     "intakeSectionHeaders": ["Intake decision"],
@@ -510,6 +513,23 @@ local `--description` override, the description is instantiated server-side and
 is invisible to a client-side check, so the gate no-ops there (same
 client-side-visibility gap as the duplicate-detection gate on a
 template-resolved title).
+
+### Summary check (`validation.summaryGate`)
+
+An **opt-in**, warn-only check that the description has a `Summary` section:
+a few plain-language sentences for readers outside the work. Only presence is
+checked, at any position and heading level.
+
+```json
+{ "validation": { "summaryGate": "warn" } }
+```
+
+- `"warn"` — print a stderr warning; creation always proceeds (recorded as an
+  `advisory` gate event).
+- absent / `false` — off (the open-source default).
+
+`--skip-validation` silences it. Like the goal-completion gate, it does not run
+on the `--from-template` path with no local `--description` override.
 
 ### Intake-decision gate (`validation.intakeDecisionGate`)
 
