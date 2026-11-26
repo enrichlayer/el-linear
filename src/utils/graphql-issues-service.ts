@@ -60,6 +60,7 @@ import type { CreateLabelResponse } from "../queries/labels-types.js";
 import type { LinearIssue, LinearPriority } from "../types/linear.js";
 import { TERMINAL_STATE_TYPES } from "../types/linear.js";
 import { toISOStringOrNow, toISOStringOrUndefined } from "./date-format.js";
+import { tokenizeTitle } from "./duplicate-detection.js";
 import { extractEmbeds } from "./embed-parser.js";
 import { multipleMatchesError, notFoundError } from "./error-messages.js";
 import type { GraphQLService } from "./graphql-service.js";
@@ -86,6 +87,15 @@ const TEAM_KEY_REGEX = /^[A-Z0-9]+$/i;
  * of this size rather than one oversized request that would be rejected.
  */
 const SAFE_ISSUE_PAGE_SIZE = 200;
+
+/**
+ * DEV-14678: most salient title words the unranked fallback searches on. Each
+ * word is one `containsIgnoreCase` clause in an `or`, so more words widen the
+ * candidate window rather than narrowing it; past a handful the extra clauses
+ * are mostly short common words that only crowd real matches out of the
+ * updatedAt-ordered page.
+ */
+const TITLE_FALLBACK_MAX_WORDS = 6;
 
 /** One page of an issue connection: its nodes plus cursor metadata. */
 interface IssueConnectionPage {
@@ -1208,23 +1218,38 @@ export class GraphQLIssuesService {
 	 * touches the reranker, so an outage degrades the check to "unranked but
 	 * running" instead of "skipped".
 	 *
-	 * Recall is deliberately narrower than the ranked search: it matches the
-	 * title substring across the workspace rather than spreading over
-	 * descriptions and comments. It is a fallback for the exact/near-verbatim
-	 * titles the hard-block tier cares about, not a replacement for the ranked
-	 * search.
+	 * The filter matches any issue whose title contains at least one of the
+	 * new title's salient words (the same `tokenizeTitle` keywords the Jaccard
+	 * scoring uses, longest first, capped at TITLE_FALLBACK_MAX_WORDS). Matching
+	 * the whole title as one substring would only find titles that contain the
+	 * new one verbatim and miss the reworded near-duplicates the gate exists
+	 * for; the caller's Jaccard scoring sorts the wider candidate set out.
+	 *
+	 * Recall is still narrower than the ranked search: it reads titles only,
+	 * not descriptions or comments, and the page is ordered by recency rather
+	 * than relevance. It is a fallback for the near-verbatim titles the
+	 * hard-block tier cares about, not a replacement for the ranked search.
+	 * A title with no salient words has nothing to compare, so no query runs.
 	 */
 	async searchIssuesByTitle(
 		title: string,
 		args: { limit?: number } = {},
 	): Promise<LinearIssue[]> {
+		const words = [...tokenizeTitle(title)]
+			.sort((a, b) => b.length - a.length)
+			.slice(0, TITLE_FALLBACK_MAX_WORDS);
+		if (words.length === 0) {
+			return [];
+		}
 		const first = Math.min(Math.max(args.limit ?? 50, 1), SAFE_ISSUE_PAGE_SIZE);
 		const result = await this.graphQLService.rawRequest<GetIssuesResponse>(
 			FILTERED_SEARCH_ISSUES_QUERY,
 			{
 				first,
 				after: null,
-				filter: { title: { containsIgnoreCase: title } },
+				filter: {
+					or: words.map((word) => ({ title: { containsIgnoreCase: word } })),
+				},
 				orderBy: "updatedAt",
 			},
 		);
