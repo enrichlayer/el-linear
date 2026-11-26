@@ -1,0 +1,303 @@
+/**
+ * Structured classification for a failed Linear GraphQL request (DEV-7987).
+ *
+ * WHY THIS EXISTS. Every command routes its failures through `outputError`
+ * in `utils/output.ts`, which used to emit `{ error, activeProfile }` and
+ * nothing else. That flattens a rate limit, a gateway blip and a permanent
+ * schema error into one indistinguishable shape, so a machine caller
+ * shelling out to `el-linear` (a job runner deciding whether to retry, say)
+ * had to substring-match the message to guess. This module carries the two
+ * facts that were being thrown away — the HTTP status and the GraphQL
+ * `extensions.code` — plus the retryable verdict derived from them, so the
+ * envelope can state them.
+ *
+ * Kept in its own module, free of `@linear/sdk`, so `utils/output.ts` can
+ * read the classification without importing the GraphQL client.
+ */
+
+import { errorChain } from "./error-chain.js";
+
+/**
+ * GraphQL `extensions.code` values Linear returns for conditions that clear
+ * on their own. A caller may retry these regardless of the HTTP status —
+ * Linear answers a rate limit with `RATELIMITED` under more than one
+ * status, so the code is load-bearing on its own.
+ */
+export const RETRYABLE_GRAPHQL_ERROR_CODES: readonly string[] = [
+	"RATELIMITED",
+	"INTERNAL_SERVER_ERROR",
+	"SERVICE_UNAVAILABLE",
+];
+
+/** HTTP statuses that mean "the request was fine, the moment wasn't". */
+const RETRYABLE_HTTP_STATUSES: readonly number[] = [408, 429];
+
+/**
+ * The classification block `el-linear` publishes as `errorDetail` on a
+ * failed command's JSON envelope. Status, code and retryability are always
+ * present; `null` means no such response signal. A known admission deadline
+ * is additive and optional.
+ */
+export interface LinearGraphQLErrorDetail {
+	/** HTTP status of the Linear response, or `null` if it never arrived. */
+	httpStatus: number | null;
+	/** GraphQL `extensions.code` of the first error, or `null`. */
+	code: string | null;
+	/** Whether retrying the identical request could plausibly succeed. */
+	retryable: boolean;
+	/** Known quota reset or recovery-probe deadline, when admission refused locally. */
+	resetAt?: string;
+}
+
+/** Accept explicit UTC timestamps only; error messages never establish a deadline. */
+function normalizeResetAt(value: unknown): string | undefined {
+	if (
+		typeof value !== "string" ||
+		!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value)
+	) {
+		return undefined;
+	}
+	const millis = Date.parse(value);
+	if (!Number.isFinite(millis)) return undefined;
+	const normalized = new Date(millis).toISOString();
+	// Date.parse normalizes impossible calendar dates rather than rejecting them.
+	return normalized.slice(0, 19) === value.slice(0, 19)
+		? normalized
+		: undefined;
+}
+
+/**
+ * The two rejection shapes that reach `GraphQLService.rawRequest`'s catch.
+ *
+ * `@linear/sdk` normalizes `graphql-request`'s `ClientError` into a
+ * `LinearError`, which hoists the status to the TOP level and keeps the
+ * original under `raw` — so the `extensions.code` survives only at
+ * `raw.response.errors[].extensions.code`. The SDK's own `errors[]` is a
+ * different projection (`{ type, message, userError, path }`) that drops
+ * `code` entirely. The un-normalized `ClientError` shape is read too,
+ * because the `client.client` escape hatch this CLI uses is not contractually
+ * guaranteed to stay normalized across SDK upgrades.
+ */
+interface GraphQLRejection {
+	/** `LinearError.status` — the SDK's hoisted HTTP status. */
+	status?: unknown;
+	/** `ClientError.response` — the un-normalized shape. */
+	response?: {
+		status?: unknown;
+		statusCode?: unknown;
+		errors?: Array<{ extensions?: { code?: unknown } }>;
+	};
+	/** `LinearError.raw` — the original `ClientError` the SDK wrapped. */
+	raw?: {
+		response?: {
+			status?: unknown;
+			errors?: Array<{ extensions?: { code?: unknown } }>;
+		};
+	};
+}
+
+function asNumber(value: unknown): number | null {
+	return typeof value === "number" ? value : null;
+}
+
+function asString(value: unknown): string | null {
+	return typeof value === "string" ? value : null;
+}
+
+/** HTTP status of a rejected request, or `null` if no response arrived. */
+export function graphQLErrorHttpStatus(error: unknown): number | null {
+	if (typeof error !== "object" || error === null) {
+		return null;
+	}
+	const rejection = error as GraphQLRejection;
+	return (
+		asNumber(rejection.status) ??
+		asNumber(rejection.response?.status) ??
+		asNumber(rejection.response?.statusCode) ??
+		asNumber(rejection.raw?.response?.status)
+	);
+}
+
+/** First GraphQL error's `extensions.code`, or `null` when absent. */
+export function graphQLErrorCode(error: unknown): string | null {
+	if (typeof error !== "object" || error === null) {
+		return null;
+	}
+	const rejection = error as GraphQLRejection;
+	return (
+		asString(rejection.response?.errors?.[0]?.extensions?.code) ??
+		asString(rejection.raw?.response?.errors?.[0]?.extensions?.code)
+	);
+}
+
+/** True when an HTTP status alone justifies a retry. */
+export function isRetryableHttpStatus(status: number | null): boolean {
+	if (status === null) {
+		return false;
+	}
+	return RETRYABLE_HTTP_STATUSES.includes(status) || status >= 500;
+}
+
+/** True when a GraphQL `extensions.code` alone justifies a retry. */
+export function isRetryableGraphQLCode(code: string | null): boolean {
+	return code !== null && RETRYABLE_GRAPHQL_ERROR_CODES.includes(code);
+}
+
+/**
+ * The retryable verdict from the authoritative response status and GraphQL code.
+ *
+ * "Retryable" here means *the failure is transient* — a caller that waits
+ * an appropriate interval could succeed. It is NOT the same question as
+ * `isTransientGraphQLError` in `graphql-service.ts`, which gates this CLI's
+ * own immediate 150 ms / 400 ms retry: a rate limit is transient (so
+ * `retryable: true`) but a terrible candidate for an immediate retry.
+ *
+ * The last arm is the one that is easy to get wrong: a rejection carrying
+ * NEITHER a status NOR a code never got an answer out of Linear at all —
+ * DNS, a refused connection, a dropped socket — and those are exactly the
+ * failures worth retrying. Every failure Linear itself produced arrives
+ * with a status (`LinearError.status` is set from the HTTP response), so
+ * this arm cannot swallow a permanent schema or permission error. Message
+ * text is deliberately excluded: a permanent response may legitimately
+ * mention a transient-looking number such as a validation limit of 500.
+ */
+export function classifyGraphQLFailure(
+	httpStatus: number | null,
+	code: string | null,
+): boolean {
+	if (isRetryableHttpStatus(httpStatus) || isRetryableGraphQLCode(code)) {
+		return true;
+	}
+	if (httpStatus === null && code === null) {
+		return true;
+	}
+	// A response status or GraphQL code is authoritative. Message text may
+	// contain an unrelated number such as a validation limit of 500; it must
+	// never turn a known permanent 400/401/403 into a retryable transport fault.
+	return false;
+}
+
+/**
+ * A Linear GraphQL failure that carries its own classification.
+ *
+ * The `message` is unchanged from what the plain `Error` used to carry, so
+ * every existing consumer that matches on the message text keeps working;
+ * the classification is purely additive.
+ */
+export class LinearGraphQLError extends Error {
+	readonly httpStatus: number | null;
+	readonly code: string | null;
+	readonly retryable: boolean;
+	readonly resetAt?: string;
+
+	constructor(
+		message: string,
+		detail: LinearGraphQLErrorDetail,
+		options?: { cause?: unknown },
+	) {
+		super(message, options);
+		this.name = "LinearGraphQLError";
+		this.httpStatus = detail.httpStatus;
+		this.code = detail.code;
+		this.retryable = detail.retryable;
+		this.resetAt = normalizeResetAt(detail.resetAt);
+	}
+
+	get detail(): LinearGraphQLErrorDetail {
+		return {
+			httpStatus: this.httpStatus,
+			code: this.code,
+			retryable: this.retryable,
+			...(this.resetAt ? { resetAt: this.resetAt } : {}),
+		};
+	}
+}
+
+/**
+ * Wrap a rejection from the Linear GraphQL client in a classified error,
+ * keeping `message` exactly as the caller composed it.
+ *
+ * This is the seam every throw out of `GraphQLService.rawRequest` must pass
+ * through. A branch that builds its own message and throws a bare `Error`
+ * instead — a rate-limit path with a friendlier wording, say — produces a
+ * failure with NO `errorDetail` on the envelope, which is precisely the
+ * blindness DEV-7987 exists to remove, and it fails silently.
+ */
+export function toLinearGraphQLError(
+	error: unknown,
+	message: string,
+): LinearGraphQLError {
+	const httpStatus = graphQLErrorHttpStatus(error);
+	const code = graphQLErrorCode(error);
+	return new LinearGraphQLError(
+		message,
+		{
+			httpStatus,
+			code,
+			retryable: classifyGraphQLFailure(httpStatus, code),
+		},
+		// Keep the rejection as the cause (DEV-14754). The message composes
+		// the rejection's message, so this costs nothing visually — the chain
+		// renderer drops text already on the line — while a rejection that
+		// wrapped something of its own (undici's `fetch failed` carrying
+		// `connect ECONNREFUSED …`) keeps the detail that says WHICH network
+		// failure it was.
+		{ cause: error },
+	);
+}
+
+/**
+ * Read the classification off an arbitrary thrown value, or `null` when it
+ * carries none. Structural rather than `instanceof` so a
+ * `LinearGraphQLError` that crossed a module-instance boundary (a vitest
+ * mock, a duplicated dependency copy) is still recognized — the envelope
+ * contract must not depend on prototype identity.
+ */
+export function readGraphQLErrorDetail(
+	error: unknown,
+): LinearGraphQLErrorDetail | null {
+	if (typeof error !== "object" || error === null) {
+		return null;
+	}
+	const candidate = error as {
+		httpStatus?: unknown;
+		code?: unknown;
+		retryable?: unknown;
+		resetAt?: unknown;
+	};
+	if (typeof candidate.retryable !== "boolean") {
+		return null;
+	}
+	const resetAt = normalizeResetAt(candidate.resetAt);
+	return {
+		httpStatus: asNumber(candidate.httpStatus),
+		code: asString(candidate.code),
+		retryable: candidate.retryable,
+		...(resetAt ? { resetAt } : {}),
+	};
+}
+
+/**
+ * Read the classification off a thrown value or anything it wraps (DEV-14754).
+ *
+ * A `LinearGraphQLError` that a command catches and rethrows with more context
+ * ("creating issue failed: ...", a retry helper's aggregate) is still a Linear
+ * GraphQL failure, but the classification sits one or more `cause` links down.
+ * Reading only the outermost link is precisely the blindness DEV-7987 exists
+ * to remove, reintroduced by the first wrapper in between.
+ *
+ * Safe by construction: only `toLinearGraphQLError` and the quota admission
+ * path attach a `retryable` boolean, so a link carrying one IS a classified
+ * Linear failure rather than an arbitrary error being upgraded into a verdict.
+ */
+export function readGraphQLErrorDetailFromChain(
+	error: unknown,
+): LinearGraphQLErrorDetail | null {
+	for (const link of errorChain(error)) {
+		const detail = readGraphQLErrorDetail(link);
+		if (detail) {
+			return detail;
+		}
+	}
+	return null;
+}

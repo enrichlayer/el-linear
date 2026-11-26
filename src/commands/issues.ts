@@ -2,6 +2,15 @@ import { execFileSync } from "node:child_process";
 import type { Command, OptionValues } from "commander";
 import { loadConfig } from "../config/config.js";
 import {
+	appendConsentReceipt,
+	consentLabelsIn,
+	evaluateConsentReceipt,
+	formatConsentReceipt,
+	formatCreateConsentRefusal,
+	formatUpdateConsentRefusal,
+	getConsentReceiptGateConfig,
+} from "../config/consent-receipt.js";
+import {
 	enrichProjectResolverError,
 	enrichValidationErrors,
 } from "../config/error-enrichment.js";
@@ -19,6 +28,10 @@ import {
 	enforceValidation,
 	validateIssueCreation,
 } from "../config/issue-validation.js";
+import {
+	type LabelAdvisorReceipt,
+	runLabelAdvisor,
+} from "../config/label-advisor.js";
 import { maybeEmitPinMismatchHint } from "../config/pin-hint.js";
 import {
 	resolveAssignee,
@@ -34,14 +47,8 @@ import {
 } from "../config/sop-label-validation.js";
 import { resolveDefaultStatus } from "../config/status-defaults.js";
 import { enforceTerms } from "../config/term-enforcer.js";
-import {
-	GET_ISSUE_RELATIONS_QUERY,
-	GET_ISSUE_STATE_HISTORY_QUERY,
-} from "../queries/issues.js";
-import type {
-	GetIssueRelationsResponse,
-	GetIssueStateHistoryResponse,
-} from "../queries/issues-types.js";
+import { GET_ISSUE_STATE_HISTORY_QUERY } from "../queries/issues.js";
+import type { GetIssueStateHistoryResponse } from "../queries/issues-types.js";
 import type {
 	IssueStateSpan,
 	LinearAttachment,
@@ -95,6 +102,7 @@ import {
 	parsePositiveInt,
 	parsePriorityFilter,
 	splitList,
+	validateIssueId,
 	validatePriority,
 } from "../utils/validators.js";
 import {
@@ -112,11 +120,11 @@ import {
 	resolveDescription,
 } from "./issues/description.js";
 import { handleLinkReferencesIssue } from "./issues/link-references.js";
+import { readIssueRelations } from "./issues/relation-reader.js";
 import {
-	buildIncomingRelationEntries,
-	buildOutgoingRelationEntries,
 	createRelations,
-	type RelatedIssueEntry,
+	deleteRelations,
+	selectRelationsToRemove,
 } from "./issues/relations.js";
 import { setupTreeCommand } from "./issues/tree.js";
 import { readIssues } from "./read-shortcut.js";
@@ -142,24 +150,44 @@ function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
-function warnClaimFailure(issueId: string, error: unknown): void {
+function warnClaimFailure(
+	issueId: string,
+	error: unknown,
+	context = "Branch operation succeeded",
+): void {
 	outputWarning(
-		`Branch operation succeeded for ${issueId}, but auto-claim failed: ${errorMessage(error)}`,
+		`${context} for ${issueId}, but auto-claim failed: ${errorMessage(error)}`,
 	);
 }
 
-async function maybeClaimBranchIssue(
-	issueId: string,
+/**
+ * Whether `issues create` should claim the issue it just made.
+ *
+ * `--claim` and `--no-claim` are a commander pair, so `options.claim` has
+ * THREE states, not two: `true` (--claim), `false` (--no-claim) and
+ * `undefined` (neither). Before --claim existed, the lone `--no-claim`
+ * declaration made the default `true`; declaring both flips that default to
+ * `undefined`. Every decision here is therefore written against the explicit
+ * values, so the pre-existing `--checkout` behaviour is unchanged: a branch
+ * claims unless the claim was explicitly suppressed.
+ */
+function shouldClaimCreatedIssue(
 	options: OptionValues,
+	branchCreated: boolean,
+): boolean {
+	if (options.claim === false) return false;
+	return options.claim === true || branchCreated;
+}
+
+async function maybeClaimIssue(
+	issueId: string,
 	issuesService: GraphQLIssuesService,
+	context: string,
 ): Promise<ClaimIssueResult | undefined> {
-	if (options.claim === false) {
-		return undefined;
-	}
 	try {
 		return await issuesService.claimIssue(issueId);
 	} catch (error) {
-		warnClaimFailure(issueId, error);
+		warnClaimFailure(issueId, error, context);
 		return undefined;
 	}
 }
@@ -198,6 +226,33 @@ function validateUpdateOptions(options: OptionValues): void {
 			"Cannot use --description and --append-description together",
 		);
 	}
+}
+
+/**
+ * Commander keeps only the LAST occurrence of a repeated `--label`/`--labels`,
+ * so `--label bug --label chore` silently became `chore` alone (DEV-14849).
+ * Accumulating into the comma-separated form these options already document
+ * means a repeated flag reaches the validator intact, which then reports the
+ * real problem ("Multiple type labels found: bug, chore") instead of creating
+ * an issue with a label the caller never saw dropped.
+ */
+export function collectList(value: string, previous?: string): string {
+	return previous ? `${previous},${value}` : value;
+}
+
+/**
+ * Fold the `--label` alias into `--labels`. The four call sites each used
+ * `if (options.label && !options.labels)`, which dropped `--label` outright
+ * when both spellings were given; merging keeps every name the caller passed
+ * and leaves de-duplication and type-label arity to the validator.
+ */
+export function mergeLabelAliases(options: OptionValues): void {
+	const merged = [options.labels, options.label]
+		.filter(
+			(value): value is string => typeof value === "string" && value.length > 0,
+		)
+		.join(",");
+	if (merged) options.labels = merged;
 }
 
 function buildUpdateArgs(
@@ -329,9 +384,7 @@ async function handleListIssues(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	if (options.label && !options.labels) {
-		options.labels = options.label;
-	}
+	mergeLabelAliases(options);
 	const rootOpts = getRootOpts(command);
 	const { issuesService } = await createIssuesService(rootOpts);
 
@@ -418,9 +471,7 @@ async function handleSearchIssues(
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
-	if (options.label && !options.labels) {
-		options.labels = options.label;
-	}
+	mergeLabelAliases(options);
 	const rootOpts = getRootOpts(command);
 	const { issuesService } = await createIssuesService(rootOpts);
 
@@ -1085,11 +1136,320 @@ async function enforceIntakeDecision(
 	throw new Error(`Issue creation blocked: ${message}`);
 }
 
+/**
+ * DEV-10372: consent-label receipt gate on create. A consent label (default
+ * `bot`) needs a receipt naming the issue, which cannot exist before the issue
+ * does, so an explicit consent label on create is refused with the two-step
+ * route. Dormant unless `validation.consentReceiptGate` is true; not bypassed
+ * by `--skip-validation`.
+ */
+function enforceCreateConsentLabels(options: OptionValues): void {
+	const gate = getConsentReceiptGateConfig();
+	if (!gate.enabled || !options.labels) {
+		return;
+	}
+	const requested = splitList(options.labels).map(
+		(label) => labelNameForId(label) ?? label,
+	);
+	const consent = consentLabelsIn(requested, gate.labels);
+	if (consent.length > 0) {
+		throw new Error(
+			`Issue creation blocked: ${formatCreateConsentRefusal(consent)}`,
+		);
+	}
+}
+
+interface LabelAdvice {
+	added: string[];
+	reason: string | null;
+	/**
+	 * DEV-10455: consent labels the advisor proposed together with receipt
+	 * policy fields. They are applied after create, with the receipt, by
+	 * `applyAdvisorConsent`; `added` never contains them.
+	 */
+	consent?: { labels: string[]; receipt: LabelAdvisorReceipt };
+}
+
+interface LabelAdvisorOutput {
+	added: string[];
+	reason: string | null;
+	consent?: {
+		labels: string[];
+		applied: boolean;
+		repo: string;
+		problem?: string;
+	};
+}
+
+/**
+ * DEV-10372: consult the optional label advisor and return the labels to add.
+ * Fail-closed on labels: an advisor failure warns and adds nothing. Labels the
+ * author already passed are not re-added. When the consent-receipt gate is on,
+ * an advisor-proposed consent label is dropped with a warning — the advisor
+ * cannot supply the receipt, and a create cannot carry one.
+ */
+function adviseLabels(
+	title: string | undefined,
+	options: OptionValues,
+	context: {
+		teamInput: string;
+		description: string | undefined;
+		status: string | undefined;
+	},
+): LabelAdvice | null {
+	if (options.labelAdvisor === false) {
+		return null;
+	}
+	const current = options.labels ? splitList(options.labels) : [];
+	const result = runLabelAdvisor(
+		{
+			team: context.teamInput || null,
+			project: typeof options.project === "string" ? options.project : null,
+			title: title ?? null,
+			description: context.description ?? null,
+			labels: current,
+			state: context.status ?? null,
+		},
+		loadConfig(),
+	);
+	if (result === null) {
+		return null;
+	}
+	if (!result.ok) {
+		outputWarning(
+			`label advisor failed; creating without advisor labels: ${result.error}`,
+		);
+		return null;
+	}
+	const present = new Set(current.map((label) => label.toLowerCase()));
+	let added = result.labels.filter(
+		(label) => !present.has(label.toLowerCase()),
+	);
+	const gate = getConsentReceiptGateConfig();
+	const consent = consentLabelsIn(added, gate.labels);
+	let deferred: LabelAdvice["consent"];
+	if (consent.length > 0 && (gate.enabled || result.receipt)) {
+		const held = new Set(consent.map((label) => label.toLowerCase()));
+		added = added.filter((label) => !held.has(label.toLowerCase()));
+		if (result.receipt) {
+			// DEV-10455: the advisor supplied the receipt policy fields, so the
+			// consent label is applied right after create, in one update with a
+			// receipt naming the new issue (see applyAdvisorConsent).
+			deferred = { labels: consent, receipt: result.receipt };
+		} else {
+			outputWarning(
+				`label advisor proposed ${consent.join(", ")}, not applied: a consent label needs an el-intake-decision:v1 receipt naming the issue. Apply it after creation with \`el-linear issues update <ID> --labels ${consent.join(",")}\` and the receipt in the description.`,
+			);
+		}
+	}
+	if (added.length === 0 && !deferred) {
+		return null;
+	}
+	if (added.length > 0) {
+		outputWarning(
+			`labels added by advisor: ${added.join(", ")}${result.reason ? ` (${result.reason})` : ""}`,
+		);
+	}
+	return {
+		added,
+		reason: result.reason,
+		...(deferred ? { consent: deferred } : {}),
+	};
+}
+
+/**
+ * DEV-10455: apply advisor-proposed consent labels after create, in ONE
+ * update that also appends an `el-intake-decision:v1` receipt naming the new
+ * issue. The advisor supplied the policy fields (`repo`, `reason`); el-linear
+ * adds only the identifier and the acting Linear user, read from the API.
+ *
+ * Fail-closed: any problem (an app viewer, a description that already holds a
+ * receipt marker, a failed update, a stored receipt that does not read back
+ * as valid) warns and leaves the issue without the consent label — or, when
+ * the write landed but the read-back fails, says so loudly. Never throws: the
+ * issue already exists.
+ *
+ * Raw GraphQL for the read: it batches `viewer` (including the `app` flag the
+ * SDK's typed viewer wrapper does not expose) with the issue in one round
+ * trip.
+ */
+async function applyAdvisorConsent(
+	created: { id: string; identifier: string },
+	consent: NonNullable<LabelAdvice["consent"]>,
+	services: {
+		graphQLService: GraphQLService;
+		issuesService: GraphQLIssuesService;
+	},
+): Promise<{ applied: boolean; problem?: string; issue?: LinearIssue }> {
+	const labels = consent.labels.join(", ");
+	const skip = (problem: string) => {
+		outputWarning(
+			`label advisor proposed ${labels}, not applied: ${problem}. Apply it with \`el-linear issues update ${created.identifier} --labels ${consent.labels.join(",")}\` and a receipt in the description.`,
+		);
+		return { applied: false, problem };
+	};
+	try {
+		const current = await services.graphQLService.rawRequest<{
+			viewer: {
+				name: string | null;
+				email: string | null;
+				app: boolean | null;
+			} | null;
+			issue: { identifier: string; description: string | null } | null;
+		}>(
+			"query($id: String!) { viewer { name email app } issue(id: $id) { identifier description } }",
+			{ id: created.id },
+		);
+		if (!current.issue) {
+			return skip(`issue ${created.identifier} could not be read back`);
+		}
+		const viewer = current.viewer;
+		if (!viewer || viewer.app === true) {
+			return skip(
+				"consent must be attributable to a person, and the authenticated Linear viewer is not one",
+			);
+		}
+		const actor = (viewer.name?.trim() || viewer.email?.trim() || "").slice(
+			0,
+			160,
+		);
+		if (!actor) {
+			return skip("the authenticated Linear viewer has no name or email");
+		}
+		const existing = current.issue.description ?? "";
+		const description = appendConsentReceipt(
+			existing,
+			formatConsentReceipt({
+				repo: consent.receipt.repo,
+				reason: consent.receipt.reason,
+				actor,
+				issue: current.issue.identifier,
+			}),
+		);
+		const planned = evaluateConsentReceipt(
+			description,
+			current.issue.identifier,
+		);
+		if (!planned.ok) {
+			return skip(planned.problem);
+		}
+		const updated = await services.issuesService.updateIssue(
+			{ id: created.id, description, labelIds: consent.labels },
+			"adding",
+		);
+		const stored = evaluateConsentReceipt(
+			updated.description ?? "",
+			current.issue.identifier,
+		);
+		if (!stored.ok) {
+			outputWarning(
+				`label advisor applied ${labels} to ${created.identifier}, but the stored receipt does not read back as valid (${stored.problem}); fix the receipt or remove the label.`,
+			);
+			return { applied: true, problem: stored.problem, issue: updated };
+		}
+		outputWarning(
+			`labels added by advisor: ${labels} with an el-intake-decision:v1 receipt for ${current.issue.identifier} (repo ${consent.receipt.repo}, actor ${actor})`,
+		);
+		return { applied: true, issue: updated };
+	} catch (error) {
+		return skip(error instanceof Error ? error.message : String(error));
+	}
+}
+
+/**
+ * DEV-10372: consent-label receipt gate on update. When the update newly
+ * applies a consent label, the resulting description must carry exactly one
+ * valid automatic-implementation receipt for this issue; otherwise refuse and
+ * name what is missing. Labels already on the issue are not re-checked.
+ */
+async function enforceUpdateConsentLabels(
+	issueId: string,
+	options: OptionValues,
+	graphQLService: GraphQLService,
+	linearService: LinearService,
+): Promise<void> {
+	const gate = getConsentReceiptGateConfig();
+	if (!gate.enabled || !options.labels) {
+		return;
+	}
+	const requested = splitList(options.labels).map(
+		(label) => labelNameForId(label) ?? label,
+	);
+	const consent = consentLabelsIn(requested, gate.labels);
+	if (consent.length === 0) {
+		return;
+	}
+	const resolved = await linearService.resolveIssueId(issueId);
+	const current = await graphQLService.rawRequest<{
+		issue: {
+			identifier: string;
+			description: string | null;
+			labels: { nodes: { name: string }[] };
+		} | null;
+	}>(
+		"query($id: String!) { issue(id: $id) { identifier description labels { nodes { name } } } }",
+		{ id: resolved },
+	);
+	if (!current.issue) {
+		throw new Error(`Issue "${issueId}" not found`);
+	}
+	const existing = new Set(
+		current.issue.labels.nodes.map((label) => label.name.toLowerCase()),
+	);
+	const newlyApplied = consent.filter(
+		(label) => !existing.has(label.toLowerCase()),
+	);
+	if (newlyApplied.length === 0) {
+		return;
+	}
+	const description =
+		typeof options.description === "string"
+			? options.description
+			: (current.issue.description ?? "");
+	const evaluation = evaluateConsentReceipt(
+		description,
+		current.issue.identifier,
+	);
+	if (!evaluation.ok) {
+		throw new Error(
+			`Issue update blocked: ${formatUpdateConsentRefusal(newlyApplied, current.issue.identifier, evaluation.problem)}`,
+		);
+	}
+}
+
+/**
+ * The configured team key for a resolved team UUID, so the label advisor sees
+ * the canonical key (`DEV`) rather than whatever alias the author typed.
+ */
+function teamKeyForId(teamId: string | undefined): string | undefined {
+	if (!teamId) return undefined;
+	for (const [key, id] of Object.entries(loadConfig().teams ?? {})) {
+		if (id === teamId) return key;
+	}
+	return undefined;
+}
+
+/** Reverse-map a configured label UUID to its name, so a UUID cannot bypass the gate. */
+function labelNameForId(value: string): string | undefined {
+	const labels = loadConfig().labels;
+	const maps = [labels?.workspace ?? {}, ...Object.values(labels?.teams ?? {})];
+	for (const map of maps) {
+		for (const [name, id] of Object.entries(map)) {
+			if (id === value) return name;
+		}
+	}
+	return undefined;
+}
+
 async function handleCreateIssue(
 	title: string | undefined,
 	options: OptionValues,
 	command: Command,
 ): Promise<void> {
+	const issueId =
+		options.issueId !== undefined
+			? validateIssueId(options.issueId)
+			: undefined;
 	const rootOpts = getRootOpts(command);
 	// DEV-7277: non-blocking nudge when this write is landing via the
 	// machine-global active profile in a repo that hasn't pinned a workspace.
@@ -1111,6 +1471,7 @@ async function handleCreateIssue(
 	// intentionally contains backslash sequences.
 	const rawDescription = resolveDescription(options);
 	await enforceIntakeDecision(rawDescription ?? "", options);
+	enforceCreateConsentLabels(options);
 	const {
 		teamInput,
 		teamId,
@@ -1121,6 +1482,23 @@ async function handleCreateIssue(
 		subscriberIds,
 		priority,
 	} = await resolveCreateInputs(title ?? "", options, rootOpts, rawDescription);
+
+	// DEV-10372: optional label advisor. Runs after validation/normalization so
+	// it sees the canonical labels, and before every gate that reads labels.
+	const labelAdvice = adviseLabels(title, options, {
+		teamInput: teamKeyForId(teamId) ?? teamInput,
+		description: rawDescription,
+		status,
+	});
+	if (labelAdvice) {
+		for (const id of resolveLabels(labelAdvice.added)) {
+			if (!labelIds.includes(id)) labelIds.push(id);
+		}
+		options.labels = [
+			...(options.labels ? splitList(options.labels) : []),
+			...labelAdvice.added,
+		].join(",");
+	}
 
 	const uploadResults = await uploadAttachmentsIfNeeded(options, rootOpts);
 	const descriptionWithAttachments = buildDescriptionWithAttachments(
@@ -1201,6 +1579,7 @@ async function handleCreateIssue(
 	const result = await withProjectResolverEnrichment(
 		() =>
 			issuesService.createIssue({
+				...(issueId !== undefined ? { id: issueId } : {}),
 				// title is omitted when --from-template is set without an override,
 				// so Linear copies the template's title server-side.
 				...(title ? { title } : {}),
@@ -1228,85 +1607,135 @@ async function handleCreateIssue(
 		{ team: options.team ?? loadConfig().defaultTeam, title },
 		{ graphQLService, linearService },
 	);
-	const relations = await createRelations(
-		result.id,
-		options,
-		graphQLService,
-		linearService,
-	);
-	// Pass the ORIGINAL description (pre-wrap) so the extractor's prose-keyword inference
-	// ("blocked by", "duplicates", etc.) sees `keyword DEV-100` instead of `keyword [DEV-100](url)`.
-	// After wrapping, the keyword regex's trailing-whitespace anchor fails to match the inserted `[`.
-	const autoLinked = await maybeAutoLink({
-		issueId: result.id,
-		identifier: result.identifier,
-		description: description || undefined,
-		options,
-		preResolved: prepared.preResolved,
-		graphQLService,
-		linearService,
-	});
-
-	// Images are already embedded inline as markdown in the description,
-	// so only create separate attachment records for non-image files.
-	const attachments: LinearAttachment[] = [];
-	if (uploadResults.length > 0) {
-		const attachmentsService = await createGraphQLAttachmentsService(rootOpts);
-		for (const uploadResult of uploadResults) {
-			if (!isImageFile(uploadResult.filename)) {
-				const attachment = await attachmentsService.createAttachment({
-					issueId: result.id,
-					url: uploadResult.assetUrl,
-					title: uploadResult.filename,
+	// DEV-15327: from here the write has succeeded, so every remaining step is
+	// post-create enrichment. A failure in any of them used to surface as an
+	// ordinary non-zero exit, indistinguishable from a rejected create — and a
+	// caller retrying on that filed a duplicate (DEV-15257/DEV-15258). Name the
+	// created issue unmistakably instead, so the caller never has to guess
+	// whether a ghost exists.
+	try {
+		// DEV-10455: advisor-proposed consent label + receipt, applied now that
+		// the issue (and its identifier) exists.
+		let issue = result;
+		let labelAdvisorOutput: LabelAdvisorOutput | undefined;
+		if (labelAdvice) {
+			labelAdvisorOutput = {
+				added: [...labelAdvice.added],
+				reason: labelAdvice.reason,
+			};
+			if (labelAdvice.consent) {
+				const outcome = await applyAdvisorConsent(result, labelAdvice.consent, {
+					graphQLService,
+					issuesService,
 				});
-				attachments.push(attachment);
+				if (outcome.issue) issue = { ...result, ...outcome.issue };
+				if (outcome.applied) {
+					labelAdvisorOutput.added.push(...labelAdvice.consent.labels);
+				}
+				labelAdvisorOutput.consent = {
+					labels: labelAdvice.consent.labels,
+					applied: outcome.applied,
+					repo: labelAdvice.consent.receipt.repo,
+					...(outcome.problem ? { problem: outcome.problem } : {}),
+				};
 			}
 		}
-	}
+		const relations = await createRelations(
+			result.id,
+			options,
+			graphQLService,
+			linearService,
+		);
+		// Pass the ORIGINAL description (pre-wrap) so the extractor's prose-keyword inference
+		// ("blocked by", "duplicates", etc.) sees `keyword DEV-100` instead of `keyword [DEV-100](url)`.
+		// After wrapping, the keyword regex's trailing-whitespace anchor fails to match the inserted `[`.
+		const autoLinked = await maybeAutoLink({
+			issueId: result.id,
+			identifier: result.identifier,
+			description: description || undefined,
+			options,
+			preResolved: prepared.preResolved,
+			graphQLService,
+			linearService,
+		});
 
-	let branch: string | undefined;
-	let claim: ClaimIssueResult | undefined;
-	if (options.checkout && result.branchName) {
-		const branchName = toBranchName(result.branchName);
-		// Only treat the branch as created (and surface it in the output) when
-		// the checkout actually happened — outside a git repo gitCheckoutBranch
-		// warns and skips, and claiming a branch / a missing marker afterward
-		// would be a contradictory second warning (DEV-4293 cycle-1).
-		if (gitCheckoutBranch(branchName)) {
-			branch = branchName;
-			// Record the issue→branch link as git metadata (DEV-4293) so the
-			// DEV-4241 hook can confirm a workflow was established without parsing
-			// the branch name. Best-effort: never let a marker-write failure abort
-			// a successful issue creation.
-			try {
-				setBranchLinearIssue(branch, result.identifier);
-			} catch {
-				outputWarning(
-					`Created branch ${branch} but could not record its Linear issue marker. ` +
-						`Run 'el-linear issues mark-branch ${result.identifier}' from the branch to set it.`,
-				);
+		// Images are already embedded inline as markdown in the description,
+		// so only create separate attachment records for non-image files.
+		const attachments: LinearAttachment[] = [];
+		if (uploadResults.length > 0) {
+			const attachmentsService =
+				await createGraphQLAttachmentsService(rootOpts);
+			for (const uploadResult of uploadResults) {
+				if (!isImageFile(uploadResult.filename)) {
+					const attachment = await attachmentsService.createAttachment({
+						issueId: result.id,
+						url: uploadResult.assetUrl,
+						title: uploadResult.filename,
+					});
+					attachments.push(attachment);
+				}
 			}
-			claim = await maybeClaimBranchIssue(
+		}
+
+		let branch: string | undefined;
+		let claim: ClaimIssueResult | undefined;
+		if (options.checkout && result.branchName) {
+			const branchName = toBranchName(result.branchName);
+			// Only treat the branch as created (and surface it in the output) when
+			// the checkout actually happened — outside a git repo gitCheckoutBranch
+			// warns and skips, and claiming a branch / a missing marker afterward
+			// would be a contradictory second warning (DEV-4293 cycle-1).
+			if (gitCheckoutBranch(branchName)) {
+				branch = branchName;
+				// Record the issue→branch link as git metadata (DEV-4293) so the
+				// DEV-4241 hook can confirm a workflow was established without parsing
+				// the branch name. Best-effort: never let a marker-write failure abort
+				// a successful issue creation.
+				try {
+					setBranchLinearIssue(branch, result.identifier);
+				} catch {
+					outputWarning(
+						`Created branch ${branch} but could not record its Linear issue marker. ` +
+							`Run 'el-linear issues mark-branch ${result.identifier}' from the branch to set it.`,
+					);
+				}
+			}
+		}
+		// DEV-10654: `--claim` claims WITHOUT cutting a branch. Remote-workspace
+		// authoring (Factory) needs the claim -- an unclaimed issue sitting in an
+		// unstarted state is eligible for the bot-layer sweep -- but a local branch
+		// there is wrong, and `--checkout` welds the two together.
+		if (shouldClaimCreatedIssue(options, branch !== undefined)) {
+			claim = await maybeClaimIssue(
 				result.identifier,
-				options,
 				issuesService,
+				branch ? "Branch operation succeeded" : "Issue was created",
 			);
 		}
-	}
 
-	const output = {
-		...result,
-		...(branch ? { branch } : {}),
-		...(claim ? { claim } : {}),
-		...(relations.length > 0 ? { relations } : {}),
-		...(autoLinked ? { autoLinked } : {}),
-		...(attachments.length === 1
-			? { attachment: attachments[0] }
-			: attachments.length > 1
-				? { attachments }
-				: {}),
-	};
-	outputSuccess(output);
+		const output = {
+			...issue,
+			...(labelAdvisorOutput ? { labelAdvisor: labelAdvisorOutput } : {}),
+			...(branch ? { branch } : {}),
+			...(claim ? { claim } : {}),
+			...(relations.length > 0 ? { relations } : {}),
+			...(autoLinked ? { autoLinked } : {}),
+			...(attachments.length === 1
+				? { attachment: attachments[0] }
+				: attachments.length > 1
+					? { attachments }
+					: {}),
+		};
+		outputSuccess(output);
+	} catch (error) {
+		const detail = error instanceof Error ? error.message : String(error);
+		throw new Error(
+			`Issue ${result.identifier} was created (id ${result.id}) — a post-create step then failed, so this failure is NOT a rejected create. ` +
+				`Do not re-run 'issues create': a retry files a duplicate. ` +
+				`Fix forward with 'el-linear issues update ${result.identifier}' or delete the issue. ` +
+				`Post-create failure: ${detail}`,
+		);
+	}
 }
 
 async function handleHistoryIssue(
@@ -1377,39 +1806,61 @@ async function handleRelateIssue(
 	});
 }
 
-async function handleRelatedIssues(
+/**
+ * DEV-14607 — retract a relation. `issues relate` could create one but
+ * nothing could remove it, so a relation recorded from an analysis that
+ * production later refuted had to stay on the issue with only a comment
+ * saying it was wrong.
+ */
+async function handleUnrelateIssue(
 	issueId: string,
-	_options: OptionValues,
+	options: OptionValues,
 	command: Command,
 ): Promise<void> {
 	const rootOpts = getRootOpts(command);
 	const graphQLService = await createGraphQLService(rootOpts);
 	const linearService = await createLinearService(rootOpts);
 
-	const resolvedId = await linearService.resolveIssueId(issueId);
-	const result = await graphQLService.rawRequest<GetIssueRelationsResponse>(
-		GET_ISSUE_RELATIONS_QUERY,
-		{ id: resolvedId },
-	);
-
-	if (!result.issue) {
-		throw new Error(`Issue "${issueId}" not found`);
+	if (
+		!options.relatedTo &&
+		!options.blocks &&
+		!options.blockedBy &&
+		!options.duplicateOf
+	) {
+		throw new Error(
+			"Specify at least one of: --related-to, --blocks, --blocked-by, --duplicate-of",
+		);
 	}
 
-	const issue = result.issue;
+	const sourceId = await linearService.resolveIssueId(issueId);
+	// The bounded COMPLETE reader, never a single page: deciding a removal from
+	// a partial relation list could report "no such relation" for one that is
+	// really there, and it fails rather than returning a short array.
+	const current = await readIssueRelations(sourceId, rootOpts);
+	if (current.meta.relations_complete !== true) {
+		throw new Error(
+			"Refusing to remove a relation from an incomplete relation read",
+		);
+	}
 
-	const entries: RelatedIssueEntry[] = [
-		...buildOutgoingRelationEntries(issue.relations.nodes),
-		...buildIncomingRelationEntries(issue.inverseRelations.nodes),
-	];
+	const targets = selectRelationsToRemove(current.data, options);
+	const removed = await deleteRelations(targets, graphQLService);
 
 	outputSuccess({
-		id: issue.id,
-		identifier: issue.identifier,
-		title: issue.title,
-		data: entries,
-		meta: { count: entries.length },
+		data: removed,
+		meta: { count: removed.length, source: issueId, removed: true },
 	});
+}
+
+async function handleRelatedIssues(
+	issueId: string,
+	_options: OptionValues,
+	command: Command,
+): Promise<void> {
+	const rootOpts = getRootOpts(command);
+	const linearService = await createLinearService(rootOpts);
+	const resolvedId = await linearService.resolveIssueId(issueId);
+	outputSuccess(await readIssueRelations(resolvedId, rootOpts));
 }
 
 async function handleStartIssue(
@@ -1480,9 +1931,7 @@ async function handleUpdateIssue(
 	if (options.state && !options.status) {
 		options.status = options.state;
 	}
-	if (options.label && !options.labels) {
-		options.labels = options.label;
-	}
+	mergeLabelAliases(options);
 	if (options.parent && !options.parentTicket) {
 		options.parentTicket = options.parent;
 	}
@@ -1559,6 +2008,12 @@ async function handleUpdateIssue(
 			strict: options.strict,
 		});
 	}
+	await enforceUpdateConsentLabels(
+		issueId,
+		options,
+		graphQLService,
+		linearService,
+	);
 	// Save the original (pre-wrap) description so we can pass it to maybeAutoLink later.
 	// The wrapped form breaks prose-keyword inference because the inserted `[` defeats the
 	// trailing-whitespace anchor in patterns like /\bblocked by\s*$/.
@@ -1914,8 +2369,12 @@ export function setupIssuesCommands(program: Command): void {
 		)
 		.option("--project <project>", "filter by project name or ID")
 		.option("--no-project", "filter issues with no project assigned")
-		.option("--labels <labels>", "filter by labels (comma-separated names)")
-		.option("--label <labels>", "alias for --labels")
+		.option(
+			"--labels <labels>",
+			"filter by labels (comma-separated names; repeatable)",
+			collectList,
+		)
+		.option("--label <labels>", "alias for --labels", collectList)
 		.option(
 			"--status <status>",
 			"filter by status (comma-separated, e.g. Todo,Backlog)",
@@ -1959,8 +2418,12 @@ export function setupIssuesCommands(program: Command): void {
 			"--include-closed",
 			"include issues in terminal states (Done / Canceled). Default is to exclude them; pass this flag to see everything. Ignored when --status is set (explicit choice wins).",
 		)
-		.option("--labels <labels>", "filter by labels (comma-separated names)")
-		.option("--label <labels>", "alias for --labels")
+		.option(
+			"--labels <labels>",
+			"filter by labels (comma-separated names; repeatable)",
+			collectList,
+		)
+		.option("--label <labels>", "alias for --labels", collectList)
 		.option(
 			"--priority <priority>",
 			"filter by priority (comma-separated: urgent,high,medium,low,none or 0-4)",
@@ -1990,6 +2453,10 @@ export function setupIssuesCommands(program: Command): void {
 		.option(
 			"-t, --title <title>",
 			"issue title (alternative to positional argument)",
+		)
+		.option(
+			"--issue-id <uuid-v4>",
+			"caller-selected issue UUIDv4 for stable identity; after a lost response or duplicate-ID error, look up this ID (replay success is not guaranteed)",
 		)
 		.option("-d, --description <desc>", "issue description")
 		.option(
@@ -2028,9 +2495,10 @@ export function setupIssuesCommands(program: Command): void {
 		.option("--team <team>", "team key or name (default: from config)")
 		.option(
 			"--labels <labels>",
-			"labels (comma-separated names, auto-resolved per team)",
+			"labels (comma-separated names, auto-resolved per team; repeatable)",
+			collectList,
 		)
-		.option("--label <labels>", "alias for --labels")
+		.option("--label <labels>", "alias for --labels", collectList)
 		.option("--claude", "add the workspace-level 'claude' label")
 		.option("--project-milestone <milestone>", "project milestone name or ID")
 		.option("--cycle <cycle>", "cycle name or ID")
@@ -2066,8 +2534,12 @@ export function setupIssuesCommands(program: Command): void {
 			"create and checkout a git branch named after the issue",
 		)
 		.option(
+			"--claim",
+			"assign the issue to the current Linear user and move it to the first started state, without creating a git branch (use --checkout to also cut one)",
+		)
+		.option(
 			"--no-claim",
-			"with --checkout, skip assigning the issue to the current Linear user and moving it to the first started state",
+			"skip the claim that --checkout and --claim perform (assigning the issue to the current Linear user and moving it to the first started state)",
 		)
 		.option(
 			"--skip-validation",
@@ -2094,6 +2566,10 @@ export function setupIssuesCommands(program: Command): void {
 			"skip auto-linking issue references found in the description",
 		)
 		.option(
+			"--no-label-advisor",
+			"skip the configured label advisor (config.labelAdvisor / EL_LINEAR_LABEL_ADVISOR) for this issue",
+		)
+		.option(
 			"--footer <text>",
 			"text appended to the description (overrides config.messageFooter)",
 		)
@@ -2110,9 +2586,7 @@ export function setupIssuesCommands(program: Command): void {
 					command: Command,
 				) => {
 					// Normalize --label alias to --labels
-					if (options.label && !options.labels) {
-						options.labels = options.label;
-					}
+					mergeLabelAliases(options);
 					// Normalize --parent alias to --parent-ticket
 					if (options.parent && !options.parentTicket) {
 						options.parentTicket = options.parent;
@@ -2206,8 +2680,12 @@ export function setupIssuesCommands(program: Command): void {
 		)
 		.option("--clear-delegate", "remove the issue delegate")
 		.option("--project <project>", "new project (name or ID)")
-		.option("--labels <labels>", "labels (comma-separated names or IDs)")
-		.option("--label <labels>", "alias for --labels")
+		.option(
+			"--labels <labels>",
+			"labels (comma-separated names or IDs; repeatable)",
+			collectList,
+		)
+		.option("--label <labels>", "alias for --labels", collectList)
 		.option(
 			"--label-by <mode>",
 			"how to apply labels: 'adding' (default) or 'overwriting'",
@@ -2312,10 +2790,26 @@ export function setupIssuesCommands(program: Command): void {
 		.action(handleAsyncCommand(handleRelateIssue));
 
 	issues
+		.command("unrelate <issueId>")
+		.description("Remove issue relations created by `issues relate`.")
+		.option("--related-to <issues>", "related issues (comma-separated)")
+		.option("--blocks <issues>", "issues this blocks (comma-separated)")
+		.option("--blocked-by <issues>", "issues blocking this (comma-separated)")
+		.addHelpText(
+			"after",
+			"\nBoth UUID and identifiers like ABC-123 are supported." +
+				"\nThe flag must match the one that created the relation: `--blocks` and" +
+				"\n`--blocked-by` name opposite directions and cannot retract each other." +
+				"\nRun `issues related <issueId>` first to see what is there.",
+		)
+		.option("--duplicate-of <issue>", "remove a duplicate-of relation")
+		.action(handleAsyncCommand(handleUnrelateIssue));
+
+	issues
 		.command("related <issueId>")
 		.alias("relations")
 		.description(
-			"List all relations for an issue (related, blocks, blockedBy, duplicate).",
+			"List all relations for an issue (related, blocks, blockedBy, duplicate, similar).",
 		)
 		.addHelpText(
 			"after",

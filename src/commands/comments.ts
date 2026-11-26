@@ -167,11 +167,19 @@ function transformComment(
 		id: comment.id,
 		body: comment.body,
 		url: comment.url ?? undefined,
-		user: {
-			id: comment.user.id,
-			name: resolveUserDisplayName(comment.user.id, comment.user.name),
-			url: comment.user.url ?? undefined,
-		},
+		user: comment.user
+			? {
+					id: comment.user.id,
+					name: resolveUserDisplayName(comment.user.id, comment.user.name),
+					url: comment.user.url ?? undefined,
+				}
+			: undefined,
+		...(comment.botActor?.name
+			? { botActor: { name: comment.botActor.name } }
+			: {}),
+		...(comment.externalUser?.name
+			? { externalUser: { name: comment.externalUser.name } }
+			: {}),
 		createdAt: comment.createdAt,
 		updatedAt: comment.updatedAt,
 		...(options.fullBodySummary ? { _summaryFullBody: true } : {}),

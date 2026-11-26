@@ -1,7 +1,24 @@
-import { type IssueLabel, LinearClient } from "@linear/sdk";
+import { LinearClient } from "@linear/sdk";
 import type { LinearCredential } from "../auth/linear-credential.js";
 import { getActiveAuth } from "../auth/token-resolver.js";
 import { resolveUserDisplayName } from "../config/resolver.js";
+import {
+	GET_CYCLE_DETAIL_QUERY,
+	GET_CYCLES_CATALOG_QUERY,
+	GET_LABELS_CATALOG_QUERY,
+	GET_PROJECTS_CATALOG_QUERY,
+	RESOLVE_PROJECT_QUERY,
+} from "../queries/catalog.js";
+import type {
+	CatalogCycleNode,
+	CatalogIssueNode,
+	CatalogProjectNode,
+	GetCycleDetailResponse,
+	GetCyclesCatalogResponse,
+	GetLabelsCatalogResponse,
+	GetProjectsCatalogResponse,
+	ResolveProjectCatalogResponse,
+} from "../queries/catalog-types.js";
 import type {
 	LinearComment,
 	LinearCycleDetail,
@@ -16,17 +33,25 @@ import type {
 import type { AuthOptions } from "./auth.js";
 import { toISOStringOrNow, toISOStringOrUndefined } from "./date-format.js";
 import { multipleMatchesError, notFoundError } from "./error-messages.js";
+import {
+	createClientCredentialsTokenRenewal,
+	GraphQLService,
+	instrumentLinearClient,
+} from "./graphql-service.js";
 import { parseIssueIdentifier } from "./identifier-parser.js";
+import {
+	graphQLErrorHttpStatus,
+	toLinearGraphQLError,
+} from "./linear-graphql-error.js";
 import { parseProjectSlugId } from "./project-slug.js";
+import {
+	createOAuthProfileRateLimitAdmission,
+	type RateLimitAdmission,
+	RateLimitAdmissionRefusal,
+} from "./rate-limit-admission.js";
 import { isUuid } from "./uuid.js";
 
 const DEFAULT_CYCLE_PAGINATION_LIMIT = 250;
-
-// The Linear SDK types don't accept string orderBy values, but the API does.
-// This helper avoids repeating the double-cast at every call site.
-function sdkOrderBy<T>(field: string): T {
-	return field as unknown as T;
-}
 
 // Filter-building helpers for Linear SDK queries.
 function eqFilter(value: unknown): { eq: unknown } {
@@ -43,6 +68,56 @@ function nonEmptyFilter(
 	return Object.keys(filter).length > 0 ? filter : undefined;
 }
 
+function projectFromCatalog(project: CatalogProjectNode): LinearProject {
+	return {
+		id: project.id,
+		name: project.name,
+		description: project.description || undefined,
+		state: project.state,
+		progress: project.progress,
+		teams: project.teams.nodes,
+		lead: project.lead ?? undefined,
+		targetDate: toISOStringOrUndefined(project.targetDate),
+		createdAt: toISOStringOrNow(project.createdAt),
+		updatedAt: toISOStringOrNow(project.updatedAt),
+	};
+}
+
+function cycleFromCatalog(cycle: CatalogCycleNode): LinearCycleSummary {
+	return {
+		id: cycle.id,
+		name: cycle.name ?? undefined,
+		number: cycle.number,
+		startsAt: toISOStringOrUndefined(cycle.startsAt),
+		endsAt: toISOStringOrUndefined(cycle.endsAt),
+		isActive: cycle.isActive,
+		isPrevious: cycle.isPrevious,
+		isNext: cycle.isNext,
+		progress: cycle.progress,
+		issueCountHistory: cycle.issueCountHistory ?? undefined,
+		team: cycle.team ?? undefined,
+	};
+}
+
+function issueFromCatalog(issue: CatalogIssueNode): LinearIssue {
+	return {
+		id: issue.id,
+		identifier: issue.identifier,
+		url: issue.url,
+		title: issue.title,
+		description: issue.description || undefined,
+		priority: issue.priority as LinearPriority,
+		estimate: issue.estimate || undefined,
+		state: issue.state ?? undefined,
+		assignee: issue.assignee ?? undefined,
+		team: issue.team ?? undefined,
+		project: issue.project ?? undefined,
+		labels: issue.labels.nodes,
+		createdAt: toISOStringOrNow(issue.createdAt),
+		updatedAt: toISOStringOrNow(issue.updatedAt),
+	};
+}
+
 /**
  * Constructor arg for `LinearService`. Re-exported alias of the shared
  * `LinearCredential` union (`{ apiKey } | { oauthToken }`). See
@@ -51,21 +126,144 @@ function nonEmptyFilter(
  */
 export type LinearServiceAuth = LinearCredential;
 
-function buildLinearClient(auth: LinearServiceAuth): LinearClient {
-	if ("oauthToken" in auth) {
-		// Linear's SDK natively supports OAuth via the `accessToken` option,
-		// which causes the underlying transport to send
-		// `Authorization: Bearer <token>` instead of the personal-token shape.
-		return new LinearClient({ accessToken: auth.oauthToken });
+type LinearSdkRequest = <Response, Variables extends Record<string, unknown>>(
+	document: string,
+	variables?: Variables,
+) => Promise<Response>;
+
+interface ClassifiableSdkClient {
+	_request?: LinearSdkRequest;
+}
+
+interface RenewableSdkTransport {
+	request<T>(
+		document: unknown,
+		variables?: Record<string, unknown>,
+		requestHeaders?: Record<string, string>,
+	): Promise<T>;
+	setHeader(name: string, value: string): void;
+}
+
+function errorMessage(error: unknown): string {
+	if (error instanceof Error) return error.message;
+	if (typeof error === "object" && error !== null) {
+		const message = (error as { message?: unknown }).message;
+		if (typeof message === "string") return message;
 	}
-	return new LinearClient({ apiKey: auth.apiKey });
+	return String(error);
+}
+
+function findRateLimitAdmissionRefusal(
+	error: unknown,
+): RateLimitAdmissionRefusal | null {
+	if (error instanceof RateLimitAdmissionRefusal) return error;
+	if (typeof error !== "object" || error === null) return null;
+	const raw = (error as { raw?: unknown }).raw;
+	return raw instanceof RateLimitAdmissionRefusal ? raw : null;
+}
+
+/**
+ * Classify every generated SDK operation after the SDK has normalized its raw
+ * transport rejection. Patching `client.client.request` is too early: the
+ * LinearClient constructor wraps that transport with `parseLinearError`, which
+ * would immediately strip our additive classification fields again. Keeping
+ * the wrapper here (rather than guessing in `outputError`) also leaves local
+ * validation and not-found errors unclassified.
+ */
+export function instrumentLinearGraphQLErrorClassification(
+	client: LinearClient,
+): LinearClient {
+	const sdk = client as unknown as ClassifiableSdkClient;
+	if (!sdk._request) return client;
+	const originalRequest = sdk._request.bind(sdk);
+	sdk._request = async <Response, Variables extends Record<string, unknown>>(
+		document: string,
+		variables?: Variables,
+	): Promise<Response> => {
+		try {
+			return await originalRequest<Response, Variables>(document, variables);
+		} catch (error) {
+			const refusal = findRateLimitAdmissionRefusal(error);
+			if (refusal) throw refusal;
+			throw toLinearGraphQLError(error, errorMessage(error));
+		}
+	};
+	return client;
+}
+
+export function instrumentClientCredentialsRenewal(
+	client: LinearClient,
+	renewAccessToken?: () => Promise<string>,
+): LinearClient {
+	if (!renewAccessToken) return client;
+	const transport = (client as unknown as { client?: RenewableSdkTransport })
+		.client;
+	if (!transport?.request || !transport.setHeader) return client;
+	const originalRequest = transport.request.bind(transport);
+	transport.request = async <T>(
+		document: unknown,
+		variables?: Record<string, unknown>,
+		requestHeaders?: Record<string, string>,
+	): Promise<T> => {
+		try {
+			return await originalRequest<T>(document, variables, requestHeaders);
+		} catch (error) {
+			if (graphQLErrorHttpStatus(error) !== 401) throw error;
+			const token = await renewAccessToken();
+			transport.setHeader("authorization", `Bearer ${token}`);
+			return originalRequest<T>(document, variables, requestHeaders);
+		}
+	};
+	return client;
+}
+
+function buildLinearClient(
+	auth: LinearServiceAuth,
+	admission?: RateLimitAdmission,
+	renewAccessToken?: () => Promise<string>,
+): LinearClient {
+	if ("oauthToken" in auth) {
+		return instrumentLinearGraphQLErrorClassification(
+			instrumentClientCredentialsRenewal(
+				instrumentLinearClient(
+					new LinearClient({ accessToken: auth.oauthToken }),
+					auth,
+					{ admission },
+				),
+				renewAccessToken,
+			),
+		);
+	}
+	return instrumentLinearGraphQLErrorClassification(
+		instrumentLinearClient(new LinearClient({ apiKey: auth.apiKey }), auth, {
+			admission,
+		}),
+	);
 }
 
 export class LinearService {
 	private readonly client: LinearClient;
+	private readonly graphQLService: GraphQLService;
 
-	constructor(auth: LinearServiceAuth) {
-		this.client = buildLinearClient(auth);
+	constructor(
+		auth: LinearServiceAuth,
+		options: {
+			admission?: RateLimitAdmission;
+			graphQLService?: GraphQLService;
+			renewAccessToken?: () => Promise<string>;
+		} = {},
+	) {
+		this.client = buildLinearClient(
+			auth,
+			options.admission,
+			options.renewAccessToken,
+		);
+		this.graphQLService =
+			options.graphQLService ??
+			new GraphQLService(auth, {
+				admission: options.admission,
+				renewAccessToken: options.renewAccessToken,
+			});
 	}
 
 	async resolveIssueId(issueId: string): Promise<string> {
@@ -208,64 +406,35 @@ export class LinearService {
 		} else if (options.excludeStates && options.excludeStates.length > 0) {
 			filter.state = { nin: options.excludeStates };
 		}
-		// `limit === 0` means "no limit" — paginate the full result set.
-		// Otherwise a single page of `limit` projects. DEV-4175: `--all` /
-		// `--limit 0` must return every project so callers never make a false
-		// "does not exist" determination off a silently truncated page.
 		const unlimited = limit === 0;
-		// DEV-5325: ProjectFilter has no `teams` relation filter — the
-		// `teams: { some: … }` shape this used since DEV-4165 errors against
-		// the live GraphQL schema ('Field "teams" is not defined by type
-		// "ProjectFilter"'). Team scoping queries from the team side instead:
-		// `Team.projects` accepts the same name/state ProjectFilter and
-		// paginates identically, keeping the filter server-side. (Args stay
-		// inline in each branch so `sdkOrderBy`'s generic keeps its contextual
-		// type from the SDK signature.)
-		let page = options.teamId
-			? await (await this.client.team(options.teamId)).projects({
-					filter: nonEmptyFilter(filter),
-					first: unlimited ? 250 : limit,
-					orderBy: sdkOrderBy("updatedAt"),
-					includeArchived: false,
-				})
-			: await this.client.projects({
-					filter: nonEmptyFilter(filter),
-					first: unlimited ? 250 : limit,
-					orderBy: sdkOrderBy("updatedAt"),
-					includeArchived: false,
-				});
-		const projectNodes = [...page.nodes];
-		if (unlimited) {
-			while (page.pageInfo.hasNextPage) {
-				page = await page.fetchNext();
-				projectNodes.push(...page.nodes);
+		const projectNodes: CatalogProjectNode[] = [];
+		let after: string | null = null;
+		do {
+			const response: GetProjectsCatalogResponse =
+				await this.graphQLService.rawRequest<GetProjectsCatalogResponse>(
+					GET_PROJECTS_CATALOG_QUERY,
+					{
+						filter: nonEmptyFilter(filter),
+						teamId: options.teamId ?? "",
+						teamScoped: Boolean(options.teamId),
+						first: unlimited ? 250 : limit,
+						after,
+					},
+				);
+			const page: GetProjectsCatalogResponse["projects"] | undefined =
+				options.teamId ? response.team?.projects : response.projects;
+			if (!page) {
+				throw new Error(
+					options.teamId
+						? `Linear project catalog omitted team ${options.teamId}`
+						: "Linear project catalog omitted the projects connection",
+				);
 			}
-		}
-		const projectsWithData = await Promise.all(
-			projectNodes.map(async (project) => {
-				const [teams, lead] = await Promise.all([
-					project.teams(),
-					project.lead,
-				]);
-				return { project, teams, lead };
-			}),
-		);
-		return projectsWithData.map(({ project, teams, lead }) => ({
-			id: project.id,
-			name: project.name,
-			description: project.description || undefined,
-			state: project.state,
-			progress: project.progress,
-			teams: teams.nodes.map((team) => ({
-				id: team.id,
-				key: team.key,
-				name: team.name,
-			})),
-			lead: lead ? { id: lead.id, name: lead.name } : undefined,
-			targetDate: toISOStringOrUndefined(project.targetDate),
-			createdAt: toISOStringOrNow(project.createdAt),
-			updatedAt: toISOStringOrNow(project.updatedAt),
-		}));
+			projectNodes.push(...page.nodes);
+			after =
+				unlimited && page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
+		} while (after);
+		return projectNodes.map(projectFromCatalog);
 	}
 
 	async resolveTeamId(teamKeyOrNameOrId: string): Promise<string> {
@@ -364,68 +533,34 @@ export class LinearService {
 		return statuses.nodes[0].id;
 	}
 
-	private async buildLabelData(
-		label: IssueLabel,
-		scope: "team" | "workspace",
-		team?: { id: string; key: string; name: string },
-	): Promise<LinearLabel> {
-		const parent = await label.parent;
-		const labelData: LinearLabel = {
-			id: label.id,
-			name: label.name,
-			color: label.color,
-			scope,
-			team,
-		};
-		if (parent) {
-			const parentLabel = await this.client.issueLabel(parent.id);
-			labelData.group = { id: parent.id, name: parentLabel.name };
-		}
-		return labelData;
-	}
-
 	async getLabels(
 		teamFilter?: string,
 		limit = 100,
 		nameFilter?: string,
 	): Promise<{ labels: LinearLabel[] }> {
-		const labels: LinearLabel[] = [];
 		const labelFilter: Record<string, unknown> = {};
 		if (nameFilter) {
 			labelFilter.name = { containsIgnoreCase: nameFilter };
 		}
 		if (teamFilter) {
 			const teamId = await this.resolveTeamId(teamFilter);
-			const team = await this.client.team(teamId);
 			labelFilter.team = teamIdFilter(teamId);
-			const teamLabels = await this.client.issueLabels({
-				filter: labelFilter,
-				first: limit,
-			});
-			const teamRef = { id: team.id, key: team.key, name: team.name };
-			for (const label of teamLabels.nodes) {
-				if (label.isGroup) {
-					continue;
-				}
-				labels.push(await this.buildLabelData(label, "team", teamRef));
-			}
-		} else {
-			const allLabels = await this.client.issueLabels({
-				filter: nonEmptyFilter(labelFilter),
-				first: limit,
-			});
-			for (const label of allLabels.nodes) {
-				if (label.isGroup) {
-					continue;
-				}
-				const team = await label.team;
-				const scope = team ? "team" : "workspace";
-				const teamRef = team
-					? { id: team.id, key: team.key, name: team.name }
-					: undefined;
-				labels.push(await this.buildLabelData(label, scope, teamRef));
-			}
 		}
+		const response =
+			await this.graphQLService.rawRequest<GetLabelsCatalogResponse>(
+				GET_LABELS_CATALOG_QUERY,
+				{ filter: nonEmptyFilter(labelFilter), first: limit },
+			);
+		const labels: LinearLabel[] = response.issueLabels.nodes
+			.filter((label) => !label.isGroup)
+			.map((label) => ({
+				id: label.id,
+				name: label.name,
+				color: label.color,
+				scope: label.team ? "team" : "workspace",
+				team: label.team ?? undefined,
+				group: label.parent ?? undefined,
+			}));
 		return { labels };
 	}
 
@@ -474,90 +609,31 @@ export class LinearService {
 		if (activeOnly) {
 			filter.isActive = eqFilter(true);
 		}
-		const cyclesConnection = await this.client.cycles({
-			filter: nonEmptyFilter(filter),
-			orderBy: sdkOrderBy("createdAt"),
-			first: limit ?? DEFAULT_CYCLE_PAGINATION_LIMIT,
-		});
-		const cyclesWithData = await Promise.all(
-			cyclesConnection.nodes.map(async (cycle) => {
-				const team = await cycle.team;
-				return {
-					id: cycle.id,
-					name: cycle.name ?? undefined,
-					number: cycle.number,
-					startsAt: toISOStringOrUndefined(cycle.startsAt),
-					endsAt: toISOStringOrUndefined(cycle.endsAt),
-					isActive: cycle.isActive,
-					isPrevious: cycle.isPrevious,
-					isNext: cycle.isNext,
-					progress: cycle.progress,
-					issueCountHistory: cycle.issueCountHistory,
-					team: team
-						? { id: team.id, key: team.key, name: team.name }
-						: undefined,
-				};
-			}),
-		);
-		return cyclesWithData;
+		const response =
+			await this.graphQLService.rawRequest<GetCyclesCatalogResponse>(
+				GET_CYCLES_CATALOG_QUERY,
+				{
+					filter: nonEmptyFilter(filter),
+					first: limit ?? DEFAULT_CYCLE_PAGINATION_LIMIT,
+				},
+			);
+		return response.cycles.nodes.map(cycleFromCatalog);
 	}
 
 	async getCycleById(
 		cycleId: string,
 		issuesLimit = 50,
 	): Promise<LinearCycleDetail> {
-		const cycle = await this.client.cycle(cycleId);
-		const [team, issuesConnection] = await Promise.all([
-			cycle.team,
-			cycle.issues({ first: issuesLimit }),
-		]);
-		const issues: LinearIssue[] = [];
-		for (const issue of issuesConnection.nodes) {
-			const [state, assignee, issueTeam, project, labels] = await Promise.all([
-				issue.state,
-				issue.assignee,
-				issue.team,
-				issue.project,
-				issue.labels(),
-			]);
-			issues.push({
-				id: issue.id,
-				identifier: issue.identifier,
-				url: issue.url,
-				title: issue.title,
-				description: issue.description || undefined,
-				// Linear SDK types `priority` as `number`; the GraphQL schema only
-				// emits 0-4, so the cast is safe and the runtime range is
-				// guaranteed by Linear's server-side schema.
-				priority: issue.priority as LinearPriority,
-				estimate: issue.estimate || undefined,
-				state: state ? { id: state.id, name: state.name } : undefined,
-				assignee: assignee
-					? { id: assignee.id, name: assignee.name }
-					: undefined,
-				team: issueTeam
-					? { id: issueTeam.id, key: issueTeam.key, name: issueTeam.name }
-					: undefined,
-				project: project ? { id: project.id, name: project.name } : undefined,
-				labels: labels.nodes.map((label) => ({
-					id: label.id,
-					name: label.name,
-				})),
-				createdAt: toISOStringOrNow(issue.createdAt),
-				updatedAt: toISOStringOrNow(issue.updatedAt),
-			});
-		}
+		const response =
+			await this.graphQLService.rawRequest<GetCycleDetailResponse>(
+				GET_CYCLE_DETAIL_QUERY,
+				{ id: cycleId, issuesFirst: issuesLimit },
+			);
+		const cycle = response.cycle;
+		if (!cycle) throw notFoundError("Cycle", cycleId);
 		return {
-			id: cycle.id,
-			name: cycle.name ?? undefined,
-			number: cycle.number,
-			startsAt: toISOStringOrUndefined(cycle.startsAt),
-			endsAt: toISOStringOrUndefined(cycle.endsAt),
-			isActive: cycle.isActive,
-			progress: cycle.progress,
-			issueCountHistory: cycle.issueCountHistory,
-			team: team ? { id: team.id, key: team.key, name: team.name } : undefined,
-			issues,
+			...cycleFromCatalog(cycle),
+			issues: cycle.issues.nodes.map(issueFromCatalog),
 		};
 	}
 
@@ -575,11 +651,12 @@ export class LinearService {
 			const teamId = await this.resolveTeamId(teamFilter);
 			filter.team = teamIdFilter(teamId);
 		}
-		const cyclesConnection = await this.client.cycles({
-			filter,
-			first: 10,
-		});
-		const cyclesData = cyclesConnection.nodes;
+		const response =
+			await this.graphQLService.rawRequest<GetCyclesCatalogResponse>(
+				GET_CYCLES_CATALOG_QUERY,
+				{ filter, first: 10 },
+			);
+		const cyclesData = response.cycles.nodes;
 		const nodes: Array<{
 			id: string;
 			name: string | undefined;
@@ -591,7 +668,6 @@ export class LinearService {
 			team: { id: string; key: string; name: string } | undefined;
 		}> = [];
 		for (const cycle of cyclesData) {
-			const team = await cycle.team;
 			nodes.push({
 				id: cycle.id,
 				name: cycle.name ?? undefined,
@@ -600,9 +676,7 @@ export class LinearService {
 				isActive: cycle.isActive,
 				isNext: cycle.isNext,
 				isPrevious: cycle.isPrevious,
-				team: team
-					? { id: team.id, key: team.key, name: team.name }
-					: undefined,
+				team: cycle.team ?? undefined,
 			});
 		}
 		if (nodes.length === 0) {
@@ -669,13 +743,18 @@ export class LinearService {
 			// worse than resolving to an archived project, which the caller can
 			// inspect via the returned UUID. Name resolution stays active-only
 			// because names collide more readily than slug-ids do.
-			const bySlug = await this.client.projects({
-				filter: { slugId: { eq: slugId } } as Record<string, unknown>,
-				first: 1,
-				includeArchived: true,
-			});
-			if (bySlug.nodes.length > 0) {
-				return bySlug.nodes[0].id;
+			const bySlug =
+				await this.graphQLService.rawRequest<ResolveProjectCatalogResponse>(
+					RESOLVE_PROJECT_QUERY,
+					{
+						filter: { slugId: { eq: slugId } },
+						teamId: "",
+						teamScoped: false,
+						includeArchived: true,
+					},
+				);
+			if (bySlug.projects?.nodes.length) {
+				return bySlug.projects.nodes[0].id;
 			}
 			// Slug-id form was syntactically valid but didn't match a project
 			// — fall through to name resolution would be misleading (the user
@@ -696,31 +775,29 @@ export class LinearService {
 		// effective project-name collisions at a handful in practice; if a
 		// workspace ever exceeds this we'll see it as a still-ambiguous error
 		// listing the first 5 teams — better than a silent wrong pick.
-		const projectsConnection = teamId
-			? await (await this.client.team(teamId)).projects({ filter, first: 5 })
-			: await this.client.projects({ filter, first: 5 });
-		if (projectsConnection.nodes.length === 0) {
+		const response =
+			await this.graphQLService.rawRequest<ResolveProjectCatalogResponse>(
+				RESOLVE_PROJECT_QUERY,
+				{
+					filter,
+					teamId: teamId ?? "",
+					teamScoped: Boolean(teamId),
+					includeArchived: false,
+				},
+			);
+		const projects = teamId
+			? response.team?.projects.nodes
+			: response.projects?.nodes;
+		if (!projects?.length) {
 			const context = teamInput ? `on team "${teamInput}"` : undefined;
 			throw notFoundError("Project", projectInput, context);
 		}
-		if (projectsConnection.nodes.length === 1) {
-			return projectsConnection.nodes[0].id;
+		if (projects.length === 1) {
+			return projects[0].id;
 		}
-		// Multiple candidates — collect team keys per candidate so the error
-		// names them concretely. Bounded N ≤ 5 keeps the per-edge resolver
-		// promise cheap (handful of round-trips on the rare ambiguous path).
-		const candidates = await Promise.all(
-			projectsConnection.nodes.map(async (p) => {
-				const teams = await p.teams();
-				return {
-					id: p.id,
-					name: p.name,
-					teamKeys: teams.nodes.map((t) => t.key),
-				};
-			}),
-		);
-		const descriptions = candidates.map(
-			(c) => `${c.id} (teams: ${c.teamKeys.join(", ") || "none"})`,
+		const descriptions = projects.map(
+			(project) =>
+				`${project.id} (teams: ${project.teams.nodes.map((team) => team.key).join(", ") || "none"})`,
 		);
 		throw multipleMatchesError(
 			"project",
@@ -793,7 +870,15 @@ export async function createLinearService(
 ): Promise<LinearService> {
 	const auth = await getActiveAuth(options);
 	if (auth.kind === "oauth") {
-		return new LinearService({ oauthToken: auth.token });
+		const credential = { oauthToken: auth.token } as const;
+		return new LinearService(credential, {
+			admission: createOAuthProfileRateLimitAdmission(
+				credential,
+				auth.oauth.clientId,
+				auth.oauth.viewerId,
+			),
+			renewAccessToken: createClientCredentialsTokenRenewal(auth.oauth),
+		});
 	}
 	return new LinearService({ apiKey: auth.token });
 }
