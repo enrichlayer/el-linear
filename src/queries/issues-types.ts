@@ -224,6 +224,14 @@ export interface GetIssueTeamResponse {
 	} | null;
 }
 
+export interface GetIssueUpdateContextResponse {
+	issue: {
+		id: string;
+		team: { id: string } | null;
+		labels: { nodes: Array<{ id: string }> };
+	} | null;
+}
+
 type WorkflowStateType =
 	| "triage"
 	| "backlog"
@@ -421,6 +429,13 @@ export interface IssueRelationCreateResponse {
 			issue: { id: string; identifier: string; title: string };
 			relatedIssue: { id: string; identifier: string; title: string };
 		} | null;
+	};
+}
+
+/** Response shape for `ISSUE_RELATION_DELETE_MUTATION` (DEV-14607). */
+export interface IssueRelationDeleteResponse {
+	issueRelationDelete: {
+		success: boolean;
 	};
 }
 

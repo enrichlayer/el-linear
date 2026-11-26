@@ -1,10 +1,7 @@
 import type { Command } from "commander";
-import { GET_ISSUE_RELATIONS_QUERY } from "../queries/issues.js";
-import type { GetIssueRelationsResponse } from "../queries/issues-types.js";
 import { downloadLinearUploads } from "../utils/download-uploads.js";
 import { extractField, extractFields } from "../utils/extract-field.js";
 import { createFileService } from "../utils/file-service.js";
-import type { GraphQLService } from "../utils/graphql-service.js";
 import { createIssuesService } from "../utils/issues-service-bootstrap.js";
 import {
 	handleAsyncCommand,
@@ -16,11 +13,7 @@ import {
 	type ParsedWithIncludes,
 	parseWithIncludes,
 } from "../utils/with-includes.js";
-import {
-	buildIncomingRelationEntries,
-	buildOutgoingRelationEntries,
-	type RelatedIssueEntry,
-} from "./issues/relations.js";
+import { readIssueRelations } from "./issues/relation-reader.js";
 
 /**
  * Issue ID pattern: 1-5 uppercase letters, dash, 1+ digits (e.g. ADM-652, DEV-12).
@@ -120,7 +113,7 @@ export async function readIssues(
 	command: Command,
 ): Promise<void> {
 	const rootOpts = getRootOpts(command);
-	const { graphQLService, issuesService } = await createIssuesService(rootOpts);
+	const { issuesService } = await createIssuesService(rootOpts);
 	const fileService = await createFileService(rootOpts);
 	// `issues` owns these options for its no-subcommand shorthand, while
 	// `issues read` registers the same options on the child command. Commander
@@ -254,7 +247,7 @@ export async function readIssues(
 		const envelope = includes.relations
 			? {
 					...resolved,
-					relations: await fetchRelations(graphQLService, resolved.id),
+					...(await includeRelations(resolved.id, rootOpts)),
 				}
 			: resolved;
 		outputSuccess(envelope);
@@ -276,7 +269,7 @@ export async function readIssues(
 				}
 				return {
 					...resolved,
-					relations: await fetchRelations(graphQLService, resolved.id),
+					...(await includeRelations(resolved.id, rootOpts)),
 				};
 			}),
 		);
@@ -284,34 +277,11 @@ export async function readIssues(
 	}
 }
 
-/**
- * Fetch relations for a known-UUID issue and flatten outgoing + incoming
- * via the shared relations builders. `relatedIssue` / `issue` peers that
- * Linear omits (rare — deleted-relation edge case) are skipped, matching
- * the `issues related` command's behavior.
- *
- * Race semantics: when `result.issue` is null (the issue existed at the
- * `getIssueById` call upstream but is missing here — Linear deleted /
- * unarchived it between the two calls), returns `[]` rather than
- * throwing. The base issue is still emitted, and the caller sees an
- * empty `relations` array — preferable to failing the whole envelope
- * for a rare race. This intentionally diverges from `handleRelatedIssues`
- * (which throws), because that command's *primary* output is relations,
- * whereas here relations are an opt-in side dish.
- */
-async function fetchRelations(
-	graphQLService: GraphQLService,
+/** Same bounded, lossless contract as `issues related`; never hide a failed include. */
+async function includeRelations(
 	issueId: string,
-): Promise<RelatedIssueEntry[]> {
-	const result = await graphQLService.rawRequest<GetIssueRelationsResponse>(
-		GET_ISSUE_RELATIONS_QUERY,
-		{ id: issueId },
-	);
-	if (!result.issue) {
-		return [];
-	}
-	return [
-		...buildOutgoingRelationEntries(result.issue.relations.nodes),
-		...buildIncomingRelationEntries(result.issue.inverseRelations.nodes),
-	];
+	auth: Parameters<typeof readIssueRelations>[1],
+) {
+	const result = await readIssueRelations(issueId, auth);
+	return { relations: result.data, meta: { relations_complete: true } };
 }

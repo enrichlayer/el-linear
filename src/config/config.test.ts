@@ -184,6 +184,39 @@ describe("loadConfig — team config layer", () => {
 		expect(config.identity).toBeUndefined();
 	});
 
+	it("IGNORES labelAdvisor from the team config layer but honors it from personal config (DEV-10372)", async () => {
+		const teamPath = "/shared/team-config.json";
+		fsFiles.set(
+			teamPath,
+			JSON.stringify({
+				defaultTeam: "ENG",
+				labelAdvisor: { command: ["/tmp/evil-payload"] },
+				validation: { consentReceiptGate: true },
+			}),
+		);
+		process.env.EL_LINEAR_TEAM_CONFIG = teamPath;
+		defaultExistsReturn = true;
+		defaultReadReturn = JSON.stringify({});
+
+		const { loadConfig, _resetConfigCacheForTests } = await import(
+			"./config.js"
+		);
+		const config = loadConfig();
+		expect(config.defaultTeam).toBe("ENG");
+		expect(config.labelAdvisor).toBeUndefined();
+		// The receipt gate is data, not code: the team layer may turn it on.
+		expect(config.validation?.consentReceiptGate).toBe(true);
+
+		_resetConfigCacheForTests();
+		defaultReadReturn = JSON.stringify({
+			labelAdvisor: { command: ["my-advisor", "--advise"] },
+		});
+		expect(loadConfig().labelAdvisor?.command).toEqual([
+			"my-advisor",
+			"--advise",
+		]);
+	});
+
 	it("honors identity.resolver from the PERSONAL config (the operator's own file)", async () => {
 		const teamPath = "/shared/team-config.json";
 		fsFiles.set(teamPath, JSON.stringify({ defaultTeam: "ENG" }));

@@ -7,9 +7,13 @@
  * focus on commander wiring + handlers.
  */
 
-import { ISSUE_RELATION_CREATE_MUTATION } from "../../queries/issues.js";
+import {
+	ISSUE_RELATION_CREATE_MUTATION,
+	ISSUE_RELATION_DELETE_MUTATION,
+} from "../../queries/issues.js";
 import type {
 	IssueRelationCreateResponse,
+	IssueRelationDeleteResponse,
 	RelationIncomingNode,
 	RelationOutgoingNode,
 	RelationPeerNode,
@@ -58,14 +62,7 @@ export async function createRelations(
 ): Promise<LinearIssueRelation[]> {
 	const relations: LinearIssueRelation[] = [];
 
-	const relationSpecs: { option: string; type: string; reverse?: boolean }[] = [
-		{ option: "relatedTo", type: "related" },
-		{ option: "blocks", type: "blocks" },
-		{ option: "blockedBy", type: "blocks", reverse: true },
-		{ option: "duplicateOf", type: "duplicate" },
-	];
-
-	for (const spec of relationSpecs) {
+	for (const spec of RELATION_SPECS) {
 		const value = options[spec.option] as string | undefined;
 		if (!value) {
 			continue;
@@ -95,6 +92,44 @@ export async function createRelations(
 
 	return relations;
 }
+
+/**
+ * The flag table `createRelations` walks, shared with the removal path so a
+ * relation can only be retracted through the same spelling that created it.
+ * `blockedBy` is the reverse of `blocks`; the reader normalizes the incoming
+ * direction to `blockedBy`, which is what `removalType` matches against.
+ */
+const RELATION_SPECS: {
+	option: string;
+	type: string;
+	/** The type as the relation reader reports it from the source's view. */
+	removalType: string;
+	/**
+	 * Which side of the relation this flag owns, where the reported type alone
+	 * does not say. `normalizeInverseType` renames only `blocks`, so `blocks`
+	 * and `blockedBy` are already distinct types and need no direction, and
+	 * `related` is symmetric so narrowing it would refuse a legitimate
+	 * removal. A duplicate is reported as `duplicate` from both sides, so
+	 * without this the flag would retract the opposite direction.
+	 */
+	removalDirection?: RelatedIssueEntry["direction"];
+	reverse?: boolean;
+}[] = [
+	{ option: "relatedTo", type: "related", removalType: "related" },
+	{ option: "blocks", type: "blocks", removalType: "blocks" },
+	{
+		option: "blockedBy",
+		type: "blocks",
+		removalType: "blockedBy",
+		reverse: true,
+	},
+	{
+		option: "duplicateOf",
+		type: "duplicate",
+		removalType: "duplicate",
+		removalDirection: "outgoing",
+	},
+];
 
 export interface RelatedIssueEntry {
 	direction: "outgoing" | "incoming";
@@ -189,4 +224,104 @@ export function buildIncomingRelationEntries(
 		});
 	}
 	return entries;
+}
+
+/** One relation selected for removal, with the flag that asked for it. */
+export interface RelationRemovalTarget {
+	entry: RelatedIssueEntry;
+	/** The flag spelling the caller used, for the confirmation line. */
+	option: string;
+	/** What the caller named on the command line, for error text. */
+	requested: string;
+}
+
+/**
+ * PURE — pick the relations the `--related-to` / `--blocks` / `--blocked-by` /
+ * `--duplicate-of` flags name, from relations already read (DEV-14607).
+ *
+ * A peer is matched on identifier (case-insensitively, since Linear
+ * identifiers are upper-case and callers type either) or on UUID, because
+ * `issues unrelate DEV-1 --blocks DEV-2` and the resolved id must both work.
+ *
+ * `related` is symmetric: Linear stores one row and the reader reports it as
+ * `related` whichever side is queried, so direction is not part of the match.
+ * `blocks` is directional, and the reader renames the incoming side to
+ * `blockedBy`, so `--blocks` and `--blocked-by` select different rows and
+ * neither can retract the other's.
+ *
+ * Returns every match rather than the first: a duplicate pair of the same
+ * type between the same two issues is removable in one pass instead of
+ * leaving a second invisible row behind.
+ */
+export function selectRelationsToRemove(
+	entries: RelatedIssueEntry[],
+	options: Record<string, unknown>,
+): RelationRemovalTarget[] {
+	const targets: RelationRemovalTarget[] = [];
+	const chosen = new Set<string>();
+	for (const spec of RELATION_SPECS) {
+		const value = options[spec.option] as string | undefined;
+		if (!value) {
+			continue;
+		}
+		for (const requested of splitList(value)) {
+			const wanted = requested.trim().toLowerCase();
+			const matches = entries.filter(
+				(entry) =>
+					entry.type === spec.removalType &&
+					(spec.removalDirection === undefined ||
+						entry.direction === spec.removalDirection) &&
+					(entry.issue.identifier.toLowerCase() === wanted ||
+						entry.issue.id.toLowerCase() === wanted),
+			);
+			if (matches.length === 0) {
+				throw new Error(
+					`No ${spec.removalType} relation to ${requested} to remove. ` +
+						(entries.length === 0
+							? "This issue has no relations."
+							: // The direction is part of the listing because a flag that
+								// owns one side refuses the other, and naming only the type
+								// would list the peer the user just asked for as if absent.
+								`This issue has: ${entries
+									.map(
+										(entry) =>
+											`${entry.direction} ${entry.type} ${entry.issue.identifier}`,
+									)
+									.join(", ")}.`),
+				);
+			}
+			for (const entry of matches) {
+				if (chosen.has(entry.id)) {
+					continue;
+				}
+				chosen.add(entry.id);
+				targets.push({ entry, option: spec.option, requested });
+			}
+		}
+	}
+	return targets;
+}
+
+/**
+ * Delete the selected relations. Each row is addressed by its own id, so a
+ * concurrent change to the issue's other relations cannot redirect a delete.
+ */
+export async function deleteRelations(
+	targets: RelationRemovalTarget[],
+	graphQLService: GraphQLService,
+): Promise<RelatedIssueEntry[]> {
+	const removed: RelatedIssueEntry[] = [];
+	for (const target of targets) {
+		const result = await graphQLService.rawRequest<IssueRelationDeleteResponse>(
+			ISSUE_RELATION_DELETE_MUTATION,
+			{ id: target.entry.id },
+		);
+		if (!result.issueRelationDelete.success) {
+			throw new Error(
+				`Linear refused to remove the ${target.entry.type} relation to ${target.entry.issue.identifier} (relation ${target.entry.id})`,
+			);
+		}
+		removed.push(target.entry);
+	}
+	return removed;
 }
