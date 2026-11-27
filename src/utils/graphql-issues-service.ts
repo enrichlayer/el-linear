@@ -263,32 +263,6 @@ export interface ClaimIssueResult {
 	targetState?: { id: string; name: string };
 }
 
-interface SummaryWalkNode {
-	text?: string;
-	content?: SummaryWalkNode[];
-}
-
-function extractSummaryText(
-	summary: NonNullable<IssueNode["summary"]>,
-): string | undefined {
-	if (summary.generationStatus !== "completed" || !summary.content) {
-		return undefined;
-	}
-	const parts: string[] = [];
-	const walk = (node: SummaryWalkNode) => {
-		if (typeof node.text === "string") {
-			parts.push(node.text);
-		}
-		if (Array.isArray(node.content)) {
-			for (const child of node.content) {
-				walk(child);
-			}
-		}
-	};
-	walk(summary.content as SummaryWalkNode);
-	return parts.length > 0 ? parts.join("") : undefined;
-}
-
 /**
  * FE-926: Linear's description-content store can end up in a corrupted state
  * for a specific issue — observed on FE-921, where a description saved
@@ -2189,7 +2163,6 @@ export class GraphQLIssuesService {
 		return {
 			...this.transformIssueCoreFields(issue),
 			...this.transformIssueRelations(issue),
-			summary: issue.summary ? extractSummaryText(issue.summary) : undefined,
 			priority: issue.priority,
 			estimate: issue.estimate ?? undefined,
 			dueDate: issue.dueDate ?? undefined,

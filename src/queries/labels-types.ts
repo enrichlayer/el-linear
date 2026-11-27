@@ -28,7 +28,7 @@ interface RetiredLabelNode {
 	id: string;
 	name: string;
 	color: string;
-	retiredAt: string | null;
+	retiredBy: { id: string; name: string } | null;
 	team: LabelTeamRef | null;
 }
 

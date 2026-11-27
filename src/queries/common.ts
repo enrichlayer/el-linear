@@ -3,7 +3,6 @@ const ISSUE_CORE_FIELDS = `
   identifier
   title
   description
-  summary { content generationStatus }
   branchName
   priority
   estimate

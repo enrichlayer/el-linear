@@ -9,6 +9,8 @@ project adheres to [Semantic Versioning](https://semver.org/).
 ### Removed
 
 * **issues:** remove the dormant consent-label receipt gate and the label advisor's post-create consent/receipt path. The optional `labelAdvisor.consent` JSON field is no longer emitted; ordinary advisor labels and `labelAdvisor.added` / `reason` are unchanged. Automation-side receipt preconditions are unchanged (DEV-15663).
+* **issues:** stop requesting the AI-generated `summary` on issues and drop the `summary` key from issue output. `Issue.summary` and `IssueSearchResult.summary` left Linear's public schema in @linear/sdk 102 with no replacement.
+* **labels:** `labels retire` returns `retiredBy` (`id`, `name`) instead of `retiredAt`, which left the public `IssueLabel` type in @linear/sdk 102.
 
 ### Features
 
@@ -24,6 +26,7 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Bug Fixes
 
+* **deps:** bump @linear/sdk from 95.2.0 to 103.0.0. The SDK is ESM-only and requires Node.js 20.19+ or 22.12+, so `engines.node` is now `>=22.12.0`.
 * **issues:** stop `issues read --body` / `--field` / `--sections` from downloading attachments and rewriting `uploads.linear.app` links to local `el-linear-downloads` paths. Those routes hand the description to scripts that diff it, hash it, or write it back with `issues update --description-file`, and the rewrite persisted host-local temp paths into Linear in place of the attachment links (and made every read wait on the largest attachment). They now print the description as Linear stores it; the JSON envelope and `--format summary` keep the image-viewing rewrite by default and gain `--no-downloads` to opt out, while `--downloads` opts a raw-text route back in (DEV-9667)
 
 * **issues:** exhaust both relation connections within fixed page, row, byte and time bounds for `issues related` / `relations` and `read --with relations`. Successful JSON adds `meta.relations_complete: true` (per issue for batched reads); incomplete enumeration, invalid rows or missing peers fail nonzero with `meta.relations_complete: false`, instead of silently truncating/dropping links or treating a missing include as empty. Existing formatted rows and mutation preflights are unchanged (DEV-14039).

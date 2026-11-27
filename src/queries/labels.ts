@@ -34,7 +34,7 @@ export const RETIRE_LABEL_MUTATION = `
         id
         name
         color
-        retiredAt
+        retiredBy { id name }
         team { id key name }
       }
     }

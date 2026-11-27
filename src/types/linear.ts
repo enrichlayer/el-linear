@@ -155,7 +155,6 @@ export interface LinearIssue {
 	projectMilestone?: MilestoneRef;
 	state?: StateRef;
 	subIssues?: IssueRef[];
-	summary?: string;
 	team?: TeamRef;
 	title: string;
 	updatedAt: string;
