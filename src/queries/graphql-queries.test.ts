@@ -577,12 +577,16 @@ describe("labels.ts — CRUD and lifecycle", () => {
 		expect(containsField(CREATE_LABEL_MUTATION, "parent")).toBe(true);
 	});
 
-	it("RETIRE_LABEL_MUTATION returns retiredAt timestamp", () => {
-		expect(containsField(RETIRE_LABEL_MUTATION, "retiredAt")).toBe(true);
+	it("RETIRE_LABEL_MUTATION returns the retiring user", () => {
+		expect(containsField(RETIRE_LABEL_MUTATION, "retiredBy")).toBe(true);
 	});
 
-	it("RESTORE_LABEL_MUTATION does not return retiredAt", () => {
-		expect(containsField(RESTORE_LABEL_MUTATION, "retiredAt")).toBe(false);
+	it("RETIRE_LABEL_MUTATION no longer selects retiredAt (removed in @linear/sdk 102)", () => {
+		expect(containsField(RETIRE_LABEL_MUTATION, "retiredAt")).toBe(false);
+	});
+
+	it("RESTORE_LABEL_MUTATION does not return retirement fields", () => {
+		expect(containsField(RESTORE_LABEL_MUTATION, "retiredBy")).toBe(false);
 	});
 });
 

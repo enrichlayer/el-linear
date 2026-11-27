@@ -58,7 +58,6 @@ function makeIssueNode(
 		identifier: "DEV-100",
 		title: "Test",
 		description: null,
-		summary: null,
 		branchName: "",
 		priority: 0,
 		estimate: null,
@@ -608,50 +607,6 @@ describe("GraphQLIssuesService", () => {
 			expect(result.comments).toHaveLength(1);
 			expect(result.comments![0].body).toBe("Looks good");
 			expect(result.comments![0].user).toEqual({ id: "user-1", name: "Bob" });
-		});
-
-		it("extracts summary from completed generation", () => {
-			const service = createService();
-			const result = service.transformIssueData(
-				makeIssueNode({
-					id: "issue-1",
-					identifier: "DEV-100",
-					title: "Test",
-					priority: 0,
-					summary: {
-						generationStatus: "completed",
-						content: {
-							content: [
-								{ text: "This issue addresses " },
-								{ text: "a bug fix." },
-							],
-						},
-					},
-					labels: { nodes: [] },
-					createdAt: "2026-01-01T00:00:00.000Z",
-					updatedAt: "2026-01-01T00:00:00.000Z",
-				}),
-			);
-
-			expect(result.summary).toBe("This issue addresses a bug fix.");
-		});
-
-		it("returns undefined summary when generation not completed", () => {
-			const service = createService();
-			const result = service.transformIssueData(
-				makeIssueNode({
-					id: "issue-1",
-					identifier: "DEV-100",
-					title: "Test",
-					priority: 0,
-					summary: { generationStatus: "pending", content: null },
-					labels: { nodes: [] },
-					createdAt: "2026-01-01T00:00:00.000Z",
-					updatedAt: "2026-01-01T00:00:00.000Z",
-				}),
-			);
-
-			expect(result.summary).toBeUndefined();
 		});
 	});
 

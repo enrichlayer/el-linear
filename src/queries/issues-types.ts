@@ -85,20 +85,6 @@ interface ProjectMilestoneNode {
 }
 
 /**
- * Linear's documented generation states for issue summaries. If Linear
- * adds a new state in the future the runtime API would deserialize the
- * new string verbatim — TypeScript wouldn't catch the divergence, but
- * the typical `=== "completed"` check keeps working safely. Widen the
- * union here when Linear documents a new state.
- */
-type IssueSummaryGenerationStatus = "completed" | "pending" | "failed";
-
-interface IssueSummary {
-	content: unknown;
-	generationStatus: IssueSummaryGenerationStatus;
-}
-
-/**
  * Mirrors `COMPLETE_ISSUE_FRAGMENT` from `src/queries/common.ts`.
  * The transformer in `graphql-issues-service.ts` reads these
  * fields. Keep the shapes in lock-step — if you add a field to
@@ -109,7 +95,6 @@ export interface IssueNode {
 	identifier: string;
 	title: string;
 	description: string | null;
-	summary: IssueSummary | null;
 	branchName: string;
 	priority: LinearPriority;
 	estimate: number | null;

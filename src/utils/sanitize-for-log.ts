@@ -1,13 +1,15 @@
 /**
  * Strip anything that looks like a Linear API/OAuth token from a string.
  *
- * Defense in depth: today the @linear/sdk error message embeds `{ query,
- * variables }` but not the Authorization header. A future SDK upgrade that
- * includes headers (which upstream graphql-request has done historically)
- * would otherwise silently write `Bearer lin_api_…` into stdout, shell
- * history, or CI logs. The regex also catches token shapes that may show
- * up in custom error wrappers — e.g. a network proxy that echoes the
- * Bearer header in its 502 body.
+ * Defense in depth: as of @linear/sdk 103 the error message embeds
+ * `{ response, request: { query } }` (the response body, status and
+ * response headers, plus the query text), but neither the request
+ * variables nor the Authorization header. A future SDK upgrade that
+ * includes request headers (which upstream graphql-request has done
+ * historically) would otherwise silently write `Bearer lin_api_…` into
+ * stdout, shell history, or CI logs. The regex also catches token shapes
+ * that may show up in custom error wrappers — e.g. a network proxy that
+ * echoes the Bearer header in its 502 body.
  *
  * Originally lived in `commands/init/token.ts` for the wizard's error
  * formatting. Hoisted to `utils/` so the central error path
