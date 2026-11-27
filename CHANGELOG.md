@@ -45,6 +45,36 @@ project adheres to [Semantic Versioning](https://semver.org/).
 * **quality:** restore a clean full-repository lint baseline (DEV-6142)
 * **labels:** resolve `labels create --team` keys and names before creating the label (DEV-5749)
 
+## [1.49.0](https://github.com/enrichlayer/el-linear/compare/v1.48.0...v1.49.0) (2026-11-27)
+
+
+### Features
+
+* **issues:** add an unrelate verb to remove issue relations (DEV-14607) ([#354](https://github.com/enrichlayer/el-linear/issues/354)) ([9dcd9aa](https://github.com/enrichlayer/el-linear/commit/9dcd9aa4a19999c9ba8cb0718427b2be01787727))
+* **issues:** warn when a new issue has no summary section (DEV-16785) ([#362](https://github.com/enrichlayer/el-linear/issues/362)) ([6feb7ed](https://github.com/enrichlayer/el-linear/commit/6feb7ed95e414736c093a9e073de5413d8d5afb7))
+* **skill:** record Done-when enforcement at issue close for self-merge repos (DEV-8753) ([#360](https://github.com/enrichlayer/el-linear/issues/360)) ([e94bc78](https://github.com/enrichlayer/el-linear/commit/e94bc782eef809f037055ae2233dfb74c1bd53f7))
+* **teams:** add completeness-safe lookup (DEV-8300) ([#304](https://github.com/enrichlayer/el-linear/issues/304)) ([71dbbe4](https://github.com/enrichlayer/el-linear/commit/71dbbe4b8326043c828ac1edd339968dd5af928d))
+
+
+### Bug Fixes
+
+* accept punctuated PROCEED decisions (DEV-8505) ([#308](https://github.com/enrichlayer/el-linear/issues/308)) ([c3de4d2](https://github.com/enrichlayer/el-linear/commit/c3de4d259e0c7ced89cd507cc2abda89fa8a89f5))
+* **ci:** authenticate PR review on the subscription seat (DEV-10708) ([#338](https://github.com/enrichlayer/el-linear/issues/338)) ([3d99d27](https://github.com/enrichlayer/el-linear/commit/3d99d275abb23269c4462e31e3a6f0508fb32143))
+* **cli:** resolve the branch from a jj bookmark when git has none ([#307](https://github.com/enrichlayer/el-linear/issues/307)) ([08ce93b](https://github.com/enrichlayer/el-linear/commit/08ce93b53b3dc30875d9df1ec3275305221464b1))
+* **comments:** accept --file body alias ([#306](https://github.com/enrichlayer/el-linear/issues/306)) ([0045a4b](https://github.com/enrichlayer/el-linear/commit/0045a4b720fe5709f5d9703a2684d41395fe854a))
+* **deps:** bump @linear/sdk from 88.0.0 to 95.0.0 ([#364](https://github.com/enrichlayer/el-linear/issues/364)) ([ea44430](https://github.com/enrichlayer/el-linear/commit/ea444303ee847aab9d5b30b17db9f9f3563f63b1))
+* **deps:** bump @linear/sdk from 95.2.0 to 103.0.0 ([#365](https://github.com/enrichlayer/el-linear/issues/365)) ([f72a92a](https://github.com/enrichlayer/el-linear/commit/f72a92acdeef7aa5e802fc227cbe5091218d9cc0))
+* **deps:** bump pnpm/action-setup from 6.0.9 to 6.1.1 ([#339](https://github.com/enrichlayer/el-linear/issues/339)) ([5de2645](https://github.com/enrichlayer/el-linear/commit/5de2645e48578b2dffc4d8bc558401c83357d042))
+* **deps:** refresh dependencies with a lockfile that keeps the patches ([#363](https://github.com/enrichlayer/el-linear/issues/363)) ([b2e5dcf](https://github.com/enrichlayer/el-linear/commit/b2e5dcf8b8c6b97be4e05482845f539c23478577))
+* isolate a team config from other Linear workspaces ([#303](https://github.com/enrichlayer/el-linear/issues/303)) ([6501bce](https://github.com/enrichlayer/el-linear/commit/6501bce9c54d37e0d842f58b12032d2a3772aae3))
+* **issues:** accumulate repeated --label and merge the alias (DEV-14849) ([#356](https://github.com/enrichlayer/el-linear/issues/356)) ([4c8373c](https://github.com/enrichlayer/el-linear/commit/4c8373c368c950370152fc34a562c07b1aa4e2b8))
+* **issues:** keep --body/--field/--sections byte-exact and add --no-downloads (DEV-9667) ([#325](https://github.com/enrichlayer/el-linear/issues/325)) ([f23aff9](https://github.com/enrichlayer/el-linear/commit/f23aff92e6f184fcee53e9b45bfdb3ec9684a505))
+* **issues:** keep the duplicate gate working when the reranker is down (DEV-14678) ([#352](https://github.com/enrichlayer/el-linear/issues/352)) ([5961c1f](https://github.com/enrichlayer/el-linear/commit/5961c1f8e7868b8a17233a0dee4ca04126dde313))
+* **issues:** name the created issue when a post-create step fails (DEV-15327) ([#358](https://github.com/enrichlayer/el-linear/issues/358)) ([2060752](https://github.com/enrichlayer/el-linear/commit/2060752d88fa7695e3d8dee9a54f0784e4397020))
+* **issues:** remove dormant consent receipt gate (DEV-15663) ([#361](https://github.com/enrichlayer/el-linear/issues/361)) ([c2f48c1](https://github.com/enrichlayer/el-linear/commit/c2f48c1114b7e8eb4f68cfda8292e49e119b0b1a))
+* **skill:** say how the output anti-patterns are checked now (DEV-10126) ([#329](https://github.com/enrichlayer/el-linear/issues/329)) ([e6fefd8](https://github.com/enrichlayer/el-linear/commit/e6fefd81e28316d3bf6b16a10a052ddbcfdcbf3d))
+* **skills:** stop telling agents their own Linear writes need the user (DEV-15004) ([#357](https://github.com/enrichlayer/el-linear/issues/357)) ([41d5aef](https://github.com/enrichlayer/el-linear/commit/41d5aefa7ef36a3afdad10b731c857935573ddd2))
+
 ## [1.48.0](https://github.com/enrichlayer/el-linear/compare/v1.47.1...v1.48.0) (2026-10-27)
 
 
