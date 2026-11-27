@@ -9,8 +9,7 @@ name: pr-review
 #
 # SETUP PREREQUISITE (one-time, repo admin):
 #   Add a `CLAUDE_CODE_OAUTH_TOKEN` repository secret
-#   (Settings -> Secrets and variables -> Actions -> New repository secret),
-#   valued from Vault `secret/claude-tools-token/token`.
+#   (Settings -> Secrets and variables -> Actions -> New repository secret).
 #   Without it the review step fails; see CONTRIBUTING.md.
 #
 # The review is ADVISORY: it posts comments, never approves or blocks a merge.
@@ -49,8 +48,8 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 
-# Least privilege: read the code and comment on the PR. The static API key
-# authenticates Anthropic API calls; Claude's GitHub App uses this OIDC token to
+# Least privilege: read the code and comment on the PR. The subscription OAuth
+# token authenticates Claude; Claude's GitHub App uses this OIDC token to
 # authenticate its GitHub identity for review comments. It is not cloud WIF.
 permissions:
   contents: read
@@ -158,7 +157,7 @@ jobs:
       # of the retried request) and the final `result` message (subtype,
       # is_error, turn count, duration, error text) — without echoing a review
       # transcript. Secrets never appear in those records, and GitHub masks the
-      # API key regardless. The action's `execution_file` output is preferred;
+      # OAuth token regardless. The action's `execution_file` output is preferred;
       # the fixed runner-temp path is the fallback when a failure omits outputs.
       - name: Surface advisory review failure
         if: steps.ai_review.outcome != 'success'

@@ -106,8 +106,7 @@ merge; a green CI and a human review still gate landing.
   runs without repository secrets and the review is skipped — a maintainer
   reviews those by hand. Draft PRs are skipped until marked ready.
 - **Setup (one-time, repo admin):** add a `CLAUDE_CODE_OAUTH_TOKEN` repository
-  secret under *Settings → Secrets and variables → Actions*, valued from Vault
-  `secret/claude-tools-token/token`. Without it the review step fails on
+  secret under *Settings → Secrets and variables → Actions*. Without it the review step fails on
   same-repo PRs. It authenticates on the Claude subscription seat, not a metered
   API key — DEV-5390 makes raw Messages-API auth a policy violation. Change the reviewer model in the workflow's
   `claude_args` if you want a different tier.
